@@ -1,0 +1,20 @@
+{
+  "subscription": "projects/data-axe-350723/subscriptions/myRunSubscription",
+  "message": {
+    "message_id": "13097971565607264",
+    "publishTime": "2024-12-20T20:31:25.011Z",
+    "publish_time": "2024-12-20T20:31:25.011Z",
+    "messageId": "13097971565607264",
+    "attributes": {
+      "objectId": "ct.dcm",
+      "eventTime": "2024-12-20T20:31:24.850559Z",
+      "notificationConfig": "projects/_/buckets/dicom-bucket/notificationConfigs/2",
+      "bucketId": "dicom-bucket",
+      "eventType": "OBJECT_METADATA_UPDATE",
+      "objectGeneration": "1734472960465773",
+      "payloadFormat": "JSON_API_V1"
+    },
+    "data": "ewogICJraW5kIjogInN0b3JhZ2Ujb2JqZWN0IiwKICAiaWQiOiAiZGljb20tYnVja2V0L2N0LmRjbS8xNzM0NDcyOTYwNDY1NzczIiwKICAic2VsZkxpbmsiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vc3RvcmFnZS92MS9iL2RpY29tLWJ1Y2tldC9vL2N0LmRjbSIsCiAgIm5hbWUiOiAiY3QuZGNtIiwKICAiYnVja2V0IjogImRpY29tLWJ1Y2tldCIsCiAgImdlbmVyYXRpb24iOiAiMTczNDQ3Mjk2MDQ2NTc3MyIsCiAgIm1ldGFnZW5lcmF0aW9uIjogIjYiLAogICJjb250ZW50VHlwZSI6ICJhcHBsaWNhdGlvbi9kaWNvbSIsCiAgInRpbWVDcmVhdGVkIjogIjIwMjQtMTItMTdUMjI6MDI6NDAuNjA0WiIsCiAgInVwZGF0ZWQiOiAiMjAyNC0xMi0yMFQyMDozMToyNC44NTBaIiwKICAic3RvcmFnZUNsYXNzIjogIlNUQU5EQVJEIiwKICAidGltZVN0b3JhZ2VDbGFzc1VwZGF0ZWQiOiAiMjAyNC0xMi0xN1QyMjowMjo0MC42MDRaIiwKICAic2l6ZSI6ICI5MTY2MCIsCiAgIm1kNUhhc2giOiAiWVptRzV1KzRwdzNQMXo5alpXdkZwUT09IiwKICAibWVkaWFMaW5rIjogImh0dHBzOi8vc3RvcmFnZS5nb29nbGVhcGlzLmNvbS9kb3dubG9hZC9zdG9yYWdlL3YxL2IvZGljb20tYnVja2V0L28vY3QuZGNtP2dlbmVyYXRpb249MTczNDQ3Mjk2MDQ2NTc3MyZhbHQ9bWVkaWEiLAogICJtZXRhZGF0YSI6IHsKICAgICJkY20yYnEtcmVpbmRleCI6ICJ0cnVlIiwKICAgICJkY20yYnEtaW5kZXgiOiAidHJ1ZSIKICB9LAogICJjcmMzMmMiOiAiZXZLOEZBPT0iLAogICJldGFnIjogIkNPMjJ1YVhucjRvREVBWT0iCn0K"
+  },
+  "deliveryAttempt": 1
+}
