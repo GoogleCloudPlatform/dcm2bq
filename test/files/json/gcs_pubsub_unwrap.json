@@ -1,0 +1,20 @@
+{
+  "subscription": "projects/data-axe-350723/subscriptions/myRunSubscription",
+  "deliveryAttempt": 1,
+  "message": {
+    "messageId": "13214082198866333",
+    "publishTime": "2024-12-13T16:14:07.165Z",
+    "attributes": {
+      "payloadFormat": "JSON_API_V1",
+      "bucketId": "dicom-bucket",
+      "notificationConfig": "projects/_/buckets/dicom-bucket/notificationConfigs/2",
+      "objectId": "1_1.dcm",
+      "eventType": "OBJECT_FINALIZE",
+      "eventTime": "2024-12-13T16:14:07.149953Z",
+      "objectGeneration": "1734105574129717"
+    },
+    "publish_time": "2024-12-13T16:14:07.165Z",
+    "message_id": "13214082198866333",
+    "data": "ewogICJraW5kIjogInN0b3JhZ2Ujb2JqZWN0IiwKICAiaWQiOiAiZGljb20tYnVja2V0L3N0dWR5XzIway85Xzk5Ny5kY20vMTczNDEwNTU3NDEyOTcxNyIsCiAgInNlbGZMaW5rIjogImh0dHBzOi8vd3d3Lmdvb2dsZWFwaXMuY29tL3N0b3JhZ2UvdjEvYi9kaWNvbS1idWNrZXQvby9zdHVkeV8yMGslMkY5Xzk5Ny5kY20iLAogICJuYW1lIjogInN0dWR5XzIway85Xzk5Ny5kY20iLAogICJidWNrZXQiOiAiZGljb20tYnVja2V0IiwKICAiZ2VuZXJhdGlvbiI6ICIxNzM0MTA1NTc0MTI5NzE3IiwKICAibWV0YWdlbmVyYXRpb24iOiAiMSIsCiAgImNvbnRlbnRUeXBlIjogImFwcGxpY2F0aW9uL2RpY29tIiwKICAidGltZUNyZWF0ZWQiOiAiMjAyNC0xMi0xM1QxNTo1OTozNC4xODVaIiwKICAidXBkYXRlZCI6ICIyMDI0LTEyLTEzVDE1OjU5OjM0LjE4NVoiLAogICJzdG9yYWdlQ2xhc3MiOiAiU1RBTkRBUkQiLAogICJ0aW1lU3RvcmFnZUNsYXNzVXBkYXRlZCI6ICIyMDI0LTEyLTEzVDE1OjU5OjM0LjE4NVoiLAogICJzaXplIjogIjg5ODQ0IiwKICAibWQ1SGFzaCI6ICIyMkpvc2xqeFk4Uy9NQ1ZGeHhVWWNRPT0iLAogICJtZWRpYUxpbmsiOiAiaHR0cHM6Ly9zdG9yYWdlLmdvb2dsZWFwaXMuY29tL2Rvd25sb2FkL3N0b3JhZ2UvdjEvYi9kaWNvbS1idWNrZXQvby9zdHVkeV8yMGslMkY5Xzk5Ny5kY20/Z2VuZXJhdGlvbj0xNzM0MTA1NTc0MTI5NzE3JmFsdD1tZWRpYSIsCiAgImNvbnRlbnRMYW5ndWFnZSI6ICJlbiIsCiAgImNyYzMyYyI6ICJoclpxUlE9PSIsCiAgImV0YWciOiAiQ0xXQS85V09wWW9ERUFFPSIKfQo="
+  }
+}

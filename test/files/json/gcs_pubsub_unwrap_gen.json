@@ -1,0 +1,20 @@
+{
+    "subscription": "projects/data-axe-350723/subscriptions/myRunSubscription",
+    "deliveryAttempt": 1,
+    "message": {
+      "attributes": {
+        "bucketId": "dicom-bucket",
+        "eventType": "OBJECT_DELETE",
+        "objectGeneration": "1734472962617455",
+        "notificationConfig": "projects/_/buckets/dicom-bucket/notificationConfigs/2",
+        "payloadFormat": "JSON_API_V1",
+        "eventTime": "2024-12-25T07:03:47.053091Z",
+        "objectId": "1.2.826.0.1.3680043.8.1055.1.20111102150929794.04832377.16419930.dcm"
+      },
+      "data": "ewogICJraW5kIjogInN0b3JhZ2Ujb2JqZWN0IiwKICAiaWQiOiAiZGljb20tYnVja2V0LzEuMi44MjYuMC4xLjM2ODAwNDMuOC4xMDU1LjEuMjAxMTExMDIxNTA5Mjk3OTQuMDQ4MzIzNzcuMTY0MTk5MzAuZGNtLzE3MzQ0NzI5NjI2MTc0NTUiLAogICJzZWxmTGluayI6ICJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9zdG9yYWdlL3YxL2IvZGljb20tYnVja2V0L28vMS4yLjgyNi4wLjEuMzY4MDA0My44LjEwNTUuMS4yMDExMTEwMjE1MDkyOTc5NC4wNDgzMjM3Ny4xNjQxOTkzMC5kY20iLAogICJuYW1lIjogIjEuMi44MjYuMC4xLjM2ODAwNDMuOC4xMDU1LjEuMjAxMTExMDIxNTA5Mjk3OTQuMDQ4MzIzNzcuMTY0MTk5MzAuZGNtIiwKICAiYnVja2V0IjogImRpY29tLWJ1Y2tldCIsCiAgImdlbmVyYXRpb24iOiAiMTczNDQ3Mjk2MjYxNzQ1NSIsCiAgIm1ldGFnZW5lcmF0aW9uIjogIjEiLAogICJjb250ZW50VHlwZSI6ICJhcHBsaWNhdGlvbi9kaWNvbSIsCiAgInRpbWVDcmVhdGVkIjogIjIwMjQtMTItMTdUMjI6MDI6NDIuNjc2WiIsCiAgInVwZGF0ZWQiOiAiMjAyNC0xMi0xN1QyMjowMjo0Mi42NzZaIiwKICAidGltZURlbGV0ZWQiOiAiMjAyNC0xMi0xN1QyMjowMjo0NS4wNzJaIiwKICAic3RvcmFnZUNsYXNzIjogIlNUQU5EQVJEIiwKICAidGltZVN0b3JhZ2VDbGFzc1VwZGF0ZWQiOiAiMjAyNC0xMi0xN1QyMjowMjo0Mi42NzZaIiwKICAic2l6ZSI6ICI5ODU4MCIsCiAgIm1kNUhhc2giOiAiMlNlTXVHcFZxakIzM0V6OTJQbkladz09IiwKICAibWVkaWFMaW5rIjogImh0dHBzOi8vc3RvcmFnZS5nb29nbGVhcGlzLmNvbS9kb3dubG9hZC9zdG9yYWdlL3YxL2IvZGljb20tYnVja2V0L28vMS4yLjgyNi4wLjEuMzY4MDA0My44LjEwNTUuMS4yMDExMTEwMjE1MDkyOTc5NC4wNDgzMjM3Ny4xNjQxOTkzMC5kY20/Z2VuZXJhdGlvbj0xNzM0NDcyOTYyNjE3NDU1JmFsdD1tZWRpYSIsCiAgImNyYzMyYyI6ICJybnZhUnc9PSIsCiAgImV0YWciOiAiQ08vZ3ZLYm5yNG9ERUFFPSIKfQo=",
+      "messageId": "13358247105934094",
+      "publish_time": "2024-12-25T07:03:47.107Z",
+      "message_id": "13358247105934094",
+      "publishTime": "2024-12-25T07:03:47.107Z"
+    }
+  }
