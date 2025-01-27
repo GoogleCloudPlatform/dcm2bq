@@ -28,7 +28,7 @@
   "devDependencies": {
     "axios": "^1.7.9",
     "glob": "^11.0.0",
-    "mocha": "^10.8.2",
+    "mocha": "^11.0.0",
     "release-it": "^17.10.0"
   },
   "release-it": {
