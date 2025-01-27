@@ -43,8 +43,8 @@
         "npm test"
       ],
       "after:release": [
-        "docker build . --tag ${repo.repository}:latest --tag ${repo.repository}:${version} --no-cache",
-        "docker push ${repo.repository} --all-tags"
+        "docker build . --tag jasonklotzer/dcm2bq:latest --tag jasonklotzer/dcm2bq:${version} --no-cache",
+        "docker push jasonklotzer/dcm2bq --all-tags"
       ]
     }
   }
