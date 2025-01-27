@@ -91,7 +91,7 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
     path: dicomWebPath,
     version: null, // TODO: Fix when HCAPI supports versions
     info: JSON.stringify({
-      event: consts.GENERIC_INSERT,
+      event: consts.HCAPI_FINALIZE,
       storage: { size: buffer.length, type: consts.STORAGE_TYPE_DICOMWEB },
     }),
     metadata: await getMetadata(buffer, uriPath),
