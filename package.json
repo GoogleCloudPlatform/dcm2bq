@@ -1,6 +1,6 @@
 {
   "name": "dcm2bq",
-  "version": "1.0.53",
+  "version": "1.0.54",
   "description": "Get the JSON representation of a DICOM part 10 file and store it into BQ.",
   "main": "index.js",
   "scripts": {
