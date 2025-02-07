@@ -38,7 +38,7 @@ program
     const { dicomParserOptions, jsonOutputOptions } = config.get();
     const reader = new DicomFile(fileUrl, dicomParserOptions);
     const json = reader.toJson(jsonOutputOptions);
-    console.log(JSON.stringify(json, "", 2));
+    console.log(JSON.stringify(json));
   });
 
 program
