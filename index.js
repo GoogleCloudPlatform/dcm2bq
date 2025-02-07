@@ -20,7 +20,7 @@
 
 const url = require("url");
 const { Command } = require("commander");
-const DicomToJson = require("./dicomtojson");
+const { DicomFile } = require("./dicomtojson");
 const config = require("./config");
 const { HttpServer } = require("./server");
 const package = require("./package.json");
@@ -35,8 +35,8 @@ program
   .argument("<inputFile>", "file to parse")
   .action((fileName) => {
     const fileUrl = new URL(url.pathToFileURL(fileName));
-    const reader = new DicomToJson(fileUrl);
-    const { jsonOutputOptions } = config.get();
+    const { dicomParserOptions, jsonOutputOptions } = config.get();
+    const reader = new DicomFile(fileUrl, dicomParserOptions);
     const json = reader.toJson(jsonOutputOptions);
     console.log(JSON.stringify(json, "", 2));
   });
