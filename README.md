@@ -33,3 +33,18 @@ The workflow for this deployment is as follows:
 - If any errors occur within the container, then the message will be NACK'd and it will be retried. If the message fails after the max retries, then it will be pushed to the deadletter topic, which then auto pushes the message to a BigQuery table for further analysis.
 
 Please note that the code is deployed as a [container](./Dockerfile) by default. You can find the latest release of the conatainer image [here](https://hub.docker.com/r/jasonklotzer/dcm2bq/tags).
+
+## CLI
+
+You can also run the `dcm2bq` as a CLI (Command Line Interface). 
+
+1) Make sure you have `npm` and `node` installed. Usually this is easily accomplished by leveraging [NVM](https://github.com/nvm-sh/nvm).
+2) Get the code to a local directory: `git clone https://github.com/googlecloudplatform/dcm2bq.git`
+3) `cd dcm2bq`, and install the code, while also registering `dcm2jq` as a CLI globally via `npm install && npm install -g`.
+4) Now you can use get the CLI parameters by using `dcm2bq --help` or going straight to see some JSON output by doing `dcm2bq dump test/files/dcm/ct.dcm`.
+
+## Development
+
+Start with the steps in the [CLI](#cli) section above. Feel free to browse the code in [test](./test/) to get a better idea of how things work.
+
+
