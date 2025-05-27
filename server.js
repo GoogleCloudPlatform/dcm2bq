@@ -28,7 +28,7 @@ const app = express();
 
 app.use(express.json());
 
-app.use("*", (req, res, next) => {
+app.use(/.*/, (req, res, next) => {
   res.perfCtx = new PerfCtx();
   if (DEBUG_MODE) {
     console.log(JSON.stringify(req.body));
