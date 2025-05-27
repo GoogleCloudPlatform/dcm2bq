@@ -17,19 +17,19 @@
   "dependencies": {
     "@google-cloud/bigquery": "^8.0.0",
     "@google-cloud/pubsub": "^5.0.0",
-    "@google-cloud/storage": "^7.14.0",
+    "@google-cloud/storage": "^7.16.0",
     "ajv": "^8.17.1",
-    "commander": "^13.0.0",
+    "commander": "^13.1.0",
     "dicom-parser": "^1.8.21",
-    "express": "^5.0.0",
+    "express": "^5.1.0",
     "express-json-validator-middleware": "^3.0.1",
-    "google-auth-library": "^9.15.0"
+    "google-auth-library": "^9.15.1"
   },
   "devDependencies": {
-    "axios": "^1.7.9",
-    "glob": "^11.0.0",
-    "mocha": "^11.0.0",
-    "release-it": "^19.0.0"
+    "axios": "^1.9.0",
+    "glob": "^11.0.2",
+    "mocha": "^11.5.0",
+    "release-it": "^19.0.2"
   },
   "release-it": {
     "github": {
