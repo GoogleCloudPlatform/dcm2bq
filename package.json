@@ -23,7 +23,7 @@
     "dicom-parser": "^1.8.21",
     "express": "^5.1.0",
     "express-json-validator-middleware": "^3.0.1",
-    "google-auth-library": "^9.15.1"
+    "google-auth-library": "^10.0.0"
   },
   "devDependencies": {
     "axios": "^1.9.0",
