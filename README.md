@@ -1,48 +1,118 @@
 # DCM2BQ
 
-This package name is an abbreviation for `DICOM to BigQuery`. It offers a service (and CLI) to create a JSON representation of a DICOM part 10 file and then store it to [Big Query](https://cloud.google.com/bigquery), with many options for input and formatting in between.
+`DCM2BQ` (DICOM to BigQuery) is a tool for extracting metadata from DICOM files and loading it into Google BigQuery. It can be run as a standalone CLI or as a containerized service, making it easy to integrate into data pipelines.
 
-This open source package is an alternative to using the [Healthcare API DICOM store](https://cloud.google.com/healthcare-api/docs/how-tos/dicom) feature allowing you to stream [metadata to BigQuery](https://cloud.google.com/healthcare-api/docs/how-tos/dicom-bigquery-streaming). It was primarily created to offer a similar option for DICOM data that is ingested to other storage platforms, starting with [Google Cloud Storage](https://cloud.google.com/storage).
+This open-source package provides an alternative to the DICOM metadata streaming feature in the Google Cloud Healthcare API. It enables similar functionality for DICOM data stored in other platforms, such as Google Cloud Storage.
 
-Why store DICOM metadata to BigQuery? Because traditional imaging systems, such as PACS and VNA, only provide a limited view of the underlying metadata. Storing the full metadata into BigQuery provides limitless analytic capabilities over this type of data.
+## Why DCM2BQ?
+
+Traditional imaging systems like PACS and VNAs offer limited query capabilities over DICOM metadata. By ingesting the complete metadata into BigQuery, you unlock powerful, large-scale analytics and insights from your imaging data.
+
+## Features
+
+-   Parse DICOM Part 10 files.
+-   Convert DICOM metadata to a flexible JSON representation.
+-   Load DICOM metadata into a BigQuery table.
+-   Run as a containerized service, ideal for event-driven pipelines.
+-   Run as a command-line interface (CLI) for manual or scripted processing.
+-   Handle Google Cloud Storage object lifecycle events (creation, deletion) to keep BigQuery synchronized.
+-   Highly configurable to adapt to your needs.
+
+## Installation
+
+### Docker
+
+The service is distributed as a container image. You can find the latest releases on Docker Hub.
+
+```bash
+docker pull jasonklotzer/dcm2bq:latest
+```
+
+### From Source (for CLI)
+
+To use the CLI, you can install it from the source code.
+
+1.  Ensure you have `node` and `npm` installed. We recommend using nvm.
+2.  Clone the repository:
+    ```bash
+    git clone https://github.com/googlecloudplatform/dcm2bq.git
+    ```
+3.  Navigate to the directory and install dependencies and the CLI:
+    ```bash
+    cd dcm2bq
+    npm install
+    npm install -g .
+    ```
+4.  Verify the installation:
+    ```bash
+    dcm2bq --help
+    ```
+
+## Usage
+
+### As a Service (Cloud Run)
+
+The recommended deployment uses Google Cloud Storage, Pub/Sub, and Cloud Run.
+
+!Deployment Architecture
+
+The workflow is as follows:
+
+1.  An object operation (e.g., creation, deletion) occurs in a GCS bucket.
+2.  A notification is sent to a Pub/Sub topic.
+3.  A Pub/Sub subscription pushes the message to a Cloud Run service running the `dcm2bq` container.
+4.  The `dcm2bq` container processes the message:
+    -   It validates the message schema and checks for a DICOM-like file extension (e.g., `.dcm`).
+    -   For new objects, it reads the file from GCS, parses the DICOM metadata, and inserts a JSON representation into BigQuery.
+    -   For deleted objects, it records the deletion event in BigQuery.
+5.  If an error occurs, the message is NACK'd for retry. After maximum retries, it's sent to a dead-letter topic for analysis.
+
+**Note:** When deploying to Cloud Run, ensure the container has enough memory allocated to handle your largest DICOM files.
+
+### As a CLI
+
+The CLI is useful for testing, development, and batch processing.
+
+**Example: Dump DICOM metadata as JSON**
+
+```bash
+dcm2bq dump test/files/dcm/ct.dcm | jq
+```
+
+This command will output the full DICOM metadata in JSON format, which can be piped to tools like `jq` for filtering and inspection.
 
 ## Configuration
 
-Please refer to the configuration options in the [default config file](./config.defaults.js).
+Configuration options can be found in the [default config file](./config.defaults.js).
 
-These options can be set by providing JSON overrides via the `DCM2BQ_CONFIG` environment variable or by putting these overrrides into a file and passing the file path via the `DCM2BQ_CONFIG_FILE` environment variable.
+You can override these defaults in two ways:
 
-The default value will be used for each config option when there's no override provided.
-
-## Deployment
-
-The default deployment option for this service is seen in the below architecture:
-
-![Deployment Architecture](./assets/arch.svg)
-
-The workflow for this deployment is as follows:
-
-- An object operation occurs in the GCS bucket where notifications are enabled: An object is written, updated, deleted, or metadata is updated.
-- A notification of the event is sent to the Pub/Sub topic, where a Pub/Sub subscription receives the message and pushes it to CloudRun.
-- CloudRun routes the message to the HTTP handler within one of the `dcm2bq` containers.
-- The `dcm2bq` container processes the message in the following way:
-  - Validates that it can handle the message JSON Schema; primarily this is checking that the message format meets expectations and that the object itself has a DICOM-like extension (`\.(dcm|DCM|dicom)`).
-  - If the message-type requires creating a new JSON representation (when new objects are written):
-    - Read the file from the storage (GCS) to the container memory (Note: Allocate enough memory for your container to handle your maximum DICOM object size), parse it, and insert it in to BigQuery.
-  - If the message-type is a delete, then it will save that operation to the BigQuery table without any DICOM metadata.
-- If any errors occur within the container, then the message will be NACK'd and it will be retried. If the message fails after the max retries, then it will be pushed to the deadletter topic, which then auto pushes the message to a BigQuery table for further analysis.
-
-Please note that the code is deployed as a [container](./Dockerfile) by default. You can find the latest release of the conatainer image [here](https://hub.docker.com/r/jasonklotzer/dcm2bq/tags).
-
-## CLI
-
-You can also run the `dcm2bq` as a CLI (Command Line Interface).
-
-1. Make sure you have `npm` and `node` installed. This can be accomplished by using [NVM](https://github.com/nvm-sh/nvm).
-2. Get the code to a local directory: `git clone https://github.com/googlecloudplatform/dcm2bq.git`
-3. `cd dcm2bq`, and install the code, while also registering `dcm2bq` as a CLI globally via `npm install && npm install -g`.
-4. Now you can use get the CLI parameters by using `dcm2bq --help` or going straight to see some JSON output by doing `dcm2bq dump test/files/dcm/ct.dcm`. You should see a JSON dump of the DICOM metadata, which can be filtered and parsed with a tool like `jq`.
+1.  **Environment Variable:** Set `DCM2BQ_CONFIG` to a JSON string.
+    ```bash
+    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","tableId":"my_table"}}'
+    ```
+2.  **Config File:** Set `DCM2BQ_CONFIG_FILE` to the path of a JSON file containing your overrides.
+    ```bash
+    # config.json
+    # {
+    #   "bigquery": {
+    #     "datasetId": "my_dataset",
+    #     "tableId": "my_table"
+    #   }
+    # }
+    export DCM2BQ_CONFIG_FILE=./config.json
+    ```
 
 ## Development
 
-Start with the steps in the [CLI](#cli) section above. Feel free to browse the code in [test](./test/) to get a better idea of how things work.
+To get started with development, follow the installation steps for the CLI.
+
+The `test` directory contains numerous examples and unit tests that are helpful for understanding the codebase and validating changes.
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to contribute to this project.
+
+## License
+
+This project is licensed under the Apache 2.0 License.
