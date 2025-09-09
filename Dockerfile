@@ -16,6 +16,11 @@ FROM node:lts-slim
 ENV NODE_ENV=production
 WORKDIR /usr/src/app
 COPY . .
+# Install system dependencies for native modules and dcmtk for image rendering,
+# and clean up apt cache to keep the image small.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev dcmtk \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm install --production --silent
 RUN chown -R node /usr/src/app
 USER node

@@ -30,8 +30,11 @@ app.use(express.json());
 
 app.use(/.*/, (req, res, next) => {
   res.perfCtx = new PerfCtx();
-  if (DEBUG_MODE) {
-    console.log(JSON.stringify(req.body));
+  if (DEBUG_MODE && req.body) {
+    const output = { url: req.url, body: req.body };
+    try {
+      console.log(JSON.stringify(output, null, 2));
+    } catch (e) {}
   }
   next();
 });

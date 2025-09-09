@@ -109,6 +109,16 @@ To get started with development, follow the installation steps for the CLI.
 
 The `test` directory contains numerous examples and unit tests that are helpful for understanding the codebase and validating changes.
 
+### Running Integration Tests
+
+The test suite includes integration tests for features like Gemini vector embedding generation. These tests make real API calls to Google Cloud services and require a properly configured environment.
+
+To run them:
+1.  Ensure you are authenticated with GCP (`gcloud auth application-default login`).
+2.  Ensure your project has the Vertex AI API enabled.
+3.  Set the `RUN_INTEGRATION_TESTS=true` environment variable.
+4.  Run the tests: `RUN_INTEGRATION_TESTS=true npm test`
+
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to contribute to this project.

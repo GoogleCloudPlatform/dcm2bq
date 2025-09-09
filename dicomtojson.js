@@ -169,4 +169,12 @@ class DicomFile extends DicomInMemory {
   }
 }
 
-module.exports = { DicomFile, DicomInMemory };
+function parseBulkDataUri(bulkDataUri) {
+  const match = bulkDataUri.match(/\?offset=(\d+)&length=(\d+)/);
+  if (match) {
+    return { offset: parseInt(match[1], 10), length: parseInt(match[2], 10) };
+  }
+  return null;
+}
+
+module.exports = { DicomFile, DicomInMemory, parseBulkDataUri };

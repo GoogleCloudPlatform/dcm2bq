@@ -20,17 +20,29 @@ const { DicomInMemory } = require("./dicomtojson");
 const bq = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
+const { createVectorEmbedding } = require("./embeddings");
 const { deepAssign, DEBUG_MODE } = require("./utils");
+const embedConfig = config.get().gcpConfig.embeddings;
 
 // TODO: Include the metaHash for all files
 
-async function getMetadata(buffer, uriPath) {
-  const configProvidedOptions = config.get().jsonOutputOptions;
+/**
+ * Processes a DICOM file buffer to extract metadata and optionally generate a vector embedding.
+ * @param {Buffer} buffer The DICOM file content as a buffer.
+ * @param {string} uriPath The URI of the DICOM file.
+ * @returns {Promise<{metadata: string, vectorEmbedding?: string}>} An object containing the stringified JSON metadata and an optional stringified vector embedding.
+ */
+async function processDicom(buffer, uriPath) {
+  const configObject = config.get();
+  const configProvidedOptions = configObject.jsonOutput;
   const bulkDataRoot = configProvidedOptions.explicitBulkDataRoot ? uriPath : "";
   const outputOptions = deepAssign({}, configProvidedOptions, { bulkDataRoot });
   const reader = new DicomInMemory(buffer);
-  const metadata = reader.toJson(outputOptions);
-  return JSON.stringify(metadata);
+  const json = reader.toJson(outputOptions);
+  return {
+    metadata: JSON.stringify(json),
+    embeddings: embedConfig.enabled ? await createVectorEmbedding(json, buffer) : null,
+  };
 }
 
 async function handleGcsPubSubUnwrap(ctx, perfCtx) {
@@ -47,6 +59,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     // The object has been removed
     case consts.GCS_OBJ_DELETE: {
       writeObj.info = JSON.stringify({
+        // TODO: Why the stringify?
         event: eventType,
         storage: { type: consts.STORAGE_TYPE_GCS },
       });
@@ -62,10 +75,13 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       writeObj.info = JSON.stringify({
         event: eventType,
         storage: { size: buffer.length, type: consts.STORAGE_TYPE_GCS },
+        embeddings: { model: embedConfig.model },
       });
       const uriPath = gcs.createUriPath(bucketId, objectId);
-      writeObj.metadata = await getMetadata(buffer, uriPath);
-      perfCtx.addRef("afterGetMetadata");
+      const { metadata, embeddings } = await processDicom(buffer, uriPath);
+      perfCtx.addRef("afterProcessDicom");
+      writeObj.metadata = metadata;
+      writeObj.embeddings = embeddings;
       await bq.insert(writeObj);
       perfCtx.addRef("afterBqInsert");
       break;
@@ -86,17 +102,23 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   const uriPath = hcapi.createUriPath(dicomWebPath);
   const buffer = await hcapi.downloadToMemory(uriPath);
   perfCtx.addRef("afterHcapiDownloadToMemory");
+
+  const { metadata, embeddings } = await processDicom(buffer, uriPath);
+  perfCtx.addRef("afterProcessDicom");
+
   const writeObj = {
     timestamp: new Date(),
     path: dicomWebPath,
     version: null, // TODO: Fix when HCAPI supports versions
     info: JSON.stringify({
+      // TODO: Why the stringify?
       event: consts.HCAPI_FINALIZE,
       storage: { size: buffer.length, type: consts.STORAGE_TYPE_DICOMWEB },
+      embeddings: { model: embedConfig.model },
     }),
-    metadata: await getMetadata(buffer, uriPath),
+    metadata,
+    embeddings,
   };
-  perfCtx.addRef("afterGetMetadata");
   await bq.insert(writeObj);
   perfCtx.addRef("afterBqInsert");
   if (DEBUG_MODE) {

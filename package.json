@@ -15,21 +15,23 @@
   "author": "Jason Klotzer",
   "license": "Apache-2.0",
   "dependencies": {
-    "@google-cloud/bigquery": "^8.0.0",
-    "@google-cloud/pubsub": "^5.0.0",
-    "@google-cloud/storage": "^7.16.0",
+    "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/pubsub": "^5.2.0",
+    "@google-cloud/storage": "^7.17.0",
+    "@google/genai": "^1.18.0",
     "ajv": "^8.17.1",
     "commander": "^14.0.0",
     "dicom-parser": "^1.8.21",
     "express": "^5.1.0",
     "express-json-validator-middleware": "^3.0.1",
-    "google-auth-library": "^10.0.0"
+    "google-auth-library": "^10.3.0",
+    "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
-    "axios": "^1.9.0",
-    "glob": "^11.0.2",
-    "mocha": "^11.5.0",
-    "release-it": "^19.0.2"
+    "axios": "^1.11.0",
+    "glob": "^11.0.3",
+    "mocha": "^11.7.2",
+    "release-it": "^19.0.4"
   },
   "release-it": {
     "github": {

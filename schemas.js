@@ -21,6 +21,63 @@ const utils = require("./utils");
 
 const schemaKeys = [];
 
+// Configuration schema based on config.defaults.js structure
+addSchema(
+  {
+    type: "object",
+    required: ["gcpConfig"],
+    properties: {
+      gcpConfig: {
+        type: "object",
+        required: ["projectId", "location", "bigQuery", "embeddings"],
+        properties: {
+          projectId: { type: "string" },
+          location: { type: "string" },
+          bigQuery: {
+            type: "object",
+            required: ["datasetId", "tableId"],
+            properties: {
+              datasetId: { type: "string" },
+              tableId: { type: "string" }
+            }
+          },
+          embeddings: {
+            type: "object",
+            required: ["enabled", "model"],
+            properties: {
+              enabled: { type: "boolean" },
+              model: { type: "string" },
+              summarizeText: {
+                type: "object",
+                required: ["enabled", "model"],
+                properties: {
+                  enabled: { type: "boolean" },
+                  model: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      },
+      dicomParser: { type: "object" },
+      jsonOutput: {
+        type: "object",
+        properties: {
+          useArrayWithSingleValue: { type: "boolean" },
+          ignoreGroupLength: { type: "boolean" },
+          ignoreMetaHeader: { type: "boolean" },
+          ignorePrivate: { type: "boolean" },
+          ignoreBinary: { type: "boolean" },
+          useCommonNames: { type: "boolean" },
+          explicitBulkDataRoot: { type: "boolean" }
+        }
+      },
+      src: { type: "string" }
+    }
+  },
+  consts.CONFIG_SCHEMA
+);
+
 // Conforms to https://cloud.google.com/storage/docs/pubsub-notifications
 addSchema(
   {

@@ -35,9 +35,9 @@ program
   .argument("<inputFile>", "file to parse")
   .action((fileName) => {
     const fileUrl = new URL(url.pathToFileURL(fileName));
-    const { dicomParserOptions, jsonOutputOptions } = config.get();
-    const reader = new DicomFile(fileUrl, dicomParserOptions);
-    const json = reader.toJson(jsonOutputOptions);
+    const { dicomParser, jsonOutput } = config.get();
+    const reader = new DicomFile(fileUrl, dicomParser);
+    const json = reader.toJson(jsonOutput);
     console.log(JSON.stringify(json));
   });
 
