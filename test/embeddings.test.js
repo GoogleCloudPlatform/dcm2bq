@@ -29,23 +29,24 @@ const testFiles = glob("./test/files/dcm/*.dcm");
 describe("embeddings", () => {
   let imageTestData, srTestData, pdfTestData;
 
-  const findTestDataBySopClass = (sopClassUids) => {
+  const findAllTestDataBySopClass = (sopClassUids) => {
     if (!Array.isArray(sopClassUids)) {
       sopClassUids = [sopClassUids];
     }
+    const testData = [];
     for (const file of testFiles) {
       const buffer = fs.readFileSync(file);
       try {
         const reader = new DicomInMemory(buffer);
         const metadata = reader.toJson({ useCommonNames: true });
         if (sopClassUids.includes(metadata.SOPClassUID)) {
-          return { buffer, metadata };
+          testData.push({ buffer, metadata, file });
         }
       } catch (e) {
         // Ignore files that are not DICOM or fail to parse
       }
     }
-    return null;
+    return testData;
   };
 
   before(() => {
@@ -53,74 +54,76 @@ describe("embeddings", () => {
     const isEnabled = c.gcpConfig.embeddings.enabled;
     assert.ok(isEnabled, "Embeddings need to be enabled in the config");
 
-    imageTestData = findTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
-    srTestData = findTestDataBySopClass([
-      SOP_CLASS_UIDS.BASIC_TEXT_SR,
-      SOP_CLASS_UIDS.ENHANCED_SR,
-      SOP_CLASS_UIDS.COMPREHENSIVE_SR,
-    ]);
-    pdfTestData = findTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
+    imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
+    srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
+    pdfTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
   });
-  
+
   describe("processors", () => {
     it("should process DICOM image", async () => {
-      const { buffer } = imageTestData;
-      const result = await processImage(buffer);
-      assert.ok(result);
-      assert.ok(result.image);
-      assert.ok(result.image.bytesBase64Encoded);
+      for (const { buffer, file } of imageTestData) {
+        const result = await processImage(buffer);
+        assert.ok(result, `processImage failed for ${file}`);
+        assert.ok(result.image, `processImage failed for ${file}`);
+        assert.ok(result.image.bytesBase64Encoded, `processImage failed for ${file}`);
+      }
     });
 
     it("should process DICOM SR", async () => {
-      const { metadata } = srTestData;
-      const result = await processSR(metadata);
-      assert.ok(result);
-      assert.ok(result.text);
+      for (const { metadata, file } of srTestData) {
+        const result = await processSR(metadata);
+        assert.ok(result, `processSR failed for ${file}`);
+        assert.ok(result.text, `processSR failed for ${file}`);
+      }
     });
 
     it("should process DICOM PDF", async () => {
-      const { metadata, buffer } = pdfTestData;
-      const result = await processPdf(metadata, buffer);
-      assert.ok(result);
-      assert.ok(result.text);
+      for (const { metadata, buffer, file } of pdfTestData) {
+        const result = await processPdf(metadata, buffer);
+        assert.ok(result, `processPdf failed for ${file}`);
+        assert.ok(result.text, `processPdf failed for ${file}`);
+      }
     });
   });
 
   describe("createVectorEmbedding", () => {
     it("should generate a vector embedding for a DICOM image", async function () {
-      const { buffer, metadata } = imageTestData;
-      const embedding = await createVectorEmbedding(metadata, buffer);
-      assert.ok(embedding, "Embedding should not be null");
-      assert.ok(Array.isArray(embedding), "Embedding should be an array");
-      assert.strictEqual(embedding.length, 1408, "Embedding should have 1408 dimensions");
-      assert.ok(
-        embedding.every((v) => typeof v === "number"),
-        "All values in embedding should be numbers"
-      );
+      for (const { buffer, metadata, file } of imageTestData) {
+        const embedding = await createVectorEmbedding(metadata, buffer);
+        assert.ok(embedding, `Embedding should not be null for ${file}`);
+        assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
+        assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
+        assert.ok(
+          embedding.every((v) => typeof v === "number"),
+          `All values in embedding should be numbers for ${file}`
+        );
+      }
     }).timeout(30000);
 
     it("should generate a vector embedding for a DICOM SR", async function () {
-      const { buffer, metadata } = srTestData;
-      const embedding = await createVectorEmbedding(metadata, buffer);
-      assert.ok(embedding, "Embedding should not be null");
-      assert.ok(Array.isArray(embedding), "Embedding should be an array");
-      assert.strictEqual(embedding.length, 1408, "Embedding should have 1408 dimensions");
-      assert.ok(
-        embedding.every((v) => typeof v === "number"),
-        "All values in embedding should be numbers"
-      );
+      for (const { buffer, metadata, file } of srTestData) {
+        const embedding = await createVectorEmbedding(metadata, buffer);
+        assert.ok(embedding, `Embedding should not be null for ${file}`);
+        assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
+        assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
+        assert.ok(
+          embedding.every((v) => typeof v === "number"),
+          `All values in embedding should be numbers for ${file}`
+        );
+      }
     }).timeout(30000);
 
     it("should generate a vector embedding for a DICOM PDF", async function () {
-      const { buffer, metadata } = pdfTestData;
-      const embedding = await createVectorEmbedding(metadata, buffer);
-      assert.ok(embedding, "Embedding should not be null");
-      assert.ok(Array.isArray(embedding), "Embedding should be an array");
-      assert.strictEqual(embedding.length, 1408, "Embedding should have 1408 dimensions");
-      assert.ok(
-        embedding.every((v) => typeof v === "number"),
-        "All values in embedding should be numbers"
-      );
+      for (const { buffer, metadata, file } of pdfTestData) {
+        const embedding = await createVectorEmbedding(metadata, buffer);
+        assert.ok(embedding, `Embedding should not be null for ${file}`);
+        assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
+        assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
+        assert.ok(
+          embedding.every((v) => typeof v === "number"),
+          `All values in embedding should be numbers for ${file}`
+        );
+      }
     }).timeout(30000);
   });
 });

@@ -25,7 +25,7 @@
       "name": "Mocha Tests",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
-      "args": ["--colors", "--bail", "--timeout", "30000"],
+      "args": ["--colors", "--timeout", "30000"],
       "env": {
         "DEBUG": "true",
         "GCP_PROJECT": "data-axe-350723"
