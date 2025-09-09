@@ -7,6 +7,13 @@
     {
       "type": "node",
       "request": "launch",
+      "name": "Launch Current File",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${file}"
+    },
+    {
+      "type": "node",
+      "request": "launch",
       "name": "Launch Program",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/index.js",
@@ -20,8 +27,8 @@
       "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
       "args": ["--colors", "--bail", "--timeout", "30000"],
       "env": {
-        // "DEBUG": "true",
-        // "DCM2BQ_CONFIG": "{\"bigQuery\":{\"datasetId\": \"dicom\", \"tableId\": \"metadata\"}}"
+        "DEBUG": "true",
+        "GCP_PROJECT": "data-axe-350723"
       }
     }
   ]

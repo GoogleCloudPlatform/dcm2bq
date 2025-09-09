@@ -24,7 +24,8 @@ CREATE TABLE
     `path` STRING NOT NULL,
     `version` STRING,
     `info` JSON NOT NULL,
-    `metadata` JSON
+    `metadata` JSON,
+    `embeddings` FLOAT REPEATED,
   );
 
 CREATE VIEW

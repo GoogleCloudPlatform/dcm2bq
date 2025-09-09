@@ -14,16 +14,34 @@
  limitations under the License.
  */
 
+// NOTE: When overriding these defaults via environment variables or a config file,
+// make sure to include all required fields.
+
 module.exports = {
-  bigQuery: {
-    // Location to use in BigQuery
-    datasetId: "dicom",
-    tableId: "metadata",
+  gcpConfig: {
+    // GCP project and location for services like Vertex AI
+    projectId: process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT,
+    location: process.env.GCP_LOCATION || "us-central1",
+    // Configuration for BigQuery and Vertex AI Embeddings
+    bigQuery: {
+      // Location to use in BigQuery
+      datasetId: "dicom",
+      tableId: "metadata",
+    },
+    embeddings: {
+      enabled: true, // Generate embeddings for text and images
+      // See https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/multimodal-embeddings
+      model: "multimodalembedding@001",
+      summarizeText: {
+        enabled: true, // Use Gemini to summarize long text fields before generating embeddings
+        model: "gemini-2.5-flash-lite", // Gemini model to use for summarization
+      },
+    },
   },
   // Passed to DICOM parser (https://github.com/cornerstonejs/dicomParser)
-  dicomParserOptions: {},
+  dicomParser: {},
   // Passed to JSON formatter
-  jsonOutputOptions: {
+  jsonOutput: {
     useArrayWithSingleValue: false, // Use array, even when there's only a single value
     ignoreGroupLength: true, // Ignore group length elements
     ignoreMetaHeader: false, // Ignore the DICOM metadata header
@@ -34,3 +52,4 @@ module.exports = {
   },
   src: "DEFAULTS",
 };
+

@@ -15,36 +15,95 @@
  */
 
 const fs = require("fs");
-const { deepClone, deepAssign } = require("./utils");
+const { getSchema } = require("./schemas");
+const consts = require('./consts');
 
-const DEFAULTS = require('./config.defaults.js');
+/**
+ * Configuration constants
+ */
+const CONFIG = {
+  ENV_VAR: 'DCM2BQ_CONFIG',
+  FILE_ENV_VAR: 'DCM2BQ_CONFIG_FILE',
+  DEFAULT_FILE: './config.defaults.js'
+};
 
-// TODO: JSONSchema validation
+// Cache for the parsed configuration
+let cachedConfig = null;
 
+/**
+ * Attempts to read and parse configuration from environment variable
+ * @returns {Object|null} Parsed configuration object or null if not found
+ * @throws {Error} If JSON parsing fails
+ */
 function tryReadEnvVars() {
-  if (process.env.DCM2BQ_CONFIG) {
-    try {
-      const defaultsClone = deepClone(DEFAULTS);
-      const config = Object.assign(defaultsClone, JSON.parse(process.env.DCM2BQ_CONFIG), { src: "ENV_VAR" });
-      return config;
-    } catch (e) {
-      console.error(e);
-    }
+  const env = process.env[CONFIG.ENV_VAR];
+  if (!env || env.trim() === "") {
+    return null;
+  }
+  
+  try {
+    return JSON.parse(env);
+  } catch (error) {
+    throw new Error(`Failed to parse DCM2BQ_CONFIG environment variable: ${error.message}`);
   }
 }
 
+/**
+ * Attempts to read and parse configuration from file
+ * @returns {Object|null} Parsed configuration object or null if not found
+ * @throws {Error} If file reading or parsing fails
+ */
 function tryReadConfigFile() {
-  if (process.env.DCM2BQ_CONFIG_FILE) {
-    try {
-      const defaultsClone = deepClone(DEFAULTS);
-      const config = Object.assign(defaultsClone, JSON.parse(fs.readFileSync(process.env.DCM2BQ_CONFIG_FILE)), { src: "ENV_VAR_FILE" });
-      return config;
-    } catch {}
+  const fileName = process.env[CONFIG.FILE_ENV_VAR];
+  if (!fileName) {
+    return null;
+  }
+  
+  try {
+    const fileContent = fs.readFileSync(fileName, 'utf8');
+    return JSON.parse(fileContent);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error(`Configuration file not found: ${fileName}`);
+    }
+    throw new Error(`Failed to read/parse configuration file ${fileName}: ${error.message}`);
   }
 }
 
-module.exports.get = function getConfig(overrides) {
-  const defaultsClone = deepClone(DEFAULTS);
-  const config = deepAssign(tryReadEnvVars() || tryReadConfigFile() || defaultsClone, overrides);
-  return config;
+/**
+ * Gets the configuration object, using the following precedence:
+ * 1. Environment variable (DCM2BQ_CONFIG)
+ * 2. Configuration file (specified by DCM2BQ_CONFIG_FILE)
+ * 3. Default configuration file
+ * 
+ * @returns {Object} The configuration object
+ * @throws {Error} If configuration cannot be loaded or parsed
+ */
+function getConfig() {
+  if (cachedConfig) {
+    return cachedConfig;
+  }
+
+  try {
+    cachedConfig = tryReadEnvVars() || tryReadConfigFile() || require(CONFIG.DEFAULT_FILE);
+    
+    if (!cachedConfig || typeof cachedConfig !== 'object') {
+      throw new Error('Invalid configuration format: expected an object');
+    }
+
+    const validate = getSchema(consts.CONFIG_SCHEMA);
+    if (!validate(cachedConfig)) {
+      throw new Error(`Invalid configuration: ${validate.errors.map(e => `${e.instancePath} ${e.message}`).join(', ')}`);
+    }
+
+    return cachedConfig;
+  } catch (error) {
+    // Clear cache in case of error to allow retry
+    cachedConfig = null;
+    throw error;
+  }
+}
+
+module.exports = {
+  get: getConfig,
 };
