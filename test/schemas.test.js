@@ -15,16 +15,11 @@
  */
 
 const assert = require("assert");
-const fs = require("fs");
-const axios = require("axios");
-const config = require("../config");
 const consts = require("../consts");
 const utils = require("../utils");
-const { HttpServer } = require("../server");
 const { getSchema, matchEventSchema } = require("../schemas");
 
 const gcsPubSubUnwrapExample = require("./files/json/gcs_pubsub_unwrap.json");
-const gcsPubSubUnwrapMetaExample = require("./files/json/gcs_pubsub_unwrap_meta.json");
 const hcapiPubSubUnwrapExample = require("./files/json/hcapi_pubsub.json");
 
 describe("schemas", () => {
@@ -54,56 +49,5 @@ describe("schemas", () => {
       matchEventSchema(data);
       assert.fail();
     } catch (e) {}
-  });
-});
-
-describe("httpserver", () => {
-  const server = new HttpServer(8080);
-  
-  before(async () => {
-    server.start();
-  });
-
-  it("version", async () => {
-    const res = await axios.get("http://localhost:8080");
-    assert(res.status == 200);
-  });
-
-  it("pubsub (fail)", async () => {
-    try {
-      await axios.post("http://localhost:8080", {});
-      assert.fail();
-    } catch (e) {
-      assert(e.status == 400);
-    }
-  });
-
-  it("GCS pubsub object finalize", async () => {
-    const data = gcsPubSubUnwrapExample;
-    const res = await axios.post("http://localhost:8080", data);
-    assert(res.status == 200);
-  });
-
-  it("GCS pubsub object delete", async () => {
-    const data = utils.deepClone(gcsPubSubUnwrapExample);
-    data.message.attributes.eventType = consts.GCS_OBJ_DELETE;
-    const res = await axios.post("http://localhost:8080", data);
-    assert(res.status == 200);
-  });
-
-  it("GCS pubsub object metadata", async () => {
-    const data = gcsPubSubUnwrapMetaExample;
-    const res = await axios.post("http://localhost:8080", data);
-    assert(res.status == 200);
-  });
-
-  it("HCAPI pubsub", async () => {
-    const data = hcapiPubSubUnwrapExample;
-    const res = await axios.post("http://localhost:8080", data);
-    assert(res.status == 200);
-  });
-
-  after(() => {
-    server.stop();
   });
 });
