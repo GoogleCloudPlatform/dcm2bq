@@ -27,7 +27,7 @@
       "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
       "args": ["--colors", "--timeout", "30000"],
       "env": {
-        "DEBUG": "true",
+        "DEBUG": "false",
         "GCP_PROJECT": "data-axe-350723"
       }
     }
