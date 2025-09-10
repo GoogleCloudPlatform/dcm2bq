@@ -19,41 +19,38 @@ const { mkdtemp, writeFile, readFile, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
-// Renders a DICOM image to a PNG buffer by wrapping the dcm2img utility from the dcmtk toolkit.
-// This requires dcmtk to be installed in the execution environment.
+// Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
+// This requires dcmtk and gdcm to be installed in the execution environment.
 async function renderDicomImage(dicomBuffer) {
   let tempDir;
   try {
     // Create a temporary directory to avoid file collisions
     tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-"));
     const dicomPath = path.join(tempDir, "input.dcm");
-    const pngPath = path.join(tempDir, "output.png");
+    const jpgPath = path.join(tempDir, "output.jpg");
+    const scriptPath = path.resolve(__dirname, "..", "helpers", "convert_dcm_to_jpg.sh");
 
     // Write the DICOM buffer to a temporary file
     await writeFile(dicomPath, dicomBuffer);
 
-    // Execute dcm2img to convert the DICOM to a PNG.
+    // Execute convert_dcm_to_jpg.sh to convert the DICOM to a JPG.
     // The command will fail if the input is not a valid DICOM image, which is handled in the catch block.
     await new Promise((resolve, reject) => {
-      // TODO: The dcmtk package installed via apt-get in the Dockerfile should support
-      // JPEG2000 decompression out-of-the-box. If using a different dcmtk build,
-      // ensure it's compiled with OpenJPEG or a similar library to handle JPEG2000.
-      // Use --write-png to specify PNG output and scale the image to a consistent size for embedding.
-      execFile("dcm2img", ["--write-png", "--scale-x-size", "512", dicomPath, pngPath], (error, stdout, stderr) => {
+      execFile(scriptPath, [dicomPath, jpgPath], (error, stdout, stderr) => {
         if (error) {
-          // dcm2img writes errors to stderr.
-          console.error(`dcm2img execution failed: ${stderr}`);
+          // The script writes errors to stderr.
+          console.error(`convert_dcm_to_jpg.sh execution failed: ${stderr}`);
           return reject(error);
         }
         resolve(stdout);
       });
     });
 
-    // Read the resulting PNG file into a buffer
-    const pngBuffer = await readFile(pngPath);
-    return pngBuffer;
+    // Read the resulting JPG file into a buffer
+    const jpgBuffer = await readFile(jpgPath);
+    return jpgBuffer;
   } catch (error) {
-    console.error(`Could not render DICOM image for embedding using dcmtk: ${error.message}`);
+    console.error(`Could not render DICOM image for embedding using convert_dcm_to_jpg.sh: ${error.message}`);
     // Returning null allows the pipeline to continue without the embedding.
     return null;
   } finally {
