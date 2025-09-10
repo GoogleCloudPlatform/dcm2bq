@@ -60,7 +60,7 @@ describe("embeddings", () => {
   });
 
   describe("processors", () => {
-    it("should process DICOM image", async () => {
+    it("should process all DICOM images", async () => {
       for (const { buffer, file } of imageTestData) {
         const result = await processImage(buffer);
         assert.ok(result, `processImage failed for ${file}`);
@@ -69,7 +69,7 @@ describe("embeddings", () => {
       }
     });
 
-    it("should process DICOM SR", async () => {
+    it("should process all DICOM SRs", async () => {
       for (const { metadata, file } of srTestData) {
         const result = await processSR(metadata);
         assert.ok(result, `processSR failed for ${file}`);
@@ -77,7 +77,7 @@ describe("embeddings", () => {
       }
     });
 
-    it("should process DICOM PDF", async () => {
+    it("should process all DICOM PDFs", async () => {
       for (const { metadata, buffer, file } of pdfTestData) {
         const result = await processPdf(metadata, buffer);
         assert.ok(result, `processPdf failed for ${file}`);
@@ -87,7 +87,7 @@ describe("embeddings", () => {
   });
 
   describe("createVectorEmbedding", () => {
-    it("should generate a vector embedding for a DICOM image", async function () {
+    it("should generate vector embeddings for all DICOM images", async function () {
       for (const { buffer, metadata, file } of imageTestData) {
         const embedding = await createVectorEmbedding(metadata, buffer);
         assert.ok(embedding, `Embedding should not be null for ${file}`);
@@ -100,7 +100,7 @@ describe("embeddings", () => {
       }
     }).timeout(30000);
 
-    it("should generate a vector embedding for a DICOM SR", async function () {
+    it("should generate vector embeddings for all DICOM SRs", async function () {
       for (const { buffer, metadata, file } of srTestData) {
         const embedding = await createVectorEmbedding(metadata, buffer);
         assert.ok(embedding, `Embedding should not be null for ${file}`);
@@ -113,7 +113,7 @@ describe("embeddings", () => {
       }
     }).timeout(30000);
 
-    it("should generate a vector embedding for a DICOM PDF", async function () {
+    it("should generate vector embeddings for all DICOM PDFs", async function () {
       for (const { buffer, metadata, file } of pdfTestData) {
         const embedding = await createVectorEmbedding(metadata, buffer);
         assert.ok(embedding, `Embedding should not be null for ${file}`);
