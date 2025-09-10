@@ -16,9 +16,24 @@ Traditional imaging systems like PACS and VNAs offer limited query capabilities 
 -   Run as a containerized service, ideal for event-driven pipelines.
 -   Run as a command-line interface (CLI) for manual or scripted processing.
 -   Handle Google Cloud Storage object lifecycle events (creation, deletion) to keep BigQuery synchronized.
+-   Generate vector embeddings from DICOM images, Structured Reports, and encapsulated PDFs using Google's multi-modal embedding model.
 -   Highly configurable to adapt to your needs.
 
 ## Installation
+
+### Dependencies
+
+For image processing and vector embedding generation, `dcm2bq` relies on two external toolkits that must be installed in the execution environment:
+
+-   **DCMTK**: A collection of libraries and applications for working with DICOM files.
+-   **GDCM**: A library for reading and writing DICOM files, used here for image format conversion.
+
+These are included in the provided Docker image. If you are building from source or running the CLI locally, you will need to install them manually.
+
+**On Debian/Ubuntu:**
+```bash
+sudo apt-get update && sudo apt-get install -y dcmtk gdcm-tools
+```
 
 ### Docker
 
@@ -33,17 +48,18 @@ docker pull jasonklotzer/dcm2bq:latest
 To use the CLI, you can install it from the source code.
 
 1.  Ensure you have `node` and `npm` installed. We recommend using nvm.
-2.  Clone the repository:
+2.  Ensure you have installed the required [Dependencies](#dependencies).
+3.  Clone the repository:
     ```bash
     git clone https://github.com/googlecloudplatform/dcm2bq.git
     ```
-3.  Navigate to the directory and install dependencies and the CLI:
+4.  Navigate to the directory and install dependencies and the CLI:
     ```bash
     cd dcm2bq
     npm install
     npm install -g .
     ```
-4.  Verify the installation:
+5.  Verify the installation:
     ```bash
     dcm2bq --help
     ```
@@ -63,7 +79,9 @@ The workflow is as follows:
 3.  A Pub/Sub subscription pushes the message to a Cloud Run service running the `dcm2bq` container.
 4.  The `dcm2bq` container processes the message:
     -   It validates the message schema and checks for a DICOM-like file extension (e.g., `.dcm`).
-    -   For new objects, it reads the file from GCS, parses the DICOM metadata, and inserts a JSON representation into BigQuery.
+    -   For new objects, it reads the file from GCS and parses the DICOM metadata.
+    -   If embeddings are enabled, it generates a vector embedding from the DICOM data (for supported types like images, SRs, and PDFs) by calling the Vertex AI Embeddings API.
+    -   It inserts a JSON representation of the metadata and the embedding into BigQuery.
     -   For deleted objects, it records the deletion event in BigQuery.
 5.  If an error occurs, the message is NACK'd for retry. After maximum retries, it's sent to a dead-letter topic for analysis.
 
@@ -81,43 +99,81 @@ dcm2bq dump test/files/dcm/ct.dcm | jq
 
 This command will output the full DICOM metadata in JSON format, which can be piped to tools like `jq` for filtering and inspection.
 
+**Example: Generate a vector embedding**
+
+```bash
+dcm2bq embed test/files/dcm/ct.dcm
+```
+
+This command will process the DICOM file, generate a vector embedding using the configured model, and output the embedding as a JSON array.
+
 ## Configuration
 
 Configuration options can be found in the [default config file](./config.defaults.js).
 
-You can override these defaults in two ways:
+You can override these defaults in two ways.
 
-1.  **Environment Variable:** Set `DCM2BQ_CONFIG` to a JSON string.
+**Important:** When providing an override via environment variable or a file, you must supply the entire configuration object. The default configuration is not merged with your overrides; your provided configuration will be used as-is.
+
+1.  **Environment Variable:** Set `DCM2BQ_CONFIG` to a JSON string containing the full configuration.
     ```bash
-    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","tableId":"my_table"}}'
+    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","tableId":"my_table"},"gcpConfig":{"projectId":"my-gcp-project","embeddings":{"enabled":true,"model":"multimodalembedding@001"}},"jsonOutput":{...}}'
     ```
-2.  **Config File:** Set `DCM2BQ_CONFIG_FILE` to the path of a JSON file containing your overrides.
+2.  **Config File:** Set `DCM2BQ_CONFIG_FILE` to the path of a JSON file containing your full configuration.
     ```bash
     # config.json
     # {
     #   "bigquery": {
     #     "datasetId": "my_dataset",
     #     "tableId": "my_table"
+    #   },
+    #   "gcpConfig": {
+    #     "projectId": "my-gcp-project",
+    #     "embeddings": {
+    #       "enabled": true,
+    #       "model": "multimodalembedding@001"
+    #     }
+    #   },
+    #   "jsonOutput": {
+    #      ...
     #   }
     # }
     export DCM2BQ_CONFIG_FILE=./config.json
     ```
 
+### Embedding Configuration
+
+To enable vector embedding generation, you need to configure the `embeddings` section within `gcpConfig`.
+
+Example `config.json` override:
+```json
+{
+  "gcpConfig": {
+    "embeddings": {
+      "enabled": true,
+      "model": "multimodalembedding@001"
+    }
+  }
+}
+```
+
+-   `enabled`: Set to `true` to activate the feature.
+-   `model`: The name of the Vertex AI model to use for generating embeddings.
+
 ## Development
 
 To get started with development, follow the installation steps for the CLI.
 
-The `test` directory contains numerous examples and unit tests that are helpful for understanding the codebase and validating changes.
+The `test` directory contains numerous examples, unit tests, and integration tests that are helpful for understanding the codebase and validating changes.
 
-### Running Integration Tests
+### Running Tests
 
-The test suite includes integration tests for features like Gemini vector embedding generation. These tests make real API calls to Google Cloud services and require a properly configured environment.
+The test suite is a combination of unit and integration tests. The integration tests make real API calls to Google Cloud services (e.g., for vector embedding generation) and require a properly configured environment.
 
-To run them:
+To run the full test suite:
 1.  Ensure you are authenticated with GCP (`gcloud auth application-default login`).
-2.  Ensure your project has the Vertex AI API enabled.
-3.  Set the `RUN_INTEGRATION_TESTS=true` environment variable.
-4.  Run the tests: `RUN_INTEGRATION_TESTS=true npm test`
+2.  Ensure your project has the necessary APIs enabled (e.g., Vertex AI API).
+3.  Run the tests: `npm test`
 
 ## Contributing
 
