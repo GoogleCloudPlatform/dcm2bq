@@ -19,11 +19,13 @@
 // TODO: Try to improve startup time, when running as CLI. Tested time: ~400ms
 
 const url = require("url");
+const fs = require("fs");
 const { Command } = require("commander");
-const { DicomFile } = require("./dicomtojson");
+const { DicomFile, DicomInMemory } = require("./dicomtojson");
 const config = require("./config");
 const { HttpServer } = require("./server");
 const package = require("./package.json");
+const { createVectorEmbedding } = require("./embeddings");
 
 const program = new Command();
 
@@ -39,6 +41,19 @@ program
     const reader = new DicomFile(fileUrl, dicomParser);
     const json = reader.toJson(jsonOutput);
     console.log(JSON.stringify(json));
+  });
+
+program
+  .command("embed")
+  .description("dump embedding to JSON")
+  .argument("<inputFile>", "file to parse")
+  .action(async (fileName) => {
+    const { jsonOutput } = config.get();
+    const buffer = fs.readFileSync(fileName);
+    const reader = new DicomInMemory(buffer);
+    const json = reader.toJson(jsonOutput);
+    const embedding = await createVectorEmbedding(json, buffer);
+    console.log(JSON.stringify(embedding));
   });
 
 program
