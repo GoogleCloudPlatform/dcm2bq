@@ -19,6 +19,11 @@ const { mkdtemp, writeFile, readFile, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
+// TODO[P1]: Select a better default multi-frame rendering strategy (e.g., first, last, average, etc.)
+// TODO[P0]: Add check for transfer syntaxes that are not supported by dcmtk/gdcm (video, etc.)
+// TODO[P0]: Make sure we handle persisting images to disk (cloudrun)
+
+
 // Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
 // This requires dcmtk and gdcm to be installed in the execution environment.
 async function renderDicomImage(dicomBuffer) {
@@ -28,7 +33,7 @@ async function renderDicomImage(dicomBuffer) {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-"));
     const dicomPath = path.join(tempDir, "input.dcm");
     const jpgPath = path.join(tempDir, "output.jpg");
-    const scriptPath = path.resolve(__dirname, "..", "helpers", "convert_dcm_to_jpg.sh");
+    const scriptPath = path.resolve(__dirname, "..", "..", "helpers", "convert_dcm_to_jpg.sh");
 
     // Write the DICOM buffer to a temporary file
     await writeFile(dicomPath, dicomBuffer);

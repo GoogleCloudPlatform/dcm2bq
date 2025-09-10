@@ -21,7 +21,7 @@ const { handleEvent } = require("./eventhandlers");
 const { matchEventSchema } = require("./schemas");
 const config = require("./config");
 const { DEBUG_MODE } = require("./utils");
-const pkg = require("./package.json");
+const pkg = require("../package.json");
 const { PerfCtx } = require("./perf");
 
 const app = express();

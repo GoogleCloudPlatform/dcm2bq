@@ -1,16 +1,16 @@
 {
   "name": "dcm2bq",
   "version": "1.0.56",
-  "description": "Get the JSON representation of a DICOM part 10 file and optionally store it into Google Cloud Big Query for further analysis.",
-  "main": "index.js",
+  "description": "A tool and service to process DICOM files, extract metadata into BigQuery, and generate vector embeddings for machine learning analysis on Google Cloud.",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js",
-    "test": "mocha --colors --bail --timeout 30000",
+    "start": "node src/index.js",
+    "test": "mocha --colors --bail --timeout 30000 test/*.test.js",
     "release": "release-it --ci",
     "release-dryrun": "release-it --verbose --dry-run --ci"
   },
   "bin": {
-    "dcm2bq": "index.js"
+    "dcm2bq": "src/index.js"
   },
   "author": "Jason Klotzer",
   "license": "Apache-2.0",

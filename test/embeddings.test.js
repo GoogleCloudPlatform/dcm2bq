@@ -17,12 +17,12 @@
 const assert = require("assert");
 const fs = require("fs");
 const glob = require("glob").globSync;
-const config = require("../config");
-const { DicomInMemory } = require("../dicomtojson");
-const { processImage } = require("../processors/image");
-const { processPdf } = require("../processors/pdf");
-const { processSR } = require("../processors/sr");
-const { SOP_CLASS_UIDS, createVectorEmbedding } = require("../embeddings");
+const config = require("../src/config");
+const { DicomInMemory } = require("../src/dicomtojson");
+const { processImage } = require("../src/processors/image");
+const { processPdf } = require("../src/processors/pdf");
+const { processSR } = require("../src/processors/sr");
+const { SOP_CLASS_UIDS, createVectorEmbedding } = require("../src/embeddings");
 
 const testFiles = glob("./test/files/dcm/*.dcm");
 

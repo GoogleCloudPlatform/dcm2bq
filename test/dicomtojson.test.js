@@ -17,7 +17,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const { globSync } = require("glob");
-const { DicomFile, DicomInMemory, parseBulkDataUri } = require("../dicomtojson");
+const { DicomFile, DicomInMemory, parseBulkDataUri } = require("../src/dicomtojson");
 
 const testFiles = globSync("./test/files/dcm/*.dcm");
 const notDicomFile = "./test/files/dcm/notdicom.txt";

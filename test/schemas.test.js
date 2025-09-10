@@ -15,9 +15,9 @@
  */
 
 const assert = require("assert");
-const consts = require("../consts");
-const utils = require("../utils");
-const { getSchema, matchEventSchema } = require("../schemas");
+const consts = require("../src/consts");
+const utils = require("../src/utils");
+const { getSchema, matchEventSchema } = require("../src/schemas");
 
 const gcsPubSubUnwrapExample = require("./files/json/gcs_pubsub_unwrap.json");
 const hcapiPubSubUnwrapExample = require("./files/json/hcapi_pubsub.json");
