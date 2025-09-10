@@ -16,9 +16,9 @@
 
 const assert = require("assert");
 const axios = require("axios");
-const consts = require("../consts");
-const utils = require("../utils");
-const { HttpServer } = require("../server");
+const consts = require("../src/consts");
+const utils = require("../src/utils");
+const { HttpServer } = require("../src/server");
 
 const gcsPubSubUnwrapExample = require("./files/json/gcs_pubsub_unwrap.json");
 const gcsPubSubUnwrapMetaExample = require("./files/json/gcs_pubsub_unwrap_meta.json");

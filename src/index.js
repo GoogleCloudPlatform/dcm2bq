@@ -24,7 +24,7 @@ const { Command } = require("commander");
 const { DicomFile, DicomInMemory } = require("./dicomtojson");
 const config = require("./config");
 const { HttpServer } = require("./server");
-const package = require("./package.json");
+const package = require("../package.json");
 const { createVectorEmbedding } = require("./embeddings");
 
 const program = new Command();

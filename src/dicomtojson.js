@@ -44,7 +44,7 @@ function normalizeTag(tag) {
 
 function lookupTag(tag) {
   if (!tagLookupMap) {
-    tagLookupMap = require("./tag-lookup.min.json");
+    tagLookupMap = require("../tag-lookup.min.json");
   }
   const normTag = normalizeTag(tag);
   return tagLookupMap[normTag];
