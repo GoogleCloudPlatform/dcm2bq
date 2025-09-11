@@ -105,6 +105,14 @@ resource "google_bigquery_table" "dead_letter_table" {
   ])
 }
 
+# Embeddings table
+resource "google_bigquery_table" "embeddings_table" {
+  deletion_protection = false
+  dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
+  table_id            = var.bq_embeddings_table_id != "" ? var.bq_embeddings_table_id : "embeddings_${random_string.bucket_suffix.result}"
+  schema              = file("${path.module}/embeddings.schema.json")
+}
+
 # Pub/Sub topics
 resource "google_pubsub_topic" "gcs_events" { name = "dcm2bq-gcs-events" }
 resource "google_pubsub_topic" "dead_letter_topic" { name = "dcm2bq-dead-letter-events" }
@@ -178,8 +186,9 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
             projectId = var.project_id
             location  = var.region
             bigQuery = {
-              datasetId = google_bigquery_dataset.dicom_dataset.dataset_id
-              tableId   = google_bigquery_table.metadata_table.table_id
+              datasetId         = google_bigquery_dataset.dicom_dataset.dataset_id
+              metadataTableId   = google_bigquery_table.metadata_table.table_id
+              embeddingsTableId = google_bigquery_table.embeddings_table.table_id
             }
             embeddings = {
               enabled       = true
@@ -254,6 +263,6 @@ resource "google_pubsub_subscription" "dead_letter_subscription" {
 }
 
 # Outputs
-output "dicom_bucket_name" { value = local.bucket_name }
 output "bq_dataset_id" { value = google_bigquery_dataset.dicom_dataset.dataset_id }
 output "bq_metadata_table_id" { value = google_bigquery_table.metadata_table.table_id }
+output "bq_embeddings_table_id" { value = google_bigquery_table.embeddings_table.table_id }

@@ -18,10 +18,20 @@ const { BigQuery } = require("@google-cloud/bigquery");
 const config = require("./config");
 
 const bigquery = new BigQuery();
-const { datasetId, tableId } = config.get().gcpConfig.bigQuery;
+const cfg = config.get().gcpConfig.bigQuery || {};
+const datasetId = cfg.datasetId;
+const metadataTable = cfg.metadataTableId;
+const embeddingsTable = cfg.embeddingsTableId || `${metadataTable}_embeddings`;
 
-async function insert(obj) {
-  await bigquery.dataset(datasetId).table(tableId).insert(obj);
+async function insertMetadata(obj) {
+  if (!datasetId || !metadataTable) throw new Error('BigQuery metadata table not configured');
+  await bigquery.dataset(datasetId).table(metadataTable).insert(obj);
 }
 
-module.exports = { insert };
+async function insertEmbeddings(obj) {
+  if (!datasetId || !embeddingsTable) throw new Error('BigQuery embeddings table not configured');
+  await bigquery.dataset(datasetId).table(embeddingsTable).insert(obj);
+}
+
+// Backwards compatible default
+module.exports = { insertMetadata, insertEmbeddings, insert: insertMetadata };
