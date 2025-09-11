@@ -28,7 +28,7 @@
       "args": ["--colors", "--timeout", "30000"],
       "env": {
         "DEBUG": "false",
-        "GCP_PROJECT": "data-axe-350723"
+        "DCM2BQ_CONFIG_FILE": "test/testconfig.json"
       }
     }
   ]

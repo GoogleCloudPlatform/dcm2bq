@@ -20,7 +20,7 @@
 module.exports = {
   gcpConfig: {
     // GCP project and location for services like Vertex AI
-    projectId: process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT,
+    projectId: process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'my-gcp-project',
     location: process.env.GCP_LOCATION || "us-central1",
     // Configuration for BigQuery and Vertex AI Embeddings
     bigQuery: {

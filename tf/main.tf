@@ -247,3 +247,9 @@ resource "google_project_iam_member" "pubsub_bq_writer" {
   role    = "roles/bigquery.dataEditor"
   member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
+
+resource "google_pubsub_topic_iam_member" "gcs_events_publisher" {
+  topic  = google_pubsub_topic.gcs_events.name
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:service-${data.google_project.project.number}@gs-project-accounts.iam.gserviceaccount.com"
+}
