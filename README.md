@@ -1,18 +1,29 @@
 # DCM2BQ
 
-`DCM2BQ` (DICOM to BigQuery) is a tool for extracting metadata from DICOM files and loading it into Google BigQuery. It can be run as a standalone CLI or as a containerized service, making it easy to integrate into data pipelines.
+
+`DCM2BQ` (DICOM to BigQuery) is a tool for extracting metadata and generating vector embeddings from DICOM files, loading both into Google BigQuery. It can be run as a standalone CLI or as a containerized service, making it easy to integrate into data pipelines.
+
+By generating vector embeddings for DICOM images, Structured Reports, and PDFs, DCM2BQ enables powerful semantic search and similarity-based retrieval across your medical imaging data. This allows you to find related studies, cases, or reports even when traditional metadata fields do not match exactly.
 
 This open-source package provides an alternative to the DICOM metadata streaming feature in the Google Cloud Healthcare API. It enables similar functionality for DICOM data stored in other platforms, such as Google Cloud Storage.
 
 ## Why DCM2BQ?
 
-Traditional imaging systems like PACS and VNAs offer limited query capabilities over DICOM metadata. By ingesting the complete metadata into BigQuery, you unlock powerful, large-scale analytics and insights from your imaging data.
+Traditional imaging systems like PACS and VNAs offer limited query capabilities over DICOM metadata. By ingesting the complete metadata and vector embeddings into BigQuery, you unlock powerful, large-scale analytics and insights from your imaging data.
+
+**Benefits of Embedding-Based Search:**
+
+- Go beyond exact field matching: Find similar images, reports, or studies based on visual or textual content, not just metadata.
+- Enable content-based retrieval: Search for "cases like this one" or "find similar findings" using embeddings.
+- Support multi-modal queries: Use embeddings from images, SRs, and PDFs for unified search across modalities.
+- Improve research, cohort discovery, and clinical decision support by surfacing relevant cases that would be missed by keyword or tag-based search alone.
 
 ## Features
 
 -   Parse DICOM Part 10 files.
 -   Convert DICOM metadata to a flexible JSON representation.
--   Load DICOM metadata into a BigQuery table.
+-   Load DICOM metadata and vector embeddings into a BigQuery table.
+-   Enable semantic and similarity search over your imaging archive using embeddings.
 -   Run as a containerized service, ideal for event-driven pipelines.
 -   Run as a command-line interface (CLI) for manual or scripted processing.
 -   Handle Google Cloud Storage object lifecycle events (creation, deletion) to keep BigQuery synchronized.
@@ -91,6 +102,7 @@ The workflow is as follows:
 
 The CLI is useful for testing, development, and batch processing.
 
+
 **Example: Dump DICOM metadata as JSON**
 
 ```bash
@@ -106,6 +118,30 @@ dcm2bq embed test/files/dcm/ct.dcm
 ```
 
 This command will process the DICOM file, generate a vector embedding using the configured model, and output the embedding as a JSON array.
+
+**Example: Extract rendered image or text from a DICOM file**
+
+```bash
+dcm2bq extract test/files/dcm/ct.dcm
+```
+
+This command will extract and save a rendered image (JPG) or extracted text (TXT) from the DICOM file, depending on its type (image, SR, or PDF). The output file extension is chosen automatically unless you specify `--output`.
+
+**Example: Extract with summarization (SR/PDF only)**
+
+```bash
+dcm2bq extract test/files/dcm/sr.dcm --summary
+```
+
+By default, summarization is disabled for extracted text. If you pass `--summary`, the extracted text from Structured Reports (SR) or PDFs will be summarized using Gemini before saving. This is useful for generating concise, embedding-friendly text.
+
+**Example: Extract without summarization (explicitly)**
+
+```bash
+dcm2bq extract test/files/dcm/sr.dcm
+```
+
+If you do not pass `--summary`, the full extracted text will be saved (subject to length limits for embedding).
 
 ## Configuration
 
@@ -141,9 +177,10 @@ You can override these defaults in two ways.
     export DCM2BQ_CONFIG_FILE=./config.json
     ```
 
-### Embedding Configuration
 
-To enable vector embedding generation, you need to configure the `embeddings` section within `gcpConfig`.
+### Embedding and Summarization Configuration
+
+To enable vector embedding generation, configure the `embeddings` section within `gcpConfig`.
 
 Example `config.json` override:
 ```json
@@ -151,7 +188,8 @@ Example `config.json` override:
   "gcpConfig": {
     "embeddings": {
       "enabled": true,
-      "model": "multimodalembedding@001"
+      "model": "multimodalembedding@001",
+      "summarizeText": { "enabled": false }
     }
   }
 }
@@ -159,6 +197,7 @@ Example `config.json` override:
 
 -   `enabled`: Set to `true` to activate the feature.
 -   `model`: The name of the Vertex AI model to use for generating embeddings.
+-   `summarizeText.enabled`: Controls whether extracted text from SR/PDF is summarized before embedding or saving. This can be overridden at runtime by the CLI `--summary` flag.
 
 ## Development
 
