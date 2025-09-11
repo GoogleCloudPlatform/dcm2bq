@@ -1,0 +1,28 @@
+{
+  "gcpConfig": {
+    "projectId": "data-axe-350723",
+    "location": "us-central1",
+    "bigQuery": {
+      "datasetId": "dicom_ykzl8ap3",
+      "tableId": "metadata_ykzl8ap3"
+    },
+    "embeddings": {
+      "enabled": true,
+      "model": "multimodalembedding@001",
+      "summarizeText": {
+        "enabled": true,
+        "model": "gemini-2.5-flash-lite"
+      }
+    }
+  },
+  "dicomParser": {},
+  "jsonOutput": {
+    "useArrayWithSingleValue": false,
+    "ignoreGroupLength": true,
+    "ignoreMetaHeader": false,
+    "ignorePrivate": false,
+    "ignoreBinary": false,
+    "useCommonNames": true,
+    "explicitBulkDataRoot": false
+  }
+}

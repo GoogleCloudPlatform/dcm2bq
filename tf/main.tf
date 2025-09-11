@@ -13,6 +13,13 @@ resource "google_cloud_run_v2_service_iam_member" "allow_cloudrun_sa_invoke" {
 output "dicom_bucket_name" {
   value = local.bucket_name
 }
+output "bq_dataset_id" {
+  value = google_bigquery_dataset.dicom_dataset.dataset_id
+}
+
+output "bq_metadata_table_id" {
+  value = google_bigquery_table.metadata_table.table_id
+}
 # Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

@@ -25,7 +25,7 @@
       "name": "Mocha Tests",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
-      "args": ["--colors", "--timeout", "30000"],
+      "args": ["--colors", "--bail", "--timeout", "30000"],
       "env": {
         "DEBUG": "false",
         "DCM2BQ_CONFIG_FILE": "test/testconfig.json"
