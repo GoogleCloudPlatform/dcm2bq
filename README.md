@@ -182,3 +182,41 @@ Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for d
 ## License
 
 This project is licensed under the Apache 2.0 License.
+
+## Deployment with Terraform
+
+The recommended way to deploy the service and all required Google Cloud resources is using Terraform. This will provision:
+- Google Cloud Storage bucket(s)
+- Pub/Sub topics and subscriptions
+- BigQuery dataset and tables
+- Cloud Run service
+- All necessary IAM permissions
+
+A helper script is provided to automate the process:
+
+```bash
+./helpers/deploy.sh [--upload-test-data|-u] [destroy] <gcp_project_id>
+```
+
+- `--upload-test-data` or `-u`: After deployment, upload all test DICOM files from `test/files/dcm/*.dcm` to the new GCS bucket for testing.
+- `destroy`: Destroy all previously created resources (cleanup).
+- `--help` or `-h`: Show usage instructions.
+
+**Example: Deploy and upload test data**
+```bash
+./helpers/deploy.sh --upload-test-data my-gcp-project-id
+```
+
+**Example: Destroy all resources**
+```bash
+./helpers/deploy.sh destroy my-gcp-project-id
+```
+
+The script will:
+1. Ensure all dependencies (Terraform, gcloud, gsutil) are installed.
+2. Create a GCS bucket for Terraform state (if needed).
+3. Generate a backend config for Terraform.
+4. Deploy all infrastructure using Terraform.
+5. Optionally upload test DICOM files if the flag is supplied.
+
+> **Note:** All resource names (buckets, datasets, tables, etc.) are made unique per deployment to avoid collisions.
