@@ -1,3 +1,8 @@
+resource "google_project_iam_member" "cloudrun_sa_vertexai_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
 resource "google_cloud_run_v2_service_iam_member" "allow_cloudrun_sa_invoke" {
   project  = google_cloud_run_v2_service.dcm2bq_service.project
   location = google_cloud_run_v2_service.dcm2bq_service.location
@@ -41,7 +46,7 @@ resource "random_string" "bucket_suffix" {
 resource "google_storage_bucket" "dicom_bucket" {
   count = var.create_gcs_bucket ? 1 : 0
 
-  name                        = var.gcs_bucket_name == "" ? "dcm2bq-dicom-bucket-${random_string.bucket_suffix.result}" : var.gcs_bucket_name
+  name                        = var.gcs_bucket_name != "" ? var.gcs_bucket_name : "dcm2bq-dicom-bucket-${random_string.bucket_suffix.result}"
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -65,17 +70,21 @@ resource "google_storage_notification" "bucket_notification" {
   payload_format = "JSON_API_V1"
   topic          = google_pubsub_topic.gcs_events.id
   event_types    = ["OBJECT_FINALIZE", "OBJECT_DELETE", "OBJECT_ARCHIVE", "OBJECT_METADATA_UPDATE"]
+  depends_on = [
+    google_pubsub_topic.gcs_events,
+    google_pubsub_topic_iam_member.gcs_events_publisher
+  ]
 }
 
 resource "google_bigquery_dataset" "dicom_dataset" {
-  dataset_id = "${var.bq_dataset_id}_${random_string.bucket_suffix.result}"
+  dataset_id = var.bq_dataset_id != "" ? var.bq_dataset_id : "dicom_${random_string.bucket_suffix.result}"
   location   = var.region
 }
 
 resource "google_bigquery_table" "metadata_table" {
   deletion_protection = false
   dataset_id = google_bigquery_dataset.dicom_dataset.dataset_id
-  table_id   = "${var.bq_metadata_table_id}_${random_string.bucket_suffix.result}"
+  table_id   = var.bq_metadata_table_id != "" ? var.bq_metadata_table_id : "metadata_${random_string.bucket_suffix.result}"
   schema = file("${path.module}/init.schema.json")
 }
 
@@ -109,7 +118,7 @@ resource "google_pubsub_topic" "dead_letter_topic" {
 resource "google_bigquery_table" "dead_letter_table" {
   deletion_protection = false
   dataset_id = google_bigquery_dataset.dicom_dataset.dataset_id
-  table_id   = var.bq_dead_letter_table_id
+  table_id   = var.bq_dead_letter_table_id != "" ? var.bq_dead_letter_table_id : "dead_letter_${random_string.bucket_suffix.result}"
   schema = jsonencode([
     {
       name = "data"
@@ -144,6 +153,9 @@ resource "google_pubsub_subscription" "dead_letter_subscription" {
     use_topic_schema = false
     write_metadata = true
   }
+  depends_on = [
+    google_pubsub_topic.dead_letter_topic
+  ]
 }
 
 resource "google_service_account" "cloudrun_sa" {
@@ -165,7 +177,7 @@ resource "google_project_iam_member" "cloudrun_sa_gcs_reader" {
 
 resource "google_cloud_run_v2_service" "dcm2bq_service" {
   deletion_protection = false
-  name     = "dcm2bq-service"
+  name     = "dcm2bq-service-${random_string.bucket_suffix.result}"
   location = var.region
 
   template {
@@ -212,7 +224,7 @@ resource "google_cloud_run_v2_service_iam_member" "allow_pubsub_invoke" {
   location = google_cloud_run_v2_service.dcm2bq_service.location
   name     = google_cloud_run_v2_service.dcm2bq_service.name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  member   = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
 data "google_project" "project" {}
