@@ -72,6 +72,8 @@ check_command "gcloud"
 check_command "gsutil"
 check_command "unzip"
 check_command "curl"
+check_command "jq"
+check_command "node"
 
 # 2. Install Terraform
 install_terraform
@@ -145,8 +147,6 @@ fi
 echo "Deploying infrastructure..."
 terraform apply -auto-approve -var="project_id=${PROJECT_ID}"
 
-echo "Deployment complete."
-
 # 7. Upload test DICOM files to the new GCS bucket if flag is supplied
 BUCKET_NAME=$(terraform output -raw dicom_bucket_name 2>/dev/null || terraform output -raw bucket_name 2>/dev/null)
 if [ -z "$BUCKET_NAME" ]; then
@@ -154,5 +154,25 @@ if [ -z "$BUCKET_NAME" ]; then
 elif [ "$UPLOAD_TEST_DATA" = true ]; then
   echo "Uploading test DICOM files to gs://$BUCKET_NAME ..."
   gsutil -m cp ../test/files/dcm/*.dcm "gs://$BUCKET_NAME/"
-  echo "Upload complete."
 fi
+
+# 8. Update test/testconfig.json
+DATASET_ID=$(terraform output -raw bq_dataset_id)
+TABLE_ID=$(terraform output -raw bq_metadata_table_id)
+TEST_CONFIG_FILE="../test/testconfig.json"
+TEMP_JSON=$(mktemp)
+
+# Create testconfig.json from defaults if it doesn't exist
+if [ ! -f "$TEST_CONFIG_FILE" ]; then
+  # Use node to export the defaults module to a JSON file
+  node -e "const defaults = require('../src/config.defaults.js'); console.log(JSON.stringify(defaults, null, 2));" > "$TEST_CONFIG_FILE"
+fi
+
+jq \
+  --arg project_id "$PROJECT_ID" \
+  --arg dataset_id "$DATASET_ID" \
+  --arg table_id "$TABLE_ID" \
+  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.tableId = $table_id' \
+  "$TEST_CONFIG_FILE" > "$TEMP_JSON" && mv "$TEMP_JSON" "$TEST_CONFIG_FILE"
+
+echo "Updated test/testconfig.json."
