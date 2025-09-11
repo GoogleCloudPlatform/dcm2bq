@@ -56,11 +56,17 @@ variable "bq_dead_letter_table_id" {
 variable "dcm2bq_image" {
   description = "The Docker image for the dcm2bq service."
   type        = string
-  default     = "jasonklotzer/dcm2bq:1.1.3"
+  default     = "jasonklotzer/dcm2bq:1.1.4"
 }
 
 variable "bq_location" {
   description = "BigQuery dataset location (multi-region like US)"
   type        = string
   default     = "US"
+}
+
+variable "bq_embeddings_table_id" {
+  description = "BigQuery table id for embeddings"
+  type        = string
+  default     = ""
 }

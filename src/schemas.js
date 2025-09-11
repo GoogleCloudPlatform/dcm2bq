@@ -35,10 +35,11 @@ addSchema(
           location: { type: "string" },
           bigQuery: {
             type: "object",
-            required: ["datasetId", "tableId"],
+            required: ["datasetId", "metadataTableId", "embeddingsTableId"],
             properties: {
               datasetId: { type: "string" },
-              tableId: { type: "string" }
+              metadataTableId: { type: "string" },
+              embeddingsTableId: { type: "string" }
             }
           },
           embeddings: {

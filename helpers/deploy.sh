@@ -148,7 +148,7 @@ echo "Deploying infrastructure..."
 terraform apply -auto-approve -var="project_id=${PROJECT_ID}"
 
 # 7. Upload test DICOM files to the new GCS bucket if flag is supplied
-BUCKET_NAME=$(terraform output -raw dicom_bucket_name 2>/dev/null || terraform output -raw bucket_name 2>/dev/null)
+BUCKET_NAME=$(terraform output -raw gcs_bucket_name 2>/dev/null)
 if [ -z "$BUCKET_NAME" ]; then
   echo "Could not determine the GCS bucket name from Terraform output."
 elif [ "$UPLOAD_TEST_DATA" = true ]; then
@@ -159,6 +159,7 @@ fi
 # 8. Update test/testconfig.json
 DATASET_ID=$(terraform output -raw bq_dataset_id)
 TABLE_ID=$(terraform output -raw bq_metadata_table_id)
+EMBEDDINGS_TABLE_ID=$(terraform output -raw bq_embeddings_table_id 2>/dev/null || terraform output -raw bq_embeddings_table 2>/dev/null || true)
 TEST_CONFIG_FILE="../test/testconfig.json"
 TEMP_JSON=$(mktemp)
 
@@ -172,7 +173,8 @@ jq \
   --arg project_id "$PROJECT_ID" \
   --arg dataset_id "$DATASET_ID" \
   --arg table_id "$TABLE_ID" \
-  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.tableId = $table_id' \
+  --arg embeddings_table_id "$EMBEDDINGS_TABLE_ID" \
+  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.metadataTableId = $table_id | .gcpConfig.bigQuery.embeddingsTableId = $embeddings_table_id' \
   "$TEST_CONFIG_FILE" > "$TEMP_JSON" && mv "$TEMP_JSON" "$TEST_CONFIG_FILE"
 
 echo "Updated test/testconfig.json."

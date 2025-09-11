@@ -30,6 +30,27 @@ Traditional imaging systems like PACS and VNAs offer limited query capabilities 
 -   Generate vector embeddings from DICOM images, Structured Reports, and encapsulated PDFs using Google's multi-modal embedding model.
 -   Highly configurable to adapt to your needs.
 
+## BigQuery schema & embeddings table
+
+The project stores DICOM metadata and embeddings in separate BigQuery tables. By default the service writes:
+
+- a metadata table (JSON fields for full DICOM metadata and processing info), and
+- an embeddings table that stores a deterministic `id` (sha256 of `path|version`) and a repeated FLOAT column named `embedding` (the vector).
+
+The Cloud Run service is configured with both table IDs via the `gcpConfig.bigQuery` object (see `config.defaults.js`). Use the `embeddingsTableId` value when running vector searches or creating vector indexes and models.
+
+Note: the project includes sample DDL and queries to create a REMOTE embedding model and a vector index and to inspect the tables — see `src/bq-samples.sql`.
+
+## Example queries
+
+You can find example queries and DDL for creating the REMOTE model and vector index in `src/bq-samples.sql`. The file includes:
+
+- example SELECTs against the metadata and view,
+- sample aggregation queries,
+- and DDL samples to create an embedding model and a vector index for the embeddings table.
+
+Before running vector searches, ensure you have created the embedding model and vector index (the samples show how to do this with `bq query`).
+
 ## Installation
 
 ### Dependencies
@@ -153,7 +174,7 @@ You can override these defaults in two ways.
 
 1.  **Environment Variable:** Set `DCM2BQ_CONFIG` to a JSON string containing the full configuration.
     ```bash
-    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","tableId":"my_table"},"gcpConfig":{"projectId":"my-gcp-project","embeddings":{"enabled":true,"model":"multimodalembedding@001"}},"jsonOutput":{...}}'
+    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","metadataTableId":"my_table"},"gcpConfig":{"projectId":"my-gcp-project","embeddings":{"enabled":true,"model":"multimodalembedding@001"}},"jsonOutput":{...}}'
     ```
 2.  **Config File:** Set `DCM2BQ_CONFIG_FILE` to the path of a JSON file containing your full configuration.
     ```bash
@@ -161,7 +182,7 @@ You can override these defaults in two ways.
     # {
     #   "bigquery": {
     #     "datasetId": "my_dataset",
-    #     "tableId": "my_table"
+    #     "metadataTableId": "my_table"
     #   },
     #   "gcpConfig": {
     #     "projectId": "my-gcp-project",

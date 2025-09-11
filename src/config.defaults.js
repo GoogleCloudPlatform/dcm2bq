@@ -20,13 +20,15 @@
 module.exports = {
   gcpConfig: {
     // GCP project and location for services like Vertex AI
-    projectId: process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'my-gcp-project',
+    projectId: process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "my-gcp-project",
     location: process.env.GCP_LOCATION || "us-central1",
     // Configuration for BigQuery and Vertex AI Embeddings
     bigQuery: {
       // Location to use in BigQuery
       datasetId: "dicom",
-      tableId: "metadata",
+      metadataTableId: "metadata",
+      // Optional embeddings table name; if omitted code will use <metadataTableId>_embeddings
+      embeddingsTableId: "embeddings",
     },
     embeddings: {
       enabled: true, // Generate embeddings for text and images
@@ -52,4 +54,3 @@ module.exports = {
   },
   src: "DEFAULTS",
 };
-

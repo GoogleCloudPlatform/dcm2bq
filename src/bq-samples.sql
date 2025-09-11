@@ -40,3 +40,16 @@ SELECT MAX(publish_time) as latest_time, COUNT(*) AS occurences, CONCAT('gs://',
 
 -- Check pubsub messages (if replicated)
 SELECT * FROM `pubsub.messages` ORDER BY publish_time DESC LIMIT 10;
+
+-- If doing a vector search on the embeddings table, make sure to create an embeddings model connection and a vector index first.
+CREATE OR REPLACE MODEL `dicom.embedding_model`
+REMOTE WITH CONNECTION DEFAULT
+OPTIONS (ENDPOINT = 'multimodalembedding@001');
+
+CREATE OR REPLACE VECTOR INDEX `dicom.embedding_index`
+ON `dicom.embeddings`(embeddings)
+OPTIONS(index_type = 'IVF', distance_type = 'COSINE');
+
+-- Show embeddings table
+SELECT * FROM `dicom.embeddings` ORDER BY timestamp DESC LIMIT 10;
+
