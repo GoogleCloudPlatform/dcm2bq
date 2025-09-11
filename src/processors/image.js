@@ -19,7 +19,6 @@ const { mkdtemp, writeFile, readFile, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
-// TODO[P1]: Select a better default multi-frame rendering strategy (e.g., first, last, average, etc.)
 // TODO[P1]: Replace complex shell script with pure JS solution (or WASM) if possible
 
 // Supported transfer syntaxes for image rendering
@@ -62,12 +61,24 @@ async function renderDicomImage(metadata, dicomBuffer) {
     // Write the DICOM buffer to a temporary file
     await writeFile(dicomPath, dicomBuffer);
 
+    // Multi-frame support: select the middle frame if present
+    let frameArg = null;
+    const numFrames = parseInt(metadata?.NumberOfFrames, 10);
+    if (!isNaN(numFrames) && numFrames > 1) {
+      // DICOM frames are 1-based
+      frameArg = Math.floor((numFrames + 1) / 2);
+    }
+
+    // Build arguments for the script
+    const args = [dicomPath, jpgPath];
+    if (frameArg) {
+      args.push(frameArg.toString());
+    }
+
     // Execute convert_dcm_to_jpg.sh to convert the DICOM to a JPG.
-    // The command will fail if the input is not a valid DICOM image, which is handled in the catch block.
     await new Promise((resolve, reject) => {
-      execFile(scriptPath, [dicomPath, jpgPath], (error, stdout, stderr) => {
+      execFile(scriptPath, args, (error, stdout, stderr) => {
         if (error) {
-          // The script writes errors to stderr.
           console.error(`convert_dcm_to_jpg.sh execution failed: ${stderr}`);
           return reject(error);
         }
@@ -80,10 +91,8 @@ async function renderDicomImage(metadata, dicomBuffer) {
     return jpgBuffer;
   } catch (error) {
     console.error(`Could not render DICOM image for embedding using convert_dcm_to_jpg.sh: ${error.message}`);
-    // Returning null allows the pipeline to continue without the embedding.
     return null;
   } finally {
-    // Clean up the temporary directory and its contents
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true }).catch((cleanupError) =>
         console.error(`Failed to clean up temporary directory ${tempDir}:`, cleanupError)
