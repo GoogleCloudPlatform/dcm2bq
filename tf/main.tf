@@ -154,7 +154,8 @@ resource "google_pubsub_subscription" "dead_letter_subscription" {
     write_metadata = true
   }
   depends_on = [
-    google_pubsub_topic.dead_letter_topic
+    google_pubsub_topic.dead_letter_topic,
+    google_project_iam_member.pubsub_bq_writer
   ]
 }
 
@@ -245,7 +246,10 @@ resource "google_pubsub_subscription" "gcs_to_cloudrun" {
     max_delivery_attempts = 5
   }
 
-  depends_on = [google_cloud_run_v2_service_iam_member.allow_pubsub_invoke]
+  depends_on = [
+    google_cloud_run_v2_service_iam_member.allow_pubsub_invoke,
+    google_pubsub_topic.dead_letter_topic
+  ]
 }
 
 resource "google_project_iam_member" "gcs_pubsub_publisher" {
