@@ -23,16 +23,16 @@ variable "region" {
   default     = "us-central1"
 }
 
-variable "gcs_bucket_name" {
-  description = "Name of the GCS bucket for DICOM files. If not provided, a new one is created."
-  type        = string
-  default     = ""
-}
-
 variable "create_gcs_bucket" {
   description = "Set to true to create a new GCS bucket."
   type        = bool
   default     = true
+}
+
+variable "gcs_bucket_name" {
+  description = "Name of the GCS bucket for DICOM files. If not provided, a new one is created."
+  type        = string
+  default     = ""
 }
 
 variable "bq_dataset_id" {
@@ -57,4 +57,10 @@ variable "dcm2bq_image" {
   description = "The Docker image for the dcm2bq service."
   type        = string
   default     = "jasonklotzer/dcm2bq:1.1.3"
+}
+
+variable "bq_location" {
+  description = "BigQuery dataset location (multi-region like US)"
+  type        = string
+  default     = "US"
 }
