@@ -66,7 +66,7 @@ function handleHttpError(req, res, e) {
   err.code = httpErrors[e.code] ? e.code : 500;
   err.messageId = req.body?.message?.messageId || "unknown";
   res.status(err.code).json({ code: err.code, messageId: err.messageId, reason: err.message });
-  console.error(err);
+  console.error(e);
 }
 
 class HttpServer {
