@@ -79,8 +79,8 @@ function tryReadConfigFile() {
  * @returns {Object} The configuration object
  * @throws {Error} If configuration cannot be loaded or parsed
  */
-function getConfig() {
-  if (cachedConfig) {
+function getConfig(options = {}) {
+  if (!options.ignoreCache && cachedConfig) {
     return cachedConfig;
   }
 
