@@ -38,23 +38,23 @@ variable "create_gcs_bucket" {
 variable "bq_dataset_id" {
   description = "The BigQuery dataset ID."
   type        = string
-  default     = "dicom"
+  default     = ""
 }
 
 variable "bq_metadata_table_id" {
   description = "The BigQuery table ID for DICOM metadata."
   type        = string
-  default     = "metadata"
+  default     = ""
 }
 
 variable "bq_dead_letter_table_id" {
   description = "The BigQuery table ID for dead-letter Pub/Sub messages."
   type        = string
-  default     = "dead_letter"
+  default     = ""
 }
 
 variable "dcm2bq_image" {
   description = "The Docker image for the dcm2bq service."
   type        = string
-  default     = "jasonklotzer/dcm2bq:latest"
+  default     = "jasonklotzer/dcm2bq:1.1.2"
 }
