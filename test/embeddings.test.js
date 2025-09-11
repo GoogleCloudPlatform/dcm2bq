@@ -61,8 +61,8 @@ describe("embeddings", () => {
 
   describe("processors", () => {
     it("should process all DICOM images", async () => {
-      for (const { buffer, file } of imageTestData) {
-        const result = await processImage(buffer);
+      for (const { metadata, buffer, file } of imageTestData) {
+        const result = await processImage(metadata, buffer);
         assert.ok(result, `processImage failed for ${file}`);
         assert.ok(result.image, `processImage failed for ${file}`);
         assert.ok(result.image.bytesBase64Encoded, `processImage failed for ${file}`);
@@ -125,5 +125,45 @@ describe("embeddings", () => {
         );
       }
     }).timeout(30000);
+  });
+
+  describe("image transfer syntax support", () => {
+    const { renderDicomImage } = require("../src/processors/image");
+    const dummyBuffer = Buffer.from([0x00]);
+    it("should allow supported transfer syntaxes", async () => {
+      const supported = [
+        "1.2.840.10008.1.2",
+        "1.2.840.10008.1.2.1",
+        "1.2.840.10008.1.2.1.99",
+        "1.2.840.10008.1.2.2",
+        "1.2.840.113619.5.2",
+        "1.2.840.10008.1.2.5",
+        "1.2.840.10008.1.2.4.50",
+        "1.2.840.10008.1.2.4.51",
+        "1.2.840.10008.1.2.4.57",
+        "1.2.840.10008.1.2.4.70",
+        "1.2.840.10008.1.2.4.90",
+        "1.2.840.10008.1.2.4.91"
+      ];
+      for (const ts of supported) {
+        const result = await renderDicomImage({ TransferSyntaxUID: ts }, dummyBuffer);
+        // We expect null because the buffer is not a real DICOM, but not rejected for transfer syntax
+        assert.strictEqual(result, null);
+      }
+    });
+    it("should reject unsupported transfer syntaxes", async () => {
+      const unsupported = [
+        "1.2.840.10008.1.2.4.100", // MPEG2
+        "1.2.840.10008.1.2.4.102", // MPEG4
+        "1.2.840.10008.1.2.4.999", // made up
+        undefined,
+        null,
+        ""
+      ];
+      for (const ts of unsupported) {
+        const result = await renderDicomImage({ TransferSyntaxUID: ts }, dummyBuffer);
+        assert.strictEqual(result, null);
+      }
+    });
   });
 });

@@ -20,13 +20,37 @@ const path = require("path");
 const os = require("os");
 
 // TODO[P1]: Select a better default multi-frame rendering strategy (e.g., first, last, average, etc.)
-// TODO[P0]: Add check for transfer syntaxes that are not supported by dcmtk/gdcm (video, etc.)
-// TODO[P0]: Make sure we handle persisting images to disk (cloudrun)
+// TODO[P1]: Replace complex shell script with pure JS solution (or WASM) if possible
 
+// Supported transfer syntaxes for image rendering
+const SUPPORTED_TRANSFER_SYNTAXES = new Set([
+  // Uncompressed
+  "1.2.840.10008.1.2",           // Implicit VR - Little Endian
+  "1.2.840.10008.1.2.1",         // Explicit VR - Little Endian
+  "1.2.840.10008.1.2.1.99",      // Deflated Explicit VR - Little Endian
+  "1.2.840.10008.1.2.2",         // Explicit VR - Big Endian
+  "1.2.840.113619.5.2",          // Implicit VR - Big Endian (G.E Private)
+  // RLE
+  "1.2.840.10008.1.2.5",         // Run Length Encoding, Lossless
+  // JPEG
+  "1.2.840.10008.1.2.4.50",      // JPEG Baseline (Process 1)
+  "1.2.840.10008.1.2.4.51",      // JPEG Extended (Process 2 & 4)
+  "1.2.840.10008.1.2.4.57",      // JPEG Lossless, Non-Hierarchical (Process 14)
+  "1.2.840.10008.1.2.4.70",      // JPEG Lossless, Hierarchical, First-Order Prediction (Process 14, [Selection Value 1])
+  "1.2.840.10008.1.2.4.90",      // JPEG 2000 Image Compression (Lossless Only)
+  "1.2.840.10008.1.2.4.91"       // JPEG 2000 Image Compression
+]);
 
 // Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
 // This requires dcmtk and gdcm to be installed in the execution environment.
-async function renderDicomImage(dicomBuffer) {
+async function renderDicomImage(metadata, dicomBuffer) {
+  // Check for supported transfer syntaxes
+  const transferSyntax = metadata && metadata.TransferSyntaxUID;
+  if (!transferSyntax || !SUPPORTED_TRANSFER_SYNTAXES.has(transferSyntax)) {
+    console.error(`Unsupported transfer syntax: ${transferSyntax || 'unknown'}`);
+    return null;
+  }
+
   let tempDir;
   try {
     // Create a temporary directory to avoid file collisions
@@ -68,8 +92,8 @@ async function renderDicomImage(dicomBuffer) {
   }
 }
 
-async function processImage(dicomBuffer) {
-  const imageBuffer = await renderDicomImage(dicomBuffer);
+async function processImage(metadata, dicomBuffer) {
+  const imageBuffer = await renderDicomImage(metadata, dicomBuffer);
   if (imageBuffer) {
     return {
       image: { bytesBase64Encoded: imageBuffer.toString("base64") },

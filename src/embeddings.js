@@ -98,7 +98,7 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   let instance;
 
   if (isImage(sopClassUid)) {
-    instance = await processImage(dicomBuffer);
+    instance = await processImage(metadata, dicomBuffer);
   } else if (isPdf(sopClassUid)) {
     instance = await processPdf(metadata, dicomBuffer);
   } else if (isStructuredReport(sopClassUid)) {
