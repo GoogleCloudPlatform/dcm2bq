@@ -127,4 +127,4 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   }
 }
 
-module.exports = { createVectorEmbedding, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS };
+module.exports = { createVectorEmbedding, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest };
