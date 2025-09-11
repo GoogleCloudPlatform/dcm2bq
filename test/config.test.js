@@ -24,8 +24,6 @@ describe("config", () => {
   beforeEach(() => {
     originalConfigEnv = process.env.DCM2BQ_CONFIG;
     originalConfigFileEnv = process.env.DCM2BQ_CONFIG_FILE;
-    // Clear require cache to ensure config is reloaded
-    delete require.cache[require.resolve("../src/config")];
   });
 
   afterEach(() => {
@@ -39,12 +37,14 @@ describe("config", () => {
     } else {
       delete process.env.DCM2BQ_CONFIG_FILE;
     }
+    // Clear require cache to ensure config is reloaded
+    delete require.cache[require.resolve("../src/config")];
   });
 
   it("DEFAULTS", () => {
     process.env.DCM2BQ_CONFIG = "";
     process.env.DCM2BQ_CONFIG_FILE = "";
-    const conf = require("../src/config").get();
+    const conf = require("../src/config").get({ ignoreCache: true });
     assert.ok(conf);
     assert.strictEqual(conf.src, "DEFAULTS");
   });
@@ -61,7 +61,7 @@ describe("config", () => {
       src: "ENV_VAR",
     };
     process.env.DCM2BQ_CONFIG = JSON.stringify(configContent);
-    const conf = require("../src/config").get();
+    const conf = require("../src/config").get({ ignoreCache: true });
     assert.ok(conf);
     assert.strictEqual(conf.src, "ENV_VAR");
     assert.strictEqual(conf.jsonOutput.ignoreBinary, true);
@@ -81,7 +81,7 @@ describe("config", () => {
     };
     fs.writeFileSync(CONFIG_FILE_NAME, JSON.stringify(configContent));
     process.env.DCM2BQ_CONFIG_FILE = CONFIG_FILE_NAME;
-    const conf = require("../src/config").get();
+    const conf = require("../src/config").get({ ignoreCache: true });
     assert.ok(conf);
     assert.strictEqual(conf.src, "ENV_VAR_FILE");
     assert.strictEqual(conf.jsonOutput.ignoreBinary, true);
