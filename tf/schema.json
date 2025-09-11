@@ -1,0 +1,32 @@
+[
+  {
+    "name": "timestamp",
+    "type": "TIMESTAMP",
+    "description": "The time the metadata was written."
+  },
+  {
+    "name": "path",
+    "type": "STRING",
+    "description": "The full path to the object."
+  },
+  {
+    "name": "version",
+    "type": "STRING",
+    "description": "The object version."
+  },
+  {
+    "name": "info",
+    "type": "JSON",
+    "description": "Information about the event and storage."
+  },
+  {
+    "name": "metadata",
+    "type": "JSON",
+    "description": "The full DICOM JSON metadata."
+  },
+  {
+    "name": "embeddings",
+    "type": "JSON",
+    "description": "The vector embedding for the DICOM instance."
+  }
+]

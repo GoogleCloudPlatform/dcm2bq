@@ -1,0 +1,8 @@
+[
+  { "name": "timestamp", "type": "TIMESTAMP", "mode": "REQUIRED" },
+  { "name": "path", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "version", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "info", "type": "JSON", "mode": "REQUIRED" },
+  { "name": "metadata", "type": "JSON", "mode": "NULLABLE" },
+  { "name": "embeddings", "type": "FLOAT", "mode": "REPEATED" }
+]
