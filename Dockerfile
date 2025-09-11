@@ -20,8 +20,7 @@ COPY . .
 # and clean up apt cache to keep the image small.
 RUN apt-get update && apt-get install -y --no-install-recommends dcmtk libgdcm-tools \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install --production --silent
-RUN npm install -g --production --silent
 RUN chown -R node /usr/src/app
+RUN npm install --production --silent
 USER node
-CMD ["node", "index.js", "service"]
+CMD ["node", "src/index.js", "service"]
