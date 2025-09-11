@@ -12,14 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM node:lts-slim
+
+
+
+FROM node:20-slim
 ENV NODE_ENV=production
 WORKDIR /usr/src/app
 COPY . .
-# Install system dependencies for native modules dcmtk/gdcm for image rendering,
-# and clean up apt cache to keep the image small.
-RUN apt-get update && apt-get install -y --no-install-recommends dcmtk libgdcm-tools \
+# Install all build and runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates build-essential cmake git libpng-dev libtiff-dev libxml2-dev zlib1g-dev \
+    libgdcm-tools libpng16-16 libxml2 zlib1g \
     && rm -rf /var/lib/apt/lists/*
+# Build and install DCMTK v3.6.9 from source
+WORKDIR /tmp
+RUN git clone --branch DCMTK-3.6.9 https://github.com/DCMTK/dcmtk.git && \
+    cd dcmtk && mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    make -j$(nproc) && make install && \
+    cd /usr/src/app && rm -rf /tmp/dcmtk
+# Remove build dependencies to keep the image small
+RUN apt-get purge -y build-essential cmake git libpng-dev libtiff-dev libxml2-dev zlib1g-dev && \
+    apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+WORKDIR /usr/src/app
 RUN chown -R node /usr/src/app
 RUN npm install --production --silent
 USER node
