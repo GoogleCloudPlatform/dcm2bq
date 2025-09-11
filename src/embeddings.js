@@ -68,21 +68,11 @@ function isPdf(sopClassUid) {
   return sopClassUid === SOP_CLASS_UIDS.ENCAPSULATED_PDF;
 }
 
+const { doRequest: httpDoRequest } = require('./http-retry');
+
+// wrapper kept for backwards compatibility with existing callers
 async function doRequest(payload) {
-  try {
-    const auth = new GoogleAuth();
-    const client = await auth.getClient();
-    const res = await client.request({
-      url: ENDPOINT,
-      method: "POST",
-      data: payload,
-      timeout: 30000 // 30 second timeout
-    });
-    return res.data;
-  } catch (error) {
-    console.error("API request failed:", error.message);
-    throw error;
-  }
+  return httpDoRequest(ENDPOINT, payload);
 }
 
 async function createVectorEmbedding(metadata, dicomBuffer) {
