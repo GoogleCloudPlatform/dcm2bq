@@ -18,6 +18,7 @@ const pdf = require("pdf-parse");
 const { parseBulkDataUri } = require("../dicomtojson");
 const { createTextInstance } = require("./text");
 
+
 async function processPdf(metadata, dicomBuffer) {
   if (!metadata.EncapsulatedDocument) {
     console.warn("Encapsulated PDF SOP Class UID found, but no (0042,0011) tag present.");

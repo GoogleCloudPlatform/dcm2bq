@@ -30,7 +30,7 @@ async function createTextInstance(text) {
     return null;
   }
 
-  // We always try to summarize the text for stronger embedding performance and to fit within length limits
+  // Summarize if config enables it
   if (gcpConfig.embeddings.summarizeText.enabled) {
     const embedText = await createEmbedText(text);
     if (embedText) {
