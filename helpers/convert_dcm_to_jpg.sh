@@ -26,13 +26,18 @@ if ! command -v dcm2img &> /dev/null; then
     exit 1
 fi
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <input_dicom_file> <output_jpg_file>"
+# Usage: convert_dcm_to_jpg.sh <input_dicom_file> <output_jpg_file> [frame_number]
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "Usage: $0 <input_dicom_file> <output_jpg_file> [frame_number]"
     exit 1
 fi
 
 INPUT_FILE="$1"
 OUTPUT_JPG_FILE="$2"
+FRAME_NUMBER=""
+if [ "$#" -eq 3 ]; then
+    FRAME_NUMBER="$3"
+fi
 
 if [[ ! "$INPUT_FILE" == *.dcm ]]; then
     echo "Error: Input file must have a .dcm extension."
@@ -44,13 +49,20 @@ if [[ ! "$OUTPUT_JPG_FILE" == *.jpg ]]; then
     exit 1
 fi
 
-TEMP_DCM_FILE=$(mktemp --suffix=.dcm)
-
 echo "Converting ${INPUT_FILE} to ${OUTPUT_JPG_FILE}..."
 
-# Convert DICOM to JPEG-compressed DICOM, then extract JPEG, then clean up
-gdcmconv --jpeg "${INPUT_FILE}" "${TEMP_DCM_FILE}" && \
-dcm2img --scale-x-size 512 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}" && \
+TEMP_DCM_FILE=$(mktemp --suffix=.dcm)
+
+# Convert DICOM to JPEG-compressed DICOM
+gdcmconv --jpeg "${INPUT_FILE}" "${TEMP_DCM_FILE}"
+
+# If frame number is provided, use dcm2img --frame <n>
+if [ -n "$FRAME_NUMBER" ]; then
+    dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"
+else
+    dcm2img --scale-x-size 512 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"
+fi
+
 rm -f "${TEMP_DCM_FILE}"
 
 echo "Successfully created ${OUTPUT_JPG_FILE}"
