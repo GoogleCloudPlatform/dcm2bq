@@ -81,7 +81,7 @@ To use the CLI, you can install it from the source code.
 
 The recommended deployment uses Google Cloud Storage, Pub/Sub, and Cloud Run.
 
-!Deployment Architecture
+![Deployment Architecture](assets/arch.svg)
 
 The workflow is as follows:
 
