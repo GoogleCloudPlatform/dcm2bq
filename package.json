@@ -1,13 +1,12 @@
 {
   "name": "dcm2bq",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "A tool and service to process DICOM files, extract metadata into BigQuery, and generate vector embeddings for machine learning analysis on Google Cloud.",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "test": "mocha --colors --bail --timeout 30000 test/*.test.js",
-    "release": "release-it --ci",
-    "release-dryrun": "release-it --verbose --dry-run --ci"
+    "start": "DCM2BQ_CONFIG_FILE=test/testconfig.json node src/index.js",
+    "test": "DCM2BQ_CONFIG_FILE=test/testconfig.json mocha --colors --bail --timeout 30000 test/*.test.js",
+    "release": "DCM2BQ_CONFIG_FILE=test/testconfig.json release-it --ci"
   },
   "bin": {
     "dcm2bq": "src/index.js"
