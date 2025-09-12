@@ -255,16 +255,28 @@ The recommended way to deploy the service and all required Google Cloud resource
 A helper script is provided to automate the process:
 
 ```bash
-./helpers/deploy.sh [--upload-test-data|-u] [destroy] <gcp_project_id>
+./helpers/deploy.sh [destroy|upload] <gcp_project_id>
 ```
-
-- `--upload-test-data` or `-u`: After deployment, upload all test DICOM files from `test/files/dcm/*.dcm` to the new GCS bucket for testing.
+- `upload`: Upload test DICOM files from `test/files/dcm/*.dcm` to the GCS bucket created by Terraform (standalone; does not deploy).
 - `destroy`: Destroy all previously created resources (cleanup).
 - `--help` or `-h`: Show usage instructions.
 
-**Example: Deploy and upload test data**
+**Examples**
+
+- Deploy infrastructure:
 ```bash
-./helpers/deploy.sh --upload-test-data my-gcp-project-id
+./helpers/deploy.sh my-gcp-project-id
+```
+
+- Upload test data only (no deploy):
+```bash
+./helpers/deploy.sh upload my-gcp-project-id
+```
+
+- Deploy and then upload test data (two steps):
+```bash
+./helpers/deploy.sh my-gcp-project-id
+./helpers/deploy.sh upload my-gcp-project-id
 ```
 
 **Example: Destroy all resources**
