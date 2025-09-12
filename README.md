@@ -215,8 +215,9 @@ Example `config.json` override:
   }
 }
 ```
+- Note: the JSON snippet above is a partial example showing only the embeddings-related settings. When providing an override (via `DCM2BQ_CONFIG` or `DCM2BQ_CONFIG_FILE`), you must supply the entire configuration object — partial merges are not supported.
 
--   `enabled`: Set to `true` to activate the feature.
+- `enabled`: Set to `true` to activate the feature.
 -   `model`: The name of the Vertex AI model to use for generating embeddings.
 -   `summarizeText.enabled`: Controls whether extracted text from SR/PDF is summarized before embedding or saving. This can be overridden at runtime by the CLI `--summary` flag.
 
