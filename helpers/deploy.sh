@@ -79,15 +79,13 @@ check_command "node"
 install_terraform
 
 # 3. Validate input and mode
-UPLOAD_TEST_DATA=false
 
-# Parse arguments
+# Parse options (only --help supported). We use subcommands for modes: deploy (default), destroy, upload
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
-    -u | --upload-test-data ) UPLOAD_TEST_DATA=true ;;
     -h | --help )
-      echo "Usage: $0 [--upload-test-data|-u] [destroy] <gcp_project_id>"
-      echo "  --upload-test-data, -u   Upload test/files/dcm/*.dcm to the GCS bucket after deploy."
+      echo "Usage: $0 [destroy|upload] <gcp_project_id>"
+      echo "  upload                   Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
       echo "  destroy                  Destroy all previously created assets."
       echo "  --help, -h               Show this help message."
       exit 0
@@ -99,14 +97,18 @@ done
 if [ "$1" == "destroy" ]; then
   MODE="destroy"
   shift
+elif [ "$1" == "upload" ]; then
+  MODE="upload"
+  shift
 else
   MODE="deploy"
 fi
 
 if [ -z "$1" ]; then
-  echo "Usage: $0 [--upload-test-data|-u] [destroy] <gcp_project_id>"
+  echo "Usage: $0 [destroy|upload] <gcp_project_id>"
   exit 1
 fi
+
 PROJECT_ID="$1"
 
 # 4. Create GCS bucket for Terraform state
@@ -144,19 +146,25 @@ if [ "$MODE" == "destroy" ]; then
   exit 0
 fi
 
-echo "Deploying infrastructure..."
-terraform apply -auto-approve -var="project_id=${PROJECT_ID}"
-
-# 7. Upload test DICOM files to the new GCS bucket if flag is supplied
-BUCKET_NAME=$(terraform output -raw gcs_bucket_name 2>/dev/null)
-if [ -z "$BUCKET_NAME" ]; then
-  echo "Could not determine the GCS bucket name from Terraform output."
-elif [ "$UPLOAD_TEST_DATA" = true ]; then
-  echo "Uploading test DICOM files to gs://$BUCKET_NAME ..."
-  gsutil -m cp ../test/files/dcm/*.dcm "gs://$BUCKET_NAME/"
+if [ "$MODE" == "deploy" ]; then
+  echo "Deploying infrastructure..."
+  terraform apply -auto-approve -var="project_id=${PROJECT_ID}"
 fi
 
-# 8. Update test/testconfig.json
+if [ "$MODE" == "upload" ]; then
+  # Upload-only mode: find bucket from Terraform outputs and upload test files
+  echo "Uploading test DICOM files to the GCS bucket for project ${PROJECT_ID}..."
+  BUCKET_NAME=$(terraform output -raw gcs_bucket_name 2>/dev/null || terraform output -raw dicom_bucket_name 2>/dev/null || terraform output -raw bucket_name 2>/dev/null)
+  if [ -z "$BUCKET_NAME" ]; then
+    echo "Could not determine the GCS bucket name from Terraform output. Ensure Terraform state exists and the project is correct."
+    exit 1
+  fi
+  gsutil -m cp ../test/files/dcm/*.dcm "gs://$BUCKET_NAME/"
+  echo "Upload complete."
+  exit 0
+fi
+
+# 7. Update test/testconfig.json
 DATASET_ID=$(terraform output -raw bq_dataset_id)
 TABLE_ID=$(terraform output -raw bq_metadata_table_id)
 EMBEDDINGS_TABLE_ID=$(terraform output -raw bq_embeddings_table_id 2>/dev/null || terraform output -raw bq_embeddings_table 2>/dev/null || true)
