@@ -69,7 +69,7 @@ sudo apt-get update && sudo apt-get install -y dcmtk gdcm-tools
 
 ### Docker
 
-The service is distributed as a container image. You can find the latest releases on Docker Hub.
+The service is distributed as a container image. You can find the latest releases on [Docker Hub](https://hub.docker.com/r/jasonklotzer/dcm2bq).
 
 ```bash
 docker pull jasonklotzer/dcm2bq:latest
