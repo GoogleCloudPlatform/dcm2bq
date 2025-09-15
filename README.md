@@ -5,11 +5,11 @@
 
 By generating vector embeddings for DICOM images, Structured Reports, and PDFs, DCM2BQ enables powerful semantic search and similarity-based retrieval across your medical imaging data. This allows you to find related studies, cases, or reports even when traditional metadata fields do not match exactly.
 
-This open-source package provides an alternative to the DICOM metadata streaming feature in the Google Cloud Healthcare API. It enables similar functionality for DICOM data stored in other platforms, such as Google Cloud Storage.
+This open-source package can be used as an alternative to the DICOM metadata streaming feature in the [Google Cloud Healthcare API](https://cloud.google.com/healthcare-api), enabling similar functionality for DICOM data stored in [Google Cloud Storage](https://cloud.google.com/storage). It can also be used to complement a Healthcare API DICOM store by generating embeddings for existing or new data.
 
 ## Why DCM2BQ?
 
-Traditional imaging systems like PACS and VNAs offer limited query capabilities over DICOM metadata. By ingesting the complete metadata and vector embeddings into BigQuery, you unlock powerful, large-scale analytics and insights from your imaging data.
+Traditional imaging systems like PACS and VNAs offer limited query capabilities over DICOM metadata. By ingesting the complete metadata and vector embeddings into [BigQuery](https://cloud.google.com/bigquery), you unlock powerful, large-scale analytics and insights from your imaging data.
 
 **Benefits of Embedding-Based Search:**
 
