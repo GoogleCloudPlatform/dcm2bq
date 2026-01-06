@@ -114,10 +114,10 @@ PROJECT_ID="$1"
 # 4. Create GCS bucket for Terraform state
 TF_STATE_BUCKET="${PROJECT_ID}-dcm2bq-tfstate"
 echo "Configuring Terraform state bucket: gs://${TF_STATE_BUCKET}"
-if ! gsutil ls "gs://${TF_STATE_BUCKET}" &> /dev/null; then
+if ! gcloud storage ls "gs://${TF_STATE_BUCKET}" &> /dev/null; then
   echo "Creating GCS bucket for Terraform state..."
-  gsutil mb -p "${PROJECT_ID}" "gs://${TF_STATE_BUCKET}"
-  gsutil versioning set on "gs://${TF_STATE_BUCKET}"
+  gcloud storage buckets create --project="${PROJECT_ID}" "gs://${TF_STATE_BUCKET}"
+  gcloud storage buckets update --versioning "gs://${TF_STATE_BUCKET}"
 else
   echo "GCS bucket for Terraform state already exists."
 fi
@@ -159,7 +159,7 @@ if [ "$MODE" == "upload" ]; then
     echo "Could not determine the GCS bucket name from Terraform output. Ensure Terraform state exists and the project is correct."
     exit 1
   fi
-  gsutil -m cp ../test/files/dcm/*.dcm "gs://$BUCKET_NAME/"
+  gcloud storage cp ../test/files/dcm/*.dcm "gs://$BUCKET_NAME/"
   echo "Upload complete."
   exit 0
 fi
