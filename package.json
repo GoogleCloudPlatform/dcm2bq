@@ -24,7 +24,7 @@
     "express": "^5.1.0",
     "express-json-validator-middleware": "^3.0.1",
     "google-auth-library": "^10.3.0",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^2.0.0"
   },
   "devDependencies": {
     "axios": "^1.11.0",
