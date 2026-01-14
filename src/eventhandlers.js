@@ -33,17 +33,16 @@ const embedConfig = config.get().gcpConfig.embeddings;
 
 /**
  * Process and persist a single DICOM file.
- * @param {string} basePath The original path of the source file (used for file ID)
  * @param {number} version The version identifier
  * @param {Date} timestamp The timestamp of the event
  * @param {Buffer} dicomBuffer The DICOM file content
- * @param {string} uriPath The URI path for this file
+ * @param {string} uriPath The URI path for this file (uniquely identifies the file)
  * @param {string} eventType The event type
  * @param {number} fileSize The size of the file
  * @param {string} storageType The type of storage (GCS, DICOMWEB, etc)
  * @returns {Promise<void>}
  */
-async function processAndPersistDicom(basePath, version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType) {
+async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType) {
   const { metadata, embeddings } = await processDicom(dicomBuffer, uriPath);
   
   const infoObj = {
@@ -54,7 +53,7 @@ async function processAndPersistDicom(basePath, version, timestamp, dicomBuffer,
   
   const writeObj = {
     timestamp,
-    path: basePath,
+    path: uriPath,
     version,
   };
   
@@ -168,22 +167,25 @@ async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType)
       console.log(`Found ${dcmFiles.length} DICOM files in zip: ${basePath}`);
     }
     
-    // Process each DICOM file
+    // Process each DICOM file; continue on per-file failure
     for (const dcmFile of dcmFiles) {
-      const fileBuffer = await fs.readFile(dcmFile);
-      const fileName = path.basename(dcmFile);
-      const uriPath = `${basePath}#${fileName}`;
-      
-      await processAndPersistDicom(
-        basePath,
-        version,
-        timestamp,
-        fileBuffer,
-        uriPath,
-        eventType,
-        fileBuffer.length,
-        consts.STORAGE_TYPE_GCS
-      );
+      try {
+        const fileBuffer = await fs.readFile(dcmFile);
+        const fileName = path.basename(dcmFile);
+        const uriPath = `${basePath}#${fileName}`;
+        
+        await processAndPersistDicom(
+          version,
+          timestamp,
+          fileBuffer,
+          uriPath,
+          eventType,
+          fileBuffer.length,
+          consts.STORAGE_TYPE_GCS
+        );
+      } catch (error) {
+        console.error(`Error processing DICOM ${dcmFile}: ${error.message}`);
+      }
     }
   } catch (error) {
     console.error(`Error processing zip file ${basePath}: ${error.message}`);
@@ -232,7 +234,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         await handleZipFile(buffer, basePath, timestamp, version, eventType);
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
-        await processAndPersistDicom(basePath, version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
+        await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
       }
       perfCtx.addRef("afterProcessDicom");
       perfCtx.addRef("afterBqInsert");
@@ -253,7 +255,7 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   const timestamp = new Date();
   const version = Date.now(); // TODO: Fix when HCAPI supports versions
 
-  await processAndPersistDicom(dicomWebPath, version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB);
+  await processAndPersistDicom(version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB);
   perfCtx.addRef("afterProcessDicom");
   perfCtx.addRef("afterBqInsert");
   if (DEBUG_MODE) {
