@@ -95,7 +95,7 @@ addSchema(
             properties: {
               payloadFormat: { const: consts.GCS_PUBSUB_MSG_V1 },
               eventType: { enum: consts.GCS_EVENT_TYPES },
-              objectId: { type: "string", pattern: ".(dcm|DCM|dicom)$" },
+              objectId: { type: "string", pattern: ".(dcm|DCM|dicom|zip)$" },
             },
           },
           data: {
