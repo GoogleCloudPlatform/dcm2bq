@@ -23,9 +23,47 @@ const hcapi = require("./hcapi");
 const { createVectorEmbedding } = require("./embeddings");
 const { deepAssign, DEBUG_MODE } = require("./utils");
 const crypto = require("crypto");
+const fs = require("fs").promises;
+const path = require("path");
+const os = require("os");
+const AdmZip = require("adm-zip");
 const embedConfig = config.get().gcpConfig.embeddings;
 
 // TODO: Include the metaHash for all files
+
+/**
+ * Process and persist a single DICOM file.
+ * @param {string} basePath The original path of the source file (used for file ID)
+ * @param {number} version The version identifier
+ * @param {Date} timestamp The timestamp of the event
+ * @param {Buffer} dicomBuffer The DICOM file content
+ * @param {string} uriPath The URI path for this file
+ * @param {string} eventType The event type
+ * @param {number} fileSize The size of the file
+ * @param {string} storageType The type of storage (GCS, DICOMWEB, etc)
+ * @returns {Promise<void>}
+ */
+async function processAndPersistDicom(basePath, version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType) {
+  const { metadata, embeddings } = await processDicom(dicomBuffer, uriPath);
+  
+  const infoObj = {
+    event: eventType,
+    storage: { size: fileSize, type: storageType },
+    embeddings: { model: embedConfig.model },
+  };
+  
+  const writeObj = {
+    timestamp,
+    path: basePath,
+    version,
+  };
+  
+  const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType)
+    ? { path: embeddings.objectPath, size: embeddings.objectSize, mimeType: embeddings.objectMimeType }
+    : null;
+  
+  await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
+}
 
 /**
  * Processes a DICOM file buffer to extract metadata and optionally generate a vector embedding.
@@ -73,24 +111,101 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData, objectMe
     const embRow = {
       id,
       embedding: embeddingsData.embedding,
-      object: objectMetadata ? {
-        path: objectMetadata.path || null,
-        size: objectMetadata.size || null,
-        mimeType: objectMetadata.mimeType || null,
-      } : null,
+      object: objectMetadata
+        ? {
+            path: objectMetadata.path || null,
+            size: objectMetadata.size || null,
+            mimeType: objectMetadata.mimeType || null,
+          }
+        : null,
     };
     await bq.insertEmbeddings(embRow);
+  }
+}
+
+/**
+ * Recursively find all .dcm files in a directory.
+ * @param {string} dir The directory to search
+ * @returns {Promise<string[]>} Array of absolute paths to .dcm files
+ */
+async function findDcmFiles(dir) {
+  const files = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const subFiles = await findDcmFiles(fullPath);
+      files.push(...subFiles);
+    } else if (entry.name.toLowerCase().endsWith('.dcm')) {
+      files.push(fullPath);
+    }
+  }
+  
+  return files;
+}
+
+/**
+ * Handle a zip file containing DICOM files.
+ * @param {Buffer} zipBuffer The zip file content
+ * @param {string} basePath The original path of the zip file
+ * @param {Date} timestamp The timestamp of the event
+ * @param {number} version The version identifier
+ * @param {string} eventType The event type
+ */
+async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType) {
+  let tempDir = null;
+  try {
+    // Extract zip to temporary directory
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
+    const zip = new AdmZip(zipBuffer);
+    zip.extractAllTo(tempDir, true);
+    
+    // Find all .dcm files
+    const dcmFiles = await findDcmFiles(tempDir);
+    
+    if (DEBUG_MODE) {
+      console.log(`Found ${dcmFiles.length} DICOM files in zip: ${basePath}`);
+    }
+    
+    // Process each DICOM file
+    for (const dcmFile of dcmFiles) {
+      const fileBuffer = await fs.readFile(dcmFile);
+      const fileName = path.basename(dcmFile);
+      const uriPath = `${basePath}#${fileName}`;
+      
+      await processAndPersistDicom(
+        basePath,
+        version,
+        timestamp,
+        fileBuffer,
+        uriPath,
+        eventType,
+        fileBuffer.length,
+        consts.STORAGE_TYPE_GCS
+      );
+    }
+  } catch (error) {
+    console.error(`Error processing zip file ${basePath}: ${error.message}`);
+  } finally {
+    // Clean up temporary directory
+    if (tempDir) {
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch (error) {
+        console.error(`Error cleaning up temp directory ${tempDir}: ${error.message}`);
+      }
+    }
   }
 }
 
 async function handleGcsPubSubUnwrap(ctx, perfCtx) {
   const { eventType, bucketId, objectId } = ctx.message.attributes;
   const msgData = JSON.parse(Buffer.from(ctx.message.data, "base64").toString());
-  const writeObj = {
-    timestamp: new Date(),
-    path: `${msgData.bucket}/${msgData.name}`,
-    version: msgData.generation,
-  };
+  const basePath = `${msgData.bucket}/${msgData.name}`;
+  const timestamp = new Date();
+  const version = msgData.generation;
+  
   switch (eventType) {
     // The object is no longer current
     case consts.GCS_OBJ_ARCHIVE:
@@ -100,6 +215,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         event: eventType,
         storage: { type: consts.STORAGE_TYPE_GCS },
       };
+      const writeObj = { timestamp, path: basePath, version };
       await persistRow(writeObj, infoObj, null, null, null);
       perfCtx.addRef("afterBqInsert");
       break;
@@ -111,23 +227,20 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       // Use memory to read, avoiding volume mount in container
       const buffer = await gcs.downloadToMemory(bucketId, objectId);
       perfCtx.addRef("afterGcsDownloadToMemory");
-      const uriPath = gcs.createUriPath(bucketId, objectId);
-      const { metadata, size, embeddings } = await processDicom(buffer, uriPath);
+      
+      if (objectId.toLowerCase().endsWith('.zip')) {
+        await handleZipFile(buffer, basePath, timestamp, version, eventType);
+      } else {
+        const uriPath = gcs.createUriPath(bucketId, objectId);
+        await processAndPersistDicom(basePath, version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
+      }
       perfCtx.addRef("afterProcessDicom");
-      const infoObj = {
-        event: eventType,
-        storage: { size, type: consts.STORAGE_TYPE_GCS },
-        embeddings: { model: embedConfig.model },
-      };
-      const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType) ? 
-        { path: embeddings.objectPath || null, size: embeddings.objectSize || null, mimeType: embeddings.objectMimeType || null } : null;
-      await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
       perfCtx.addRef("afterBqInsert");
       break;
     }
   }
   if (DEBUG_MODE) {
-    console.log(JSON.stringify(writeObj));
+    console.log(JSON.stringify({ path: basePath }));
   }
 }
 
@@ -137,27 +250,14 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   const buffer = await hcapi.downloadToMemory(uriPath);
   perfCtx.addRef("afterHcapiDownloadToMemory");
 
-  const { metadata, size, embeddings } = await processDicom(buffer, uriPath);
+  const timestamp = new Date();
+  const version = Date.now(); // TODO: Fix when HCAPI supports versions
+
+  await processAndPersistDicom(dicomWebPath, version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB);
   perfCtx.addRef("afterProcessDicom");
-
-  const infoObj = {
-    event: consts.HCAPI_FINALIZE,
-    storage: { size, type: consts.STORAGE_TYPE_DICOMWEB },
-    embeddings: { model: embedConfig.model },
-  };
-
-  const writeObj = {
-    timestamp: new Date(),
-    path: dicomWebPath,
-    version: Date.now(), // TODO: Fix when HCAPI supports versions
-  };
-
-  const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType) ? 
-    { path: embeddings.objectPath || null, size: embeddings.objectSize || null, mimeType: embeddings.objectMimeType || null } : null;
-  await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
   perfCtx.addRef("afterBqInsert");
   if (DEBUG_MODE) {
-    console.log(JSON.stringify(writeObj));
+    console.log(JSON.stringify({ path: dicomWebPath }));
   }
 }
 
