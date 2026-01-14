@@ -24,27 +24,31 @@ async function createEmbedText(text) {
   return await askGemini(prompt);
 }
 
-async function createTextInstance(text) {
+async function createTextInstance(text, requireEmbeddingCompatible = false) {
   if (!text) {
     console.log("No text could be extracted from DICOM object.");
     return null;
   }
 
-  // Summarize if config enables it
-  if (gcpConfig.embeddings.summarizeText.enabled) {
-    const embedText = await createEmbedText(text);
-    if (embedText) {
-      return { text: embedText };
+  // If text is too long for embedding and we need embedding compatibility
+  if (requireEmbeddingCompatible && text.length > MAX_TEXT_LENGTH) {
+    if (gcpConfig.embeddings.summarizeText.enabled) {
+      console.log(`Text length (${text.length}) exceeds MAX_TEXT_LENGTH (${MAX_TEXT_LENGTH}), attempting to summarize...`);
+      const embedText = await createEmbedText(text);
+      if (embedText) {
+        return { text: embedText };
+      } else {
+        console.error("Failed to summarize text for embedding.");
+        return null;
+      }
     } else {
-      console.warn("Failed to summarize text for embedding, skipping.");
+      console.error(`Text is too long for embedding (${text.length} > ${MAX_TEXT_LENGTH} characters) and summarization is disabled. Cannot create embedding.`);
       return null;
     }
-  } else if (text.length > MAX_TEXT_LENGTH) {
-    console.warn("Extracted text is too long for embedding, skipping.");
-    return null;
-  } else {
-    return { text };
   }
+
+  // For CLI extraction or short text, return as-is
+  return { text };
 }
 
 module.exports = { createTextInstance, MAX_TEXT_LENGTH };

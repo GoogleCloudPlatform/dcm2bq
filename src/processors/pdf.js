@@ -14,12 +14,23 @@
  limitations under the License.
  */
 
-const pdf = require("pdf-parse");
+const pdfParseModule = require("pdf-parse");
 const { parseBulkDataUri } = require("../dicomtojson");
 const { createTextInstance } = require("./text");
 
+// Handle both pdf-parse v1.x (function) and v2.x (PDFParse class)
+async function parsePdf(pdfBuffer) {
+  // Check if v2.x (PDFParse class exists)
+  if (pdfParseModule.PDFParse) {
+    const parser = new pdfParseModule.PDFParse({ data: pdfBuffer });
+    const result = await parser.getText();
+    return { text: result.text };
+  }
+  // v1.x (function)
+  return await pdfParseModule(pdfBuffer);
+}
 
-async function processPdf(metadata, dicomBuffer) {
+async function processPdf(metadata, dicomBuffer, requireEmbeddingCompatible = true) {
   if (!metadata.EncapsulatedDocument) {
     console.warn("Encapsulated PDF SOP Class UID found, but no (0042,0011) tag present.");
     return null;
@@ -35,8 +46,8 @@ async function processPdf(metadata, dicomBuffer) {
   }
 
   const pdfBuffer = Buffer.from(dicomBuffer, offset, length);
-  const data = await pdf(pdfBuffer);
-  return await createTextInstance(data.text);
+  const data = await parsePdf(pdfBuffer);
+  return await createTextInstance(data.text, requireEmbeddingCompatible);
 }
 
 module.exports = { processPdf };

@@ -80,6 +80,11 @@ install_terraform
 
 # 3. Validate input and mode
 
+# Extract version from package.json using jq (already required as a dependency)
+DCM2BQ_VERSION=$(jq -r '.version' "$(dirname "$0")/../package.json")
+DCM2BQ_IMAGE="jasonklotzer/dcm2bq:${DCM2BQ_VERSION}"
+echo "Using dcm2bq image: ${DCM2BQ_IMAGE}"
+
 # Parse options (only --help supported). We use subcommands for modes: deploy (default), destroy, upload
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
@@ -141,14 +146,14 @@ terraform init
 
 if [ "$MODE" == "destroy" ]; then
   echo "Destroying infrastructure..."
-  terraform destroy -auto-approve -var="project_id=${PROJECT_ID}"
+  terraform destroy -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}"
   echo "Cleanup complete."
   exit 0
 fi
 
 if [ "$MODE" == "deploy" ]; then
   echo "Deploying infrastructure..."
-  terraform apply -auto-approve -var="project_id=${PROJECT_ID}"
+  terraform apply -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}"
 fi
 
 if [ "$MODE" == "upload" ]; then
