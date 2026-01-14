@@ -27,7 +27,7 @@
       "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
       "args": ["--colors", "--bail", "--timeout", "30000"],
       "env": {
-        "DEBUG": "false",
+        "DEBUG": "true",
         "DCM2BQ_CONFIG_FILE": "test/testconfig.json"
       }
     }

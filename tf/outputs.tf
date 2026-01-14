@@ -31,3 +31,23 @@ output "bigquery_dead_letter_table" {
   description = "The ID of the BigQuery dead-letter table."
   value       = google_bigquery_table.dead_letter_table.id
 }
+
+output "gcs_processed_data_bucket_name" {
+  description = "The name of the GCS bucket for processed data (extracted images and text)."
+  value       = google_storage_bucket.processed_data_bucket.name
+}
+
+output "bq_dataset_id" {
+  description = "The ID of the BigQuery dataset."
+  value       = google_bigquery_dataset.dicom_dataset.dataset_id
+}
+
+output "bq_metadata_table_id" {
+  description = "The ID of the BigQuery metadata table."
+  value       = google_bigquery_table.metadata_table.table_id
+}
+
+output "bq_embeddings_table_id" {
+  description = "The ID of the BigQuery embeddings table."
+  value       = google_bigquery_table.embeddings_table.table_id
+}

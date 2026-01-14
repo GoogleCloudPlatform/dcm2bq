@@ -210,7 +210,8 @@ Example `config.json` override:
     "embeddings": {
       "enabled": true,
       "model": "multimodalembedding@001",
-      "summarizeText": { "enabled": false }
+      "summarizeText": { "enabled": false },
+      "gcsBucketPath": "gs://my-bucket/processed-data"
     }
   }
 }
@@ -220,6 +221,7 @@ Example `config.json` override:
 - `enabled`: Set to `true` to activate the feature.
 -   `model`: The name of the Vertex AI model to use for generating embeddings.
 -   `summarizeText.enabled`: Controls whether extracted text from SR/PDF is summarized before embedding or saving. This can be overridden at runtime by the CLI `--summary` flag.
+-   `gcsBucketPath`: Optional GCS bucket path where processed images (.jpg) and text (.txt) files will be saved. Format: `gs://bucket-name/optional-path`. Files are organized as `{gcsBucketPath}/{StudyInstanceUID}/{SeriesInstanceUID}/{SOPInstanceUID}.{jpg|txt}`. If omitted or empty, files will not be saved to GCS. **Important:** This bucket should be separate from the DICOM source bucket to avoid triggering unwanted events when processed files are created.
 
 ## Development
 

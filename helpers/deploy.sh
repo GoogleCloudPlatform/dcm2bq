@@ -154,7 +154,7 @@ fi
 if [ "$MODE" == "upload" ]; then
   # Upload-only mode: find bucket from Terraform outputs and upload test files
   echo "Uploading test DICOM files to the GCS bucket for project ${PROJECT_ID}..."
-  BUCKET_NAME=$(terraform output -raw gcs_bucket_name 2>/dev/null || terraform output -raw dicom_bucket_name 2>/dev/null || terraform output -raw bucket_name 2>/dev/null)
+  BUCKET_NAME=$(terraform output -raw gcs_bucket_name 2>/dev/null)
   if [ -z "$BUCKET_NAME" ]; then
     echo "Could not determine the GCS bucket name from Terraform output. Ensure Terraform state exists and the project is correct."
     exit 1
@@ -168,6 +168,7 @@ fi
 DATASET_ID=$(terraform output -raw bq_dataset_id)
 TABLE_ID=$(terraform output -raw bq_metadata_table_id)
 EMBEDDINGS_TABLE_ID=$(terraform output -raw bq_embeddings_table_id 2>/dev/null || terraform output -raw bq_embeddings_table 2>/dev/null || true)
+PROCESSED_DATA_BUCKET=$(terraform output -raw gcs_processed_data_bucket_name 2>/dev/null || true)
 TEST_CONFIG_FILE="../test/testconfig.json"
 TEMP_JSON=$(mktemp)
 
@@ -182,7 +183,8 @@ jq \
   --arg dataset_id "$DATASET_ID" \
   --arg table_id "$TABLE_ID" \
   --arg embeddings_table_id "$EMBEDDINGS_TABLE_ID" \
-  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.metadataTableId = $table_id | .gcpConfig.bigQuery.embeddingsTableId = $embeddings_table_id' \
+  --arg gcs_bucket_path "gs://${PROCESSED_DATA_BUCKET}" \
+  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.metadataTableId = $table_id | .gcpConfig.bigQuery.embeddingsTableId = $embeddings_table_id | .gcpConfig.embeddings.gcsBucketPath = $gcs_bucket_path' \
   "$TEST_CONFIG_FILE" > "$TEMP_JSON" && mv "$TEMP_JSON" "$TEST_CONFIG_FILE"
 
 echo "Updated test/testconfig.json."

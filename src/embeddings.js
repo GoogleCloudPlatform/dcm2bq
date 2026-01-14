@@ -14,11 +14,14 @@
  limitations under the License.
  */
 
-const { GoogleAuth } = require("google-auth-library");
+const { Storage } = require("@google-cloud/storage");
 const { gcpConfig, jsonOutput } = require("./config").get();
+const { DEBUG_MODE } = require("./utils");
 const { processImage } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
+
+const storage = new Storage();
 
 // --- Configuration ---
 const ENDPOINT = createEndpoint(gcpConfig);
@@ -75,6 +78,58 @@ async function doRequest(payload) {
   return httpDoRequest(ENDPOINT, payload);
 }
 
+/**
+ * Saves extracted image or text data to a GCS bucket.
+ * @param {Buffer|string} data - The data to save (image buffer or text content)
+ * @param {string} fileName - The file path within the bucket (e.g., 'study/series/instance.jpg')
+ * @param {string} contentType - The MIME type of the file
+ * @param {string} subDirectory - Optional subdirectory within the base path (e.g., 'processed')
+ */
+async function saveToGCS(data, fileName, contentType, subDirectory = '') {
+  const gcsBucketPath = gcpConfig.embeddings.gcsBucketPath;
+  
+  if (!gcsBucketPath) {
+    console.warn("gcpConfig.embeddings.gcsBucketPath is not configured. Skipping file save to GCS.");
+    return;
+  }
+
+  try {
+    // Extract bucket name from GCS path (e.g., 'gs://bucket-name' from 'gs://bucket-name/path')
+    const bucketMatch = gcsBucketPath.match(/^gs:\/\/([^\/]+)/);
+    if (!bucketMatch) {
+      console.error("Invalid GCS bucket path format. Expected 'gs://bucket-name/path'.");
+      return;
+    }
+
+    const bucketName = bucketMatch[1];
+    // Remove the bucket prefix (gs://bucket-name) to get the base path
+    const bucketPrefix = `gs://${bucketName}`;
+    let basePath = gcsBucketPath.substring(bucketPrefix.length).replace(/^\//, "") || "";
+    
+    // Build full path with optional subdirectory
+    let fullPath = basePath;
+    if (subDirectory) {
+      fullPath = fullPath ? `${fullPath}/${subDirectory}` : subDirectory;
+    }
+    fullPath = fullPath ? `${fullPath}/${fileName}` : fileName;
+
+    const file = storage.bucket(bucketName).file(fullPath);
+    await file.save(data, {
+      contentType: contentType,
+      resumable: false,
+    });
+
+    const gcsUri = `gs://${bucketName}/${fullPath}`;
+    if (DEBUG_MODE) {
+      console.log(`Saved file to ${gcsUri}`);
+    }
+    return gcsUri;
+  } catch (error) {
+    console.error(`Error saving file to GCS: ${error.message}`);
+    return null;
+  }
+}
+
 async function createVectorEmbedding(metadata, dicomBuffer) {
   if (!jsonOutput.useCommonNames) {
     throw new Error("Embeddings generation code relies on jsonOutput.useCommonNames to be true in the configuration.");
@@ -86,13 +141,29 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   const sopClassUid = metadata.SOPClassUID;
 
   let instance;
+  let objectPath = null;
+  const studyUid = metadata.StudyInstanceUID || "unknown";
+  const seriesUid = metadata.SeriesInstanceUID || "unknown";
+  const instanceUid = metadata.SOPInstanceUID || "unknown";
 
   if (isImage(sopClassUid)) {
     instance = await processImage(metadata, dicomBuffer);
+    if (instance?.image?.bytesBase64Encoded) {
+      const fileName = `${studyUid}/${seriesUid}/${instanceUid}.jpg`;
+      objectPath = await saveToGCS(Buffer.from(instance.image.bytesBase64Encoded, 'base64'), fileName, 'image/jpeg', '');
+    }
   } else if (isPdf(sopClassUid)) {
     instance = await processPdf(metadata, dicomBuffer);
+    if (instance?.text) {
+      const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
+      objectPath = await saveToGCS(instance.text, fileName, 'text/plain', '');
+    }
   } else if (isStructuredReport(sopClassUid)) {
     instance = await processSR(metadata);
+    if (instance?.text) {
+      const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
+      objectPath = await saveToGCS(instance.text, fileName, 'text/plain', '');
+    }
   } else {
     console.error(`SOP Class UID ${sopClassUid} is not supported for vector embedding generation.`);
     return null;
@@ -106,7 +177,7 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
     const response = await doRequest({ instances: [instance] });
     if (response.predictions && response.predictions.length > 0) {
       const embedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
-      return embedding;
+      return { embedding, objectPath };
     } else {
       console.error("Failed to get embedding from the model response.");
       return null;
@@ -117,4 +188,4 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   }
 }
 
-module.exports = { createVectorEmbedding, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest };
+module.exports = { createVectorEmbedding, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS };

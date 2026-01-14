@@ -56,6 +56,15 @@ resource "google_storage_bucket" "dicom_bucket" {
   uniform_bucket_level_access = true
 }
 
+# GCS bucket for processed data (images and text extracted from DICOM)
+# This must be separate from the DICOM bucket to avoid triggering events when processed files are created
+resource "google_storage_bucket" "processed_data_bucket" {
+  name                        = "dcm2bq-processed-data-${random_string.bucket_suffix.result}"
+  location                    = var.region
+  force_destroy               = true
+  uniform_bucket_level_access = true
+}
+
 # BigQuery dataset and tables
 resource "google_bigquery_dataset" "dicom_dataset" {
   dataset_id = var.bq_dataset_id != "" ? var.bq_dataset_id : "dicom_${random_string.bucket_suffix.result}"
@@ -150,6 +159,12 @@ resource "google_project_iam_member" "cloudrun_sa_gcs_reader" {
   member  = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
+resource "google_project_iam_member" "cloudrun_sa_gcs_writer" {
+  project = var.project_id
+  role    = "roles/storage.objectCreator"
+  member  = "serviceAccount:${google_service_account.cloudrun_sa.email}"
+}
+
 resource "google_project_iam_member" "cloudrun_sa_vertexai_user" {
   project = var.project_id
   role    = "roles/aiplatform.user"
@@ -194,6 +209,7 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
               enabled       = true
               model         = "multimodalembedding@001"
               summarizeText = { enabled = true, model = "gemini-2.5-flash-lite" }
+              gcsBucketPath = "gs://${google_storage_bucket.processed_data_bucket.name}"
             }
           }
           dicomParser = {}
@@ -261,8 +277,3 @@ resource "google_pubsub_subscription" "dead_letter_subscription" {
   }
   depends_on = [google_pubsub_topic.dead_letter_topic, google_project_iam_member.pubsub_bq_writer]
 }
-
-# Outputs
-output "bq_dataset_id" { value = google_bigquery_dataset.dicom_dataset.dataset_id }
-output "bq_metadata_table_id" { value = google_bigquery_table.metadata_table.table_id }
-output "bq_embeddings_table_id" { value = google_bigquery_table.embeddings_table.table_id }
