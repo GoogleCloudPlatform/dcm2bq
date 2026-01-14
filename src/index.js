@@ -36,7 +36,7 @@ const { processImage } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
 
-const { isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS } = require("./embeddings");
+const { isImage, isPdf, isStructuredReport } = require("./embeddings");
 
 program
   .command("extract")
@@ -45,9 +45,10 @@ program
   .option("-o, --output <output>", "output file (for image: .jpg, for text: .txt)")
   .option("--summary", "summarize SR or PDF text with Gemini", false)
   .action(async (fileName, options) => {
+    let requireEmbeddingCompatible = false;
     const { jsonOutput, gcpConfig } = config.get();
     // Set summarization config based on CLI
-    gcpConfig.embeddings.summarizeText.enabled = !!options.summary;
+    requireEmbeddingCompatible = gcpConfig.embeddings.summarizeText.enabled = !!options.summary;
     const buffer = fs.readFileSync(fileName);
     const reader = new DicomInMemory(buffer);
     const metadata = reader.toJson(jsonOutput);
@@ -66,7 +67,7 @@ program
       console.error("Could not render image from the DICOM file.");
       process.exit(1);
     } else if (isPdf(sopClassUid)) {
-      const result = await processPdf(metadata, buffer);
+      const result = await processPdf(metadata, buffer, requireEmbeddingCompatible);
       if (result && result.text) {
         if (!outFile) outFile = fileName.replace(/\.[^.]+$/, ".txt");
         fs.writeFileSync(outFile, result.text, "utf8");
@@ -76,7 +77,7 @@ program
       console.error("Could not extract text from the DICOM PDF file.");
       process.exit(1);
     } else if (isStructuredReport(sopClassUid)) {
-      const result = await processSR(metadata);
+      const result = await processSR(metadata, requireEmbeddingCompatible);
       if (result && result.text) {
         if (!outFile) outFile = fileName.replace(/\.[^.]+$/, ".txt");
         fs.writeFileSync(outFile, result.text, "utf8");

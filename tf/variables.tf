@@ -56,7 +56,7 @@ variable "bq_dead_letter_table_id" {
 variable "dcm2bq_image" {
   description = "The Docker image for the dcm2bq service."
   type        = string
-  default     = "jasonklotzer/dcm2bq:1.1.5"
+  default     = "jasonklotzer/dcm2bq:1.1.6"
 }
 
 variable "bq_location" {

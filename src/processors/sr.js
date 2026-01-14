@@ -132,9 +132,9 @@ function getTextFromSR(metadata, options = {}) {
   return result || null;
 }
 
-async function processSR(metadata) {
+async function processSR(metadata, requireEmbeddingCompatible = true) {
   const text = getTextFromSR(metadata);
-  return await createTextInstance(text);
+  return await createTextInstance(text, requireEmbeddingCompatible);
 }
 
 module.exports = { processSR, getTextFromSR };
