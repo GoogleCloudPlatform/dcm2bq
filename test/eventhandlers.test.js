@@ -111,9 +111,9 @@ describe("eventhandlers", () => {
           assert.ok(metaRow.info, "Should have info");
           assert.ok(metaRow.metadata, "Should have metadata");
           
-          // Verify the path format is correct for zip files
-          assert.strictEqual(metaRow.path, "test-bucket/test.zip", 
-            "Path should be the original zip file path");
+          // Verify the path format is correct for zip files (uriPath = basePath#fileName)
+          assert.ok(metaRow.path.startsWith("test-bucket/test.zip#"), "Path should include zip base path with #fileName");
+          assert.ok(metaRow.path.endsWith(".dcm"), "Path should end with .dcm");
         }
 
       } finally {
@@ -201,8 +201,8 @@ describe("eventhandlers", () => {
           "Should process exactly one DICOM file");
 
         const metaRow = bqInsertMetadataStub.getCall(0).args[0];
-        assert.strictEqual(metaRow.path, "test-bucket/ct.dcm", 
-          "Path should be the DICOM file path");
+        assert.strictEqual(metaRow.path, "gs://test-bucket/ct.dcm", 
+          "Path should be the DICOM file uriPath");
 
       } finally {
         gcsDownloadStub.restore();
