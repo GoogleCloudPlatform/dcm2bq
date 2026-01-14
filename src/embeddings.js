@@ -142,6 +142,8 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
 
   let instance;
   let objectPath = null;
+  let objectSize = null;
+  let objectMimeType = null;
   const studyUid = metadata.StudyInstanceUID || "unknown";
   const seriesUid = metadata.SeriesInstanceUID || "unknown";
   const instanceUid = metadata.SOPInstanceUID || "unknown";
@@ -149,20 +151,29 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   if (isImage(sopClassUid)) {
     instance = await processImage(metadata, dicomBuffer);
     if (instance?.image?.bytesBase64Encoded) {
+      const imageBuffer = Buffer.from(instance.image.bytesBase64Encoded, 'base64');
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}.jpg`;
-      objectPath = await saveToGCS(Buffer.from(instance.image.bytesBase64Encoded, 'base64'), fileName, 'image/jpeg', '');
+      objectPath = await saveToGCS(imageBuffer, fileName, 'image/jpeg', '');
+      objectSize = imageBuffer.length;
+      objectMimeType = 'image/jpeg';
     }
   } else if (isPdf(sopClassUid)) {
     instance = await processPdf(metadata, dicomBuffer);
     if (instance?.text) {
+      const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
-      objectPath = await saveToGCS(instance.text, fileName, 'text/plain', '');
+      objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
+      objectSize = textBuffer.length;
+      objectMimeType = 'text/plain';
     }
   } else if (isStructuredReport(sopClassUid)) {
     instance = await processSR(metadata);
     if (instance?.text) {
+      const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
-      objectPath = await saveToGCS(instance.text, fileName, 'text/plain', '');
+      objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
+      objectSize = textBuffer.length;
+      objectMimeType = 'text/plain';
     }
   } else {
     console.error(`SOP Class UID ${sopClassUid} is not supported for vector embedding generation.`);
@@ -176,8 +187,8 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   try {
     const response = await doRequest({ instances: [instance] });
     if (response.predictions && response.predictions.length > 0) {
-      const embedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
-      return { embedding, objectPath };
+      const vectorEmbedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
+      return { embedding: vectorEmbedding, objectPath, objectSize, objectMimeType };
     } else {
       console.error("Failed to get embedding from the model response.");
       return null;
