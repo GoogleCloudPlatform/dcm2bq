@@ -33,7 +33,9 @@ describe("Semantic comparison between text and image embeddings", function () {
     const { jsonOutput } = config.get();
     const reader = new DicomInMemory(buffer);
     const metadata = reader.toJson(jsonOutput);
-    imageEmbedding = await createVectorEmbedding(metadata, buffer);
+    const result = await createVectorEmbedding(metadata, buffer);
+    assert.ok(result, "Result should not be null");
+    imageEmbedding = result.embedding;
     assert.ok(Array.isArray(imageEmbedding), "Image embedding should be an array");
     assert.strictEqual(imageEmbedding.length, 1408, "Image embedding should have 1408 dimensions");
   });

@@ -38,6 +38,7 @@ module.exports = {
         enabled: true, // Use Gemini to summarize long text fields before generating embeddings
         model: "gemini-2.5-flash-lite", // Gemini model to use for summarization
       },
+      gcsBucketPath: process.env.GCS_BUCKET_PATH || "", // GCS path to save processed images and text (e.g., 'gs://my-bucket/extract')
     },
   },
   // Passed to DICOM parser (https://github.com/cornerstonejs/dicomParser)

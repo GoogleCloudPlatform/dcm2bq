@@ -40,9 +40,10 @@ async function processDicom(buffer, uriPath) {
   const outputOptions = deepAssign({}, configProvidedOptions, { bulkDataRoot });
   const reader = new DicomInMemory(buffer);
   const json = reader.toJson(outputOptions);
+  const embeddingsResult = embedConfig.enabled ? await createVectorEmbedding(json, buffer) : null;
   return {
     metadata: JSON.stringify(json),
-    embeddings: embedConfig.enabled ? await createVectorEmbedding(json, buffer) : null,
+    embeddings: embeddingsResult,
   };
 }
 
@@ -51,9 +52,9 @@ async function processDicom(buffer, uriPath) {
  * writeBase should contain timestamp, path, version.
  * infoObj will be JSON.stringified into the info field.
  * metadata is the JSON string (or null).
- * embeddings is an array of floats (or null).
+ * embeddingsData is an object with { embedding: array, objectPath: string } (or null).
  */
-async function persistRow(writeBase, infoObj, metadata, embeddings) {
+async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
   // Compute deterministic id from path + version
   const idSource = `${writeBase.path}|${String(writeBase.version)}`;
   const id = crypto.createHash("sha256").update(idSource).digest("hex");
@@ -66,10 +67,11 @@ async function persistRow(writeBase, infoObj, metadata, embeddings) {
 
   await bq.insertMetadata(metaRow);
 
-  if (embeddings && Array.isArray(embeddings)) {
+  if (embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding)) {
     const embRow = {
       id,
-      embedding: embeddings,
+      embedding: embeddingsData.embedding,
+      object: embeddingsData.objectPath ? { path: embeddingsData.objectPath } : null,
     };
     await bq.insertEmbeddings(embRow);
   }
@@ -96,6 +98,8 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       perfCtx.addRef("afterBqInsert");
       break;
     }
+    // Metadata has been updated on the object (HACK: treat same as finalize)
+    case consts.GCS_OBJ_METADATA_UPDATE:
     // The object has been replaced with a new version
     case consts.GCS_OBJ_FINALIZE: {
       // Use memory to read, avoiding volume mount in container
@@ -111,11 +115,6 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       perfCtx.addRef("afterProcessDicom");
       await persistRow(writeObj, infoObj, metadata, embeddings);
       perfCtx.addRef("afterBqInsert");
-      break;
-    }
-    // Metadata has been updated on the object
-    case consts.GCS_OBJ_METADATA_UPDATE: {
-      // Do nothing
       break;
     }
   }

@@ -89,8 +89,9 @@ describe("embeddings", () => {
   describe("createVectorEmbedding", () => {
     it("should generate vector embeddings for all DICOM images", async function () {
       for (const { buffer, metadata, file } of imageTestData) {
-        const embedding = await createVectorEmbedding(metadata, buffer);
-        assert.ok(embedding, `Embedding should not be null for ${file}`);
+        const result = await createVectorEmbedding(metadata, buffer);
+        assert.ok(result, `Result should not be null for ${file}`);
+        const embedding = result.embedding;
         assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
         assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
         assert.ok(
@@ -102,8 +103,9 @@ describe("embeddings", () => {
 
     it("should generate vector embeddings for all DICOM SRs", async function () {
       for (const { buffer, metadata, file } of srTestData) {
-        const embedding = await createVectorEmbedding(metadata, buffer);
-        assert.ok(embedding, `Embedding should not be null for ${file}`);
+        const result = await createVectorEmbedding(metadata, buffer);
+        assert.ok(result, `Result should not be null for ${file}`);
+        const embedding = result.embedding;
         assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
         assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
         assert.ok(
@@ -115,8 +117,9 @@ describe("embeddings", () => {
 
     it("should generate vector embeddings for all DICOM PDFs", async function () {
       for (const { buffer, metadata, file } of pdfTestData) {
-        const embedding = await createVectorEmbedding(metadata, buffer);
-        assert.ok(embedding, `Embedding should not be null for ${file}`);
+        const result = await createVectorEmbedding(metadata, buffer);
+        assert.ok(result, `Result should not be null for ${file}`);
+        const embedding = result.embedding;
         assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
         assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
         assert.ok(
