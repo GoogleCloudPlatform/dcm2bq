@@ -31,7 +31,7 @@ const embedConfig = config.get().gcpConfig.embeddings;
  * Processes a DICOM file buffer to extract metadata and optionally generate a vector embedding.
  * @param {Buffer} buffer The DICOM file content as a buffer.
  * @param {string} uriPath The URI of the DICOM file.
- * @returns {Promise<{metadata: string, vectorEmbedding?: string}>} An object containing the stringified JSON metadata and an optional stringified vector embedding.
+ * @returns {Promise<{metadata: string, size: number, embeddings?: object}>} An object containing the stringified JSON metadata, buffer size, and optional embeddings.
  */
 async function processDicom(buffer, uriPath) {
   const configObject = config.get();
@@ -43,6 +43,7 @@ async function processDicom(buffer, uriPath) {
   const embeddingsResult = embedConfig.enabled ? await createVectorEmbedding(json, buffer) : null;
   return {
     metadata: JSON.stringify(json),
+    size: buffer.length,
     embeddings: embeddingsResult,
   };
 }
@@ -52,9 +53,10 @@ async function processDicom(buffer, uriPath) {
  * writeBase should contain timestamp, path, version.
  * infoObj will be JSON.stringified into the info field.
  * metadata is the JSON string (or null).
- * embeddingsData is an object with { embedding: array, objectPath: string } (or null).
+ * embeddingsData is an object with { embedding: array } (or null).
+ * objectMetadata is an object with { path, size, mimeType } for the embedding's associated object (or null).
  */
-async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
+async function persistRow(writeBase, infoObj, metadata, embeddingsData, objectMetadata) {
   // Compute deterministic id from path + version
   const idSource = `${writeBase.path}|${String(writeBase.version)}`;
   const id = crypto.createHash("sha256").update(idSource).digest("hex");
@@ -71,7 +73,11 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
     const embRow = {
       id,
       embedding: embeddingsData.embedding,
-      object: embeddingsData.objectPath ? { path: embeddingsData.objectPath } : null,
+      object: objectMetadata ? {
+        path: objectMetadata.path || null,
+        size: objectMetadata.size || null,
+        mimeType: objectMetadata.mimeType || null,
+      } : null,
     };
     await bq.insertEmbeddings(embRow);
   }
@@ -94,7 +100,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         event: eventType,
         storage: { type: consts.STORAGE_TYPE_GCS },
       };
-      await persistRow(writeObj, infoObj, null, null);
+      await persistRow(writeObj, infoObj, null, null, null);
       perfCtx.addRef("afterBqInsert");
       break;
     }
@@ -105,15 +111,17 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       // Use memory to read, avoiding volume mount in container
       const buffer = await gcs.downloadToMemory(bucketId, objectId);
       perfCtx.addRef("afterGcsDownloadToMemory");
+      const uriPath = gcs.createUriPath(bucketId, objectId);
+      const { metadata, size, embeddings } = await processDicom(buffer, uriPath);
+      perfCtx.addRef("afterProcessDicom");
       const infoObj = {
         event: eventType,
-        storage: { size: buffer.length, type: consts.STORAGE_TYPE_GCS },
+        storage: { size, type: consts.STORAGE_TYPE_GCS },
         embeddings: { model: embedConfig.model },
       };
-      const uriPath = gcs.createUriPath(bucketId, objectId);
-      const { metadata, embeddings } = await processDicom(buffer, uriPath);
-      perfCtx.addRef("afterProcessDicom");
-      await persistRow(writeObj, infoObj, metadata, embeddings);
+      const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType) ? 
+        { path: embeddings.objectPath || null, size: embeddings.objectSize || null, mimeType: embeddings.objectMimeType || null } : null;
+      await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
       perfCtx.addRef("afterBqInsert");
       break;
     }
@@ -129,12 +137,12 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   const buffer = await hcapi.downloadToMemory(uriPath);
   perfCtx.addRef("afterHcapiDownloadToMemory");
 
-  const { metadata, embeddings } = await processDicom(buffer, uriPath);
+  const { metadata, size, embeddings } = await processDicom(buffer, uriPath);
   perfCtx.addRef("afterProcessDicom");
 
   const infoObj = {
     event: consts.HCAPI_FINALIZE,
-    storage: { size: buffer.length, type: consts.STORAGE_TYPE_DICOMWEB },
+    storage: { size, type: consts.STORAGE_TYPE_DICOMWEB },
     embeddings: { model: embedConfig.model },
   };
 
@@ -144,7 +152,9 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
     version: Date.now(), // TODO: Fix when HCAPI supports versions
   };
 
-  await persistRow(writeObj, infoObj, metadata, embeddings);
+  const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType) ? 
+    { path: embeddings.objectPath || null, size: embeddings.objectSize || null, mimeType: embeddings.objectMimeType || null } : null;
+  await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
   perfCtx.addRef("afterBqInsert");
   if (DEBUG_MODE) {
     console.log(JSON.stringify(writeObj));
