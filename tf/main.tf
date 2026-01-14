@@ -161,7 +161,7 @@ resource "google_project_iam_member" "cloudrun_sa_gcs_reader" {
 
 resource "google_project_iam_member" "cloudrun_sa_gcs_writer" {
   project = var.project_id
-  role    = "roles/storage.objectCreator"
+  role    = "roles/storage.objectAdmin"
   member  = "serviceAccount:${google_service_account.cloudrun_sa.email}"
 }
 
