@@ -27,6 +27,7 @@ Traditional imaging systems like PACS and VNAs offer limited query capabilities 
 -   Run as a containerized service, ideal for event-driven pipelines.
 -   Run as a command-line interface (CLI) for manual or scripted processing.
 -   Handle Google Cloud Storage object lifecycle events (creation, deletion) to keep BigQuery synchronized.
+-   Process zip archives containing multiple DICOM files with a single event.
 -   Generate vector embeddings from DICOM images, Structured Reports, and encapsulated PDFs using Google's multi-modal embedding model.
 -   Highly configurable to adapt to your needs.
 
@@ -110,14 +111,27 @@ The workflow is as follows:
 2.  A notification is sent to a Pub/Sub topic.
 3.  A Pub/Sub subscription pushes the message to a Cloud Run service running the `dcm2bq` container.
 4.  The `dcm2bq` container processes the message:
-    -   It validates the message schema and checks for a DICOM-like file extension (e.g., `.dcm`).
+    -   It validates the message schema and checks for a DICOM-like file extension (e.g., `.dcm`) or zip archive (`.zip`).
     -   For new objects, it reads the file from GCS and parses the DICOM metadata.
+    -   For zip archives, it extracts all `.dcm` files and processes each one individually.
     -   If embeddings are enabled, it generates a vector embedding from the DICOM data (for supported types like images, SRs, and PDFs) by calling the Vertex AI Embeddings API.
     -   It inserts a JSON representation of the metadata and the embedding into BigQuery.
     -   For deleted objects, it records the deletion event in BigQuery.
 5.  If an error occurs, the message is NACK'd for retry. After maximum retries, it's sent to a dead-letter topic for analysis.
 
 **Note:** When deploying to Cloud Run, ensure the container has enough memory allocated to handle your largest DICOM files.
+
+### Zip Archive Support
+
+The service can process zip archives containing multiple DICOM files. When a `.zip` file is uploaded to the configured GCS bucket:
+
+1. The zip archive is downloaded to memory
+2. All `.dcm` files are extracted to a temporary directory
+3. Each DICOM file is processed individually (metadata extraction and optional embedding generation)
+4. All files share the same base path (the zip file path) for tracking purposes
+5. Temporary files are automatically cleaned up after processing
+
+This feature is useful for batch uploads or when DICOM files are already archived in zip format. All DICOM files within the archive will be processed as separate entries in BigQuery, maintaining the original zip file path as the base path for version tracking.
 
 ### As a CLI
 
@@ -166,7 +180,7 @@ If you do not pass `--summary`, the full extracted text will be saved (subject t
 
 ## Configuration
 
-Configuration options can be found in the [default config file](./config.defaults.js).
+Configuration options can be found in the [default config file](./src/config.defaults.js).
 
 You can override these defaults in two ways.
 
@@ -210,18 +224,21 @@ Example `config.json` override:
     "embeddings": {
       "enabled": true,
       "model": "multimodalembedding@001",
-      "summarizeText": { "enabled": false },
+      "summarizeText": {
+        "enabled": false
+      },
       "gcsBucketPath": "gs://my-bucket/processed-data"
     }
   }
 }
 ```
-- Note: the JSON snippet above is a partial example showing only the embeddings-related settings. When providing an override (via `DCM2BQ_CONFIG` or `DCM2BQ_CONFIG_FILE`), you must supply the entire configuration object — partial merges are not supported.
+
+**Note:** The JSON snippet above is a partial example showing only the embeddings-related settings. When providing an override (via `DCM2BQ_CONFIG` or `DCM2BQ_CONFIG_FILE`), you must supply the entire configuration object — partial merges are not supported.
 
 - `enabled`: Set to `true` to activate the feature.
--   `model`: The name of the Vertex AI model to use for generating embeddings.
--   `summarizeText.enabled`: Controls whether extracted text from SR/PDF is summarized before embedding or saving. This can be overridden at runtime by the CLI `--summary` flag.
--   `gcsBucketPath`: Optional GCS bucket path where processed images (.jpg) and text (.txt) files will be saved. Format: `gs://bucket-name/optional-path`. Files are organized as `{gcsBucketPath}/{StudyInstanceUID}/{SeriesInstanceUID}/{SOPInstanceUID}.{jpg|txt}`. If omitted or empty, files will not be saved to GCS. **Important:** This bucket should be separate from the DICOM source bucket to avoid triggering unwanted events when processed files are created.
+- `model`: The name of the Vertex AI model to use for generating embeddings.
+- `summarizeText.enabled`: Controls whether extracted text from SR/PDF is summarized before embedding or saving. This can be overridden at runtime by the CLI `--summary` flag.
+- `gcsBucketPath`: Optional GCS bucket path where processed images (.jpg) and text (.txt) files will be saved. Format: `gs://bucket-name/optional-path`. Files are organized as `{gcsBucketPath}/{StudyInstanceUID}/{SeriesInstanceUID}/{SOPInstanceUID}.{jpg|txt}`. If omitted or empty, files will not be saved to GCS. **Important:** This bucket should be separate from the DICOM source bucket to avoid triggering unwanted events when processed files are created.
 
 ## Development
 
@@ -229,13 +246,21 @@ To get started with development, follow the installation steps for the CLI.
 
 The `test` directory contains numerous examples, unit tests, and integration tests that are helpful for understanding the codebase and validating changes.
 
+**Note:** Most operations (including tests) require a properly configured `test/testconfig.json` file. The easiest way to prepare your environment is to run:
+
+```bash
+./helpers/deploy.sh my-project-name
+```
+
+This will create all necessary Google Cloud resources and generate the required configuration file.
+
 ### Running Tests
 
 The test suite is a combination of unit and integration tests. The integration tests make real API calls to Google Cloud services (e.g., for vector embedding generation) and require a properly configured environment.
 
 To run the full test suite:
-1.  Ensure you are authenticated with GCP (`gcloud auth application-default login`).
-2.  Ensure your project has the necessary APIs enabled (e.g., Vertex AI API).
+1.  Run `./helpers/deploy.sh my-project-name` to create resources and generate `test/testconfig.json`.
+2.  Ensure you are authenticated with GCP (`gcloud auth application-default login`).
 3.  Run the tests: `npm test`
 
 ## Contributing
@@ -267,25 +292,25 @@ A helper script is provided to automate the process:
 **Examples**
 
 - Deploy infrastructure:
-```bash
-./helpers/deploy.sh my-gcp-project-id
-```
+  ```bash
+  ./helpers/deploy.sh my-gcp-project-id
+  ```
 
 - Upload test data only (no deploy):
-```bash
-./helpers/deploy.sh upload my-gcp-project-id
-```
+  ```bash
+  ./helpers/deploy.sh upload my-gcp-project-id
+  ```
 
 - Deploy and then upload test data (two steps):
-```bash
-./helpers/deploy.sh my-gcp-project-id
-./helpers/deploy.sh upload my-gcp-project-id
-```
+  ```bash
+  ./helpers/deploy.sh my-gcp-project-id
+  ./helpers/deploy.sh upload my-gcp-project-id
+  ```
 
-**Example: Destroy all resources**
-```bash
-./helpers/deploy.sh destroy my-gcp-project-id
-```
+- Destroy all resources:
+  ```bash
+  ./helpers/deploy.sh destroy my-gcp-project-id
+  ```
 
 The script will:
 1. Ensure all dependencies (Terraform, gcloud, gsutil) are installed.
