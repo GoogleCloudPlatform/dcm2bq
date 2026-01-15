@@ -85,15 +85,21 @@ DCM2BQ_VERSION=$(jq -r '.version' "$(dirname "$0")/../package.json")
 DCM2BQ_IMAGE="jasonklotzer/dcm2bq:${DCM2BQ_VERSION}"
 echo "Using dcm2bq image: ${DCM2BQ_IMAGE}"
 
-# Parse options (only --help supported). We use subcommands for modes: deploy (default), destroy, upload
+# Parse options
+DEBUG_MODE="false"
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
     -h | --help )
-      echo "Usage: $0 [destroy|upload] <gcp_project_id>"
+      echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
       echo "  upload                   Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
       echo "  destroy                  Destroy all previously created assets."
+      echo "  --debug                  Enable debug mode in Cloud Run service (verbose logging)."
       echo "  --help, -h               Show this help message."
       exit 0
+      ;;
+    --debug )
+      DEBUG_MODE="true"
+      echo "Debug mode enabled."
       ;;
   esac
   shift
@@ -146,14 +152,14 @@ terraform init
 
 if [ "$MODE" == "destroy" ]; then
   echo "Destroying infrastructure..."
-  terraform destroy -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}"
+  terraform destroy -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}" -var="debug_mode=${DEBUG_MODE}"
   echo "Cleanup complete."
   exit 0
 fi
 
 if [ "$MODE" == "deploy" ]; then
   echo "Deploying infrastructure..."
-  terraform apply -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}"
+  terraform apply -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}" -var="debug_mode=${DEBUG_MODE}"
 fi
 
 if [ "$MODE" == "upload" ]; then

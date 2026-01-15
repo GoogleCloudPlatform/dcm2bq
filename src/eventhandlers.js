@@ -43,6 +43,10 @@ const embedConfig = config.get().gcpConfig.embeddings;
  * @returns {Promise<void>}
  */
 async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType) {
+  if (DEBUG_MODE) {
+    console.log(`Processing DICOM: ${uriPath} (size: ${fileSize} bytes)`);
+  }
+  
   const { metadata, embeddings } = await processDicom(dicomBuffer, uriPath);
   
   const infoObj = {
@@ -60,6 +64,10 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
   const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType)
     ? { path: embeddings.objectPath, size: embeddings.objectSize, mimeType: embeddings.objectMimeType }
     : null;
+  
+  if (DEBUG_MODE) {
+    console.log(`Persisting DICOM: ${uriPath}, embedding: ${embeddings ? 'yes' : 'no'}`);
+  }
   
   await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
 }
@@ -184,18 +192,23 @@ async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType)
           consts.STORAGE_TYPE_GCS
         );
       } catch (error) {
-        console.error(`Error processing DICOM ${dcmFile}: ${error.message}`);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : '';
+        console.error(`Error processing DICOM ${dcmFile}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
       }
     }
   } catch (error) {
-    console.error(`Error processing zip file ${basePath}: ${error.message}`);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : '';
+    console.error(`Error processing zip file ${basePath}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
   } finally {
     // Clean up temporary directory
     if (tempDir) {
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
       } catch (error) {
-        console.error(`Error cleaning up temp directory ${tempDir}: ${error.message}`);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`Error cleaning up temp directory ${tempDir}: ${errorMsg}`);
       }
     }
   }

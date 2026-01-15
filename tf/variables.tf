@@ -70,3 +70,9 @@ variable "bq_embeddings_table_id" {
   type        = string
   default     = ""
 }
+
+variable "debug_mode" {
+  description = "Enable debug mode with verbose logging in Cloud Run service"
+  type        = bool
+  default     = false
+}

@@ -283,10 +283,11 @@ The recommended way to deploy the service and all required Google Cloud resource
 A helper script is provided to automate the process:
 
 ```bash
-./helpers/deploy.sh [destroy|upload] <gcp_project_id>
+./helpers/deploy.sh [OPTIONS] [destroy|upload] <gcp_project_id>
 ```
 - `upload`: Upload test DICOM files from `test/files/dcm/*.dcm` to the GCS bucket created by Terraform (standalone; does not deploy).
 - `destroy`: Destroy all previously created resources (cleanup).
+- `--debug`: Enable debug mode with verbose logging in the Cloud Run service.
 - `--help` or `-h`: Show usage instructions.
 
 **Examples**
@@ -294,6 +295,11 @@ A helper script is provided to automate the process:
 - Deploy infrastructure:
   ```bash
   ./helpers/deploy.sh my-gcp-project-id
+  ```
+
+- Deploy with debug mode enabled:
+  ```bash
+  ./helpers/deploy.sh --debug my-gcp-project-id
   ```
 
 - Upload test data only (no deploy):
