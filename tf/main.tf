@@ -232,7 +232,7 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
         })
       }
       env {
-        name  = "DEBUG_MODE"
+        name  = "DEBUG"
         value = var.debug_mode ? "true" : "false"
       }
     }
