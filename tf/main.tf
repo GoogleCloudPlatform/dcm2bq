@@ -192,8 +192,15 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
 
   template {
     service_account = google_service_account.cloudrun_sa.email
+    timeout         = "3600s" # 1 hour timeout for processing large zip files
     containers {
       image = var.dcm2bq_image
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "4Gi"
+        }
+      }
       env {
         name = "DCM2BQ_CONFIG"
         value = jsonencode({
@@ -224,6 +231,10 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
           }
         })
       }
+      env {
+        name  = "DEBUG_MODE"
+        value = var.debug_mode ? "true" : "false"
+      }
     }
   }
 }
@@ -248,8 +259,10 @@ resource "google_storage_notification" "bucket_notification" {
 
 # Subscription to push GCS events to Cloud Run
 resource "google_pubsub_subscription" "gcs_to_cloudrun" {
-  name  = "dcm2bq-gcs-to-cloudrun-subscription"
-  topic = google_pubsub_topic.gcs_events.name
+  name                       = "dcm2bq-gcs-to-cloudrun-subscription"
+  topic                      = google_pubsub_topic.gcs_events.name
+  ack_deadline_seconds       = 600 # 10 minutes to process before retry
+  message_retention_duration = "86400s" # 1 day
 
   push_config {
     push_endpoint = google_cloud_run_v2_service.dcm2bq_service.uri
@@ -259,6 +272,11 @@ resource "google_pubsub_subscription" "gcs_to_cloudrun" {
   dead_letter_policy {
     dead_letter_topic     = google_pubsub_topic.dead_letter_topic.id
     max_delivery_attempts = 5
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
   }
 
   depends_on = [google_cloud_run_v2_service_iam_member.allow_pubsub_invoke, google_pubsub_topic.dead_letter_topic]
