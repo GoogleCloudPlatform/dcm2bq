@@ -170,13 +170,15 @@ async function findDcmFiles(dir) {
 /**
  * Handle a zip file containing DICOM files.
  * @param {Buffer} zipBuffer The zip file content
- * @param {string} basePath The original path of the zip file
+ * @param {string} bucketId The GCS bucket ID
+ * @param {string} objectId The GCS object ID (zip file name)
  * @param {Date} timestamp The timestamp of the event
  * @param {number} version The version identifier
  * @param {string} eventType The event type
  */
-async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType) {
+async function handleZipFile(zipBuffer, bucketId, objectId, timestamp, version, eventType) {
   let tempDir = null;
+  const zipUriPath = gcs.createUriPath(bucketId, objectId);
   try {
     // Extract zip to temporary directory
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
@@ -187,7 +189,7 @@ async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType)
     const dcmFiles = await findDcmFiles(tempDir);
     
     if (DEBUG_MODE) {
-      console.log(`Found ${dcmFiles.length} DICOM files in zip: ${basePath}`);
+      console.log(`Found ${dcmFiles.length} DICOM files in zip: ${zipUriPath}`);
     }
     
     // Process each DICOM file; continue on per-file failure
@@ -195,7 +197,7 @@ async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType)
       try {
         const fileBuffer = await fs.readFile(dcmFile);
         const fileName = path.basename(dcmFile);
-        const uriPath = `${basePath}#${fileName}`;
+        const uriPath = `${zipUriPath}#${fileName}`;
         
         await processAndPersistDicom(
           version,
@@ -215,7 +217,7 @@ async function handleZipFile(zipBuffer, basePath, timestamp, version, eventType)
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : '';
-    console.error(`Error processing zip file ${basePath}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
+    console.error(`Error processing zip file ${zipUriPath}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
   } finally {
     // Clean up temporary directory
     if (tempDir) {
@@ -259,7 +261,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       perfCtx.addRef("afterGcsDownloadToMemory");
       
       if (objectId.toLowerCase().endsWith('.zip')) {
-        await handleZipFile(buffer, basePath, timestamp, version, eventType);
+        await handleZipFile(buffer, bucketId, objectId, timestamp, version, eventType);
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
         await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
