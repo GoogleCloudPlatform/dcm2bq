@@ -135,10 +135,12 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
     metadata: metadata || null,
     // Ensure schema type compatibility
     version: String(writeBase.version),
-    embeddingVector: embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding)
-      ? embeddingsData.embedding
-      : null,
   });
+
+  // Only add embeddingVector if it has data (REPEATED fields cannot be null)
+  if (embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding) && embeddingsData.embedding.length > 0) {
+    row.embeddingVector = embeddingsData.embedding;
+  }
 
   await insert(row);
 }
