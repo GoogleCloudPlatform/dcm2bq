@@ -17,10 +17,9 @@
 const { gcpConfig } = require("../config").get();
 const askGemini = require("../gemini");
 
-const MAX_TEXT_LENGTH = 1024; // Max characters for text to be sent for embedding
-
 async function createEmbedText(text) {
-  const prompt = `Summarize the following medical text for embedding. Keep it under ${MAX_TEXT_LENGTH} characters and retain important clinical details:\n\n${text}`;
+  const maxLength = gcpConfig.embedding?.input?.summarizeText?.maxLength || 1024;
+  const prompt = `Summarize the following medical text for embedding. Keep it under ${maxLength} characters and retain important clinical details:\n\n${text}`;
   return await askGemini(prompt);
 }
 
@@ -30,10 +29,11 @@ async function createTextInstance(text, requireEmbeddingCompatible = false) {
     return null;
   }
 
+  const maxLength = gcpConfig.embedding?.input?.summarizeText?.maxLength || 1024;
   // If text is too long for embedding and we need embedding compatibility
-  if (requireEmbeddingCompatible && text.length > MAX_TEXT_LENGTH) {
-    if (gcpConfig.embeddings.summarizeText.enabled) {
-      console.log(`Text length (${text.length}) exceeds MAX_TEXT_LENGTH (${MAX_TEXT_LENGTH}), attempting to summarize...`);
+  if (requireEmbeddingCompatible && text.length > maxLength) {
+    if (gcpConfig.embedding?.input?.summarizeText?.model) {
+      console.log(`Text length (${text.length}) exceeds maxLength (${maxLength}), attempting to summarize...`);
       const embedText = await createEmbedText(text);
       if (embedText) {
         return { text: embedText };
@@ -42,7 +42,7 @@ async function createTextInstance(text, requireEmbeddingCompatible = false) {
         return null;
       }
     } else {
-      console.error(`Text is too long for embedding (${text.length} > ${MAX_TEXT_LENGTH} characters) and summarization is disabled. Cannot create embedding.`);
+      console.error(`Text is too long for embedding (${text.length} > ${maxLength} characters) and summarization is disabled. Cannot create embedding.`);
       return null;
     }
   }
@@ -51,4 +51,4 @@ async function createTextInstance(text, requireEmbeddingCompatible = false) {
   return { text };
 }
 
-module.exports = { createTextInstance, MAX_TEXT_LENGTH };
+module.exports = { createTextInstance };

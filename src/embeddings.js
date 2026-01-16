@@ -24,10 +24,16 @@ const { processSR } = require("./processors/sr");
 const storage = new Storage();
 
 // --- Configuration ---
-const ENDPOINT = createEndpoint(gcpConfig);
-
 function createEndpoint(config) {
-  return `https://us-central1-aiplatform.googleapis.com/v1/projects/${config.projectId}/locations/us-central1/publishers/google/models/${config.embeddings.model}:predict`;
+  const model = config.embedding?.input?.vector?.model;
+  if (!model) {
+    throw new Error("embedding.input.vector.model is required for embedding generation");
+  }
+  return `https://us-central1-aiplatform.googleapis.com/v1/projects/${config.projectId}/locations/us-central1/publishers/google/models/${model}:predict`;
+}
+
+function getEndpoint() {
+  return createEndpoint(gcpConfig);
 }
 
 // SOP Class UIDs for different DICOM object types
@@ -75,7 +81,7 @@ const { doRequest: httpDoRequest } = require('./http-retry');
 
 // wrapper kept for backwards compatibility with existing callers
 async function doRequest(payload) {
-  return httpDoRequest(ENDPOINT, payload);
+  return httpDoRequest(getEndpoint(), payload);
 }
 
 /**
@@ -86,10 +92,10 @@ async function doRequest(payload) {
  * @param {string} subDirectory - Optional subdirectory within the base path (e.g., 'processed')
  */
 async function saveToGCS(data, fileName, contentType, subDirectory = '') {
-  const gcsBucketPath = gcpConfig.embeddings.gcsBucketPath;
+  const gcsBucketPath = gcpConfig.embedding?.input?.gcsBucketPath;
   
   if (!gcsBucketPath) {
-    console.warn("gcpConfig.embeddings.gcsBucketPath is not configured. Skipping file save to GCS.");
+    console.warn("gcpConfig.embedding.input.gcsBucketPath is not configured. Skipping file save to GCS.");
     return;
   }
 
@@ -130,12 +136,19 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
   }
 }
 
-async function createVectorEmbedding(metadata, dicomBuffer) {
+/**
+ * Creates embedding input from DICOM metadata and buffer.
+ * Extracts text or images and optionally saves them to GCS.
+ * @param {Object} metadata - DICOM metadata JSON
+ * @param {Buffer} dicomBuffer - Raw DICOM file buffer
+ * @returns {Promise<{instance: Object, objectPath: string|null, objectSize: number|null, objectMimeType: string|null}|null>}
+ */
+async function createEmbeddingInput(metadata, dicomBuffer) {
   if (!jsonOutput.useCommonNames) {
     throw new Error("Embeddings generation code relies on jsonOutput.useCommonNames to be true in the configuration.");
   }
   if (!metadata?.SOPClassUID) {
-    console.warn("SOPClassUID not found in metadata. Cannot generate vector embedding.");
+    console.warn("SOPClassUID not found in metadata. Cannot create embedding input.");
     return null;
   }
   const sopClassUid = metadata.SOPClassUID;
@@ -176,13 +189,24 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
       objectMimeType = 'text/plain';
     }
   } else {
-    console.error(`SOP Class UID ${sopClassUid} is not supported for vector embedding generation.`);
+    console.error(`SOP Class UID ${sopClassUid} is not supported for embedding input generation.`);
     return null;
   }
 
   if (!instance) {
     return null;
   }
+
+  return { instance, objectPath, objectSize, objectMimeType };
+}
+
+async function createVectorEmbedding(metadata, dicomBuffer) {
+  const inputResult = await createEmbeddingInput(metadata, dicomBuffer);
+  if (!inputResult) {
+    return null;
+  }
+
+  const { instance, objectPath, objectSize, objectMimeType } = inputResult;
 
   try {
     const response = await doRequest({ instances: [instance] });
@@ -199,4 +223,4 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
   }
 }
 
-module.exports = { createVectorEmbedding, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS };
+module.exports = { createVectorEmbedding, createEmbeddingInput, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS };

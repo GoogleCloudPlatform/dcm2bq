@@ -26,7 +26,7 @@ const ai = new GoogleGenAI({
 async function askGemini(contents) {
   // Set the config below to use temperature: 0
   const response = await ai.models.generateContent({
-    model: gcpConfig.embeddings.summarizeText.model || "gemini-2.5-flash-lite",
+    model: gcpConfig.embedding?.input?.summarizeText?.model || "gemini-2.5-flash-lite",
     config: {
       temperature: 0,
       thinkingConfig: {

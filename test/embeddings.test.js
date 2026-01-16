@@ -51,8 +51,8 @@ describe("embeddings", () => {
 
   before(() => {
     const c = config.get();
-    const isEnabled = c.gcpConfig.embeddings.enabled;
-    assert.ok(isEnabled, "Embeddings need to be enabled in the config");
+    const hasEmbeddingVector = c.gcpConfig.embedding?.input?.vector?.model;
+    assert.ok(hasEmbeddingVector, "Embeddings need to be configured (embedding.input.vector.model)");
 
     imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
     srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);

@@ -72,17 +72,40 @@ resource "google_bigquery_dataset" "dicom_dataset" {
   location = var.bq_location
 }
 
-resource "google_bigquery_table" "metadata_table" {
+resource "google_bigquery_table" "instances_table" {
   deletion_protection = false
   dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
-  table_id            = var.bq_metadata_table_id != "" ? var.bq_metadata_table_id : "metadata_${random_string.bucket_suffix.result}"
+  table_id            = var.bq_instances_table_id != "" ? var.bq_instances_table_id : "instances"
   schema              = file("${path.module}/init.schema.json")
+}
+
+resource "google_bigquery_table" "instances_view" {
+  deletion_protection = false
+  dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
+  table_id            = "instancesView"
+  
+  view {
+    query          = <<-EOT
+      SELECT
+        * EXCEPT(_row_id)
+      FROM (
+        SELECT
+          ROW_NUMBER() OVER (PARTITION BY path, version ORDER BY timestamp DESC) AS _row_id,
+          *
+        FROM
+          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}`
+      )
+      WHERE _row_id = 1
+        AND metadata IS NOT NULL
+    EOT
+    use_legacy_sql = false
+  }
 }
 
 resource "google_bigquery_table" "dead_letter_table" {
   deletion_protection = false
   dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
-  table_id            = var.bq_dead_letter_table_id != "" ? var.bq_dead_letter_table_id : "dead_letter_${random_string.bucket_suffix.result}"
+  table_id            = var.bq_dead_letter_table_id != "" ? var.bq_dead_letter_table_id : "dead_letter"
   schema = jsonencode([
     { name = "data", type = "BYTES" },
     { name = "attributes", type = "STRING" },
@@ -179,13 +202,19 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
             location  = var.region
             bigQuery = {
               datasetId       = google_bigquery_dataset.dicom_dataset.dataset_id
-              metadataTableId = google_bigquery_table.metadata_table.table_id
+              instancesTableId = google_bigquery_table.instances_table.table_id
             }
-            embeddings = {
-              enabled       = true
-              model         = "multimodalembedding@001"
-              summarizeText = { enabled = true, model = "gemini-2.5-flash-lite" }
-              gcsBucketPath = "gs://${google_storage_bucket.processed_data_bucket.name}"
+            embedding = {
+              input = {
+                gcsBucketPath = "gs://${google_storage_bucket.processed_data_bucket.name}"
+                summarizeText = {
+                  model     = "gemini-2.5-flash-lite"
+                  maxLength = 1024
+                }
+                vector = {
+                  model = "multimodalembedding@001"
+                }
+              }
             }
           }
           dicomParser = {}

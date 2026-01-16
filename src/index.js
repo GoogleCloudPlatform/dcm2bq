@@ -48,7 +48,14 @@ program
     let requireEmbeddingCompatible = false;
     const { jsonOutput, gcpConfig } = config.get();
     // Set summarization config based on CLI
-    requireEmbeddingCompatible = gcpConfig.embeddings.summarizeText.enabled = !!options.summary;
+    requireEmbeddingCompatible = !!options.summary;
+    if (options.summary) {
+      if (!gcpConfig.embedding) gcpConfig.embedding = {};
+      if (!gcpConfig.embedding.input) gcpConfig.embedding.input = {};
+      gcpConfig.embedding.input.summarizeText = { model: "gemini-2.5-flash-lite" };
+    } else if (gcpConfig.embedding?.input?.summarizeText) {
+      delete gcpConfig.embedding.input.summarizeText;
+    }
     const buffer = fs.readFileSync(fileName);
     const reader = new DicomInMemory(buffer);
     const metadata = reader.toJson(jsonOutput);

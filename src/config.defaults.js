@@ -26,17 +26,27 @@ module.exports = {
     bigQuery: {
       // Location to use in BigQuery
       datasetId: "dicom",
-      metadataTableId: "metadata",
+      instancesTableId: "instances",
     },
-    embeddings: {
-      enabled: true, // Generate embeddings for text and images
-      // See https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/multimodal-embeddings
-      model: "multimodalembedding@001",
-      summarizeText: {
-        enabled: true, // Use Gemini to summarize long text fields before generating embeddings
-        model: "gemini-2.5-flash-lite", // Gemini model to use for summarization
+    // Configuration for embeddings: input extraction, summarization, and vector generation
+    embedding: {
+      // Configuration for embedding input processing
+      // If this section exists with gcsBucketPath, embedding inputs will be saved to GCS
+      input: {
+        gcsBucketPath: process.env.GCS_BUCKET_PATH || "", // GCS path to save processed images and text (e.g., 'gs://my-bucket/extract')
+        // Configuration for text summarization before processing
+        // If this section exists, long text fields will be summarized
+        summarizeText: {
+          model: "gemini-2.5-flash-lite", // Gemini model to use for summarization
+          maxLength: 1024, // Max characters for summarized text to be sent for embedding
+        },
+        // Configuration for vector embedding generation using Vertex AI
+        // If this section exists, vector embeddings will be generated
+        vector: {
+          // See https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/multimodal-embeddings
+          model: "multimodalembedding@001",
+        },
       },
-      gcsBucketPath: process.env.GCS_BUCKET_PATH || "", // GCS path to save processed images and text (e.g., 'gs://my-bucket/extract')
     },
   },
   // Passed to DICOM parser (https://github.com/cornerstonejs/dicomParser)

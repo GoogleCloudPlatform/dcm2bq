@@ -39,12 +39,16 @@ The project stores DICOM metadata and vector embeddings in a single consolidated
 - `timestamp`: TIMESTAMP (REQUIRED) - When the record was written
 - `path`: STRING (REQUIRED) - Full path to the DICOM file
 - `version`: STRING (NULLABLE) - Object version identifier
-- `info`: JSON (REQUIRED) - Processing metadata (event type, storage info, model info)
+- `info`: RECORD (REQUIRED) - Processing metadata with structured fields:
+  - `event`: STRING - Event type (e.g., OBJECT_FINALIZE)
+  - `input`: RECORD - DICOM file metadata (size, type)
+  - `embedding`: RECORD - Embedding generation details
+    - `model`: STRING - Model used for embedding
+    - `input`: RECORD - Object used for embedding (path, size, mimeType)
 - `metadata`: JSON (NULLABLE) - Complete DICOM JSON metadata
 - `embeddingVector`: FLOAT ARRAY (NULLABLE) - Vector embedding for semantic search
-- `embeddingObject`: RECORD (NULLABLE) - Metadata about the object used for embedding (path, size, mimeType)
 
-The Cloud Run service is configured with the table ID via the `gcpConfig.bigQuery.metadataTableId` setting (see `config.defaults.js`). Use the `embeddingVector` column when running vector searches or creating vector indexes and models.
+The Cloud Run service is configured with the table ID via the `gcpConfig.bigQuery.instancesTableId` setting (see `config.defaults.js`). Use the `embeddingVector` column when running vector searches or creating vector indexes and models.
 
 Note: the project includes sample DDL and queries — see `src/bq-samples.sql`.
 
@@ -194,7 +198,7 @@ You can override these defaults in two ways.
 
 1.  **Environment Variable:** Set `DCM2BQ_CONFIG` to a JSON string containing the full configuration.
     ```bash
-    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","metadataTableId":"my_table"},"gcpConfig":{"projectId":"my-gcp-project","embeddings":{"enabled":true,"model":"multimodalembedding@001"}},"jsonOutput":{...}}'
+    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","instancesTableId":"my_table"},"gcpConfig":{"projectId":"my-gcp-project","embeddings":{"enabled":true,"model":"multimodalembedding@001"}},"jsonOutput":{...}}'
     ```
 2.  **Config File:** Set `DCM2BQ_CONFIG_FILE` to the path of a JSON file containing your full configuration.
     ```bash
@@ -202,7 +206,7 @@ You can override these defaults in two ways.
     # {
     #   "bigquery": {
     #     "datasetId": "my_dataset",
-    #     "metadataTableId": "my_table"
+    #     "instancesTableId": "my_table"
     #   },
     #   "gcpConfig": {
     #     "projectId": "my-gcp-project",
@@ -221,19 +225,22 @@ You can override these defaults in two ways.
 
 ### Embedding and Summarization Configuration
 
-To enable vector embedding generation, configure the `embeddings` section within `gcpConfig`.
+To enable vector embedding generation and input extraction, configure the `embedding.input` section within `gcpConfig`. The configuration uses a hierarchical structure where the presence of settings indicates they are enabled.
 
 Example `config.json` override:
 ```json
 {
   "gcpConfig": {
-    "embeddings": {
-      "enabled": true,
-      "model": "multimodalembedding@001",
-      "summarizeText": {
-        "enabled": false
-      },
-      "gcsBucketPath": "gs://my-bucket/processed-data"
+    "embedding": {
+      "input": {
+        "gcsBucketPath": "gs://my-bucket/processed-data",
+        "summarizeText": {
+          "model": "gemini-2.5-flash-lite"
+        },
+        "vector": {
+          "model": "multimodalembedding@001"
+        }
+      }
     }
   }
 }
@@ -241,10 +248,14 @@ Example `config.json` override:
 
 **Note:** The JSON snippet above is a partial example showing only the embeddings-related settings. When providing an override (via `DCM2BQ_CONFIG` or `DCM2BQ_CONFIG_FILE`), you must supply the entire configuration object — partial merges are not supported.
 
-- `enabled`: Set to `true` to activate the feature.
-- `model`: The name of the Vertex AI model to use for generating embeddings.
-- `summarizeText.enabled`: Controls whether extracted text from SR/PDF is summarized before embedding or saving. This can be overridden at runtime by the CLI `--summary` flag.
-- `gcsBucketPath`: Optional GCS bucket path where processed images (.jpg) and text (.txt) files will be saved. Format: `gs://bucket-name/optional-path`. Files are organized as `{gcsBucketPath}/{StudyInstanceUID}/{SeriesInstanceUID}/{SOPInstanceUID}.{jpg|txt}`. If omitted or empty, files will not be saved to GCS. **Important:** This bucket should be separate from the DICOM source bucket to avoid triggering unwanted events when processed files are created.
+### Embedding Input Configuration
+
+- `embedding.input.gcsBucketPath`: GCS bucket path where processed images (.jpg) and text (.txt) files will be saved. Format: `gs://bucket-name/optional-path`. Files are organized as `{gcsBucketPath}/{StudyInstanceUID}/{SeriesInstanceUID}/{SOPInstanceUID}.{jpg|txt}`. If this is omitted or empty, no files will be saved. **Important:** This bucket should be separate from the DICOM source bucket to avoid triggering unwanted events when processed files are created.
+- `embedding.input.vector.model`: If present, vector embeddings will be generated using the specified Vertex AI model (e.g., `multimodalembedding@001`). Omit this section to only extract and save inputs without generating embeddings.
+
+### Text Summarization Configuration
+
+- `embedding.input.summarizeText.model`: If present, long text extracted from SR/PDF will be summarized using the specified Gemini model before processing. Omit this section to skip summarization. This can be overridden at runtime by the CLI `--summary` flag.
 
 ## Development
 
