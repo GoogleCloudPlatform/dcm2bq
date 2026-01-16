@@ -194,7 +194,7 @@ describe("BigQuery insert payload matches schema", () => {
       const row = insertStub.firstCall.args[0];
       validateRow(row);
       assert.strictEqual(row.metadata, null, "metadata should be null for archive/delete");
-      assert.strictEqual(row.embeddingVector, null, "embeddingVector should be null for archive/delete");
+      assert.strictEqual(row.embeddingVector, undefined, "embeddingVector should be undefined (omitted) for archive/delete");
       assert.strictEqual(row.info.event, eventType, "info.event should reflect event type");
       assert.strictEqual(row.info.input.type, "GCS", "input.type should be GCS");
     }
