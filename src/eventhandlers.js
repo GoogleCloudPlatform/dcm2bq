@@ -97,7 +97,7 @@ async function processDicom(buffer, uriPath) {
   // Check if we should create embedding input (extract and save text/images)
   const shouldCreateInput = embeddingInputConfig?.gcsBucketPath;
   // Check if we should generate actual embeddings (call Vertex AI)
-  const shouldGenerateEmbedding = embeddingInputConfig?.embeddingVector?.model;
+  const shouldGenerateEmbedding = embeddingInputConfig?.vector?.model;
   
   if (shouldGenerateEmbedding) {
     // Generate full embedding (includes input creation + vector generation)
@@ -130,8 +130,10 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
     id,
     info: infoObj,
     metadata: metadata || null,
-    embeddingVector: embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding) 
-      ? embeddingsData.embedding 
+    // Ensure schema type compatibility
+    version: String(writeBase.version),
+    embeddingVector: embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding)
+      ? embeddingsData.embedding
       : null,
   });
 
@@ -297,4 +299,4 @@ async function handleEvent(name, req, res) {
   }
 }
 
-module.exports = { handleEvent };
+module.exports = { handleEvent, handleGcsPubSubUnwrap };
