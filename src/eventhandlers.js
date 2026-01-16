@@ -126,9 +126,12 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
   const idSource = `${writeBase.path}|${String(writeBase.version)}`;
   const id = crypto.createHash("sha256").update(idSource).digest("hex");
 
+  // Ensure info object is never null (required by BigQuery schema)
+  const info = infoObj || { event: null, input: null, embedding: null };
+
   const row = Object.assign({}, writeBase, {
     id,
-    info: infoObj,
+    info,
     metadata: metadata || null,
     // Ensure schema type compatibility
     version: String(writeBase.version),
