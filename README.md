@@ -31,24 +31,30 @@ Traditional imaging systems like PACS and VNAs offer limited query capabilities 
 -   Generate vector embeddings from DICOM images, Structured Reports, and encapsulated PDFs using Google's multi-modal embedding model.
 -   Highly configurable to adapt to your needs.
 
-## BigQuery schema & embeddings table
+## BigQuery schema
 
-The project stores DICOM metadata and embeddings in separate BigQuery tables. By default the service writes:
+The project stores DICOM metadata and vector embeddings in a single consolidated BigQuery table with the following columns:
 
-- a metadata table (JSON fields for full DICOM metadata and processing info), and
-- an embeddings table that stores a deterministic `id` (sha256 of `path|version`) and a repeated FLOAT column named `embedding` (the vector).
+- `id`: STRING (REQUIRED) - Deterministic SHA256 hash of `path|version`
+- `timestamp`: TIMESTAMP (REQUIRED) - When the record was written
+- `path`: STRING (REQUIRED) - Full path to the DICOM file
+- `version`: STRING (NULLABLE) - Object version identifier
+- `info`: JSON (REQUIRED) - Processing metadata (event type, storage info, model info)
+- `metadata`: JSON (NULLABLE) - Complete DICOM JSON metadata
+- `embeddingVector`: FLOAT ARRAY (NULLABLE) - Vector embedding for semantic search
+- `embeddingObject`: RECORD (NULLABLE) - Metadata about the object used for embedding (path, size, mimeType)
 
-The Cloud Run service is configured with both table IDs via the `gcpConfig.bigQuery` object (see `config.defaults.js`). Use the `embeddingsTableId` value when running vector searches or creating vector indexes and models.
+The Cloud Run service is configured with the table ID via the `gcpConfig.bigQuery.metadataTableId` setting (see `config.defaults.js`). Use the `embeddingVector` column when running vector searches or creating vector indexes and models.
 
-Note: the project includes sample DDL and queries to create a REMOTE embedding model and a vector index and to inspect the tables — see `src/bq-samples.sql`.
+Note: the project includes sample DDL and queries — see `src/bq-samples.sql`.
 
 ## Example queries
 
-You can find example queries and DDL for creating the REMOTE model and vector index in `src/bq-samples.sql`. The file includes:
+You can find example queries and DDL for creating the embedding model and vector index in `src/bq-samples.sql`. The file includes:
 
-- example SELECTs against the metadata and view,
-- sample aggregation queries,
-- and DDL samples to create an embedding model and a vector index for the embeddings table.
+- example SELECTs against the consolidated metadata table,
+- sample aggregation queries for vector search,
+- and DDL samples to create an embedding model and a vector index on the `embeddingVector` column.
 
 Before running vector searches, ensure you have created the embedding model and vector index (the samples show how to do this with `bq query`).
 

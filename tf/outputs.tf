@@ -43,11 +43,6 @@ output "bq_dataset_id" {
 }
 
 output "bq_metadata_table_id" {
-  description = "The ID of the BigQuery metadata table."
+  description = "The ID of the BigQuery metadata table (includes embeddings)."
   value       = google_bigquery_table.metadata_table.table_id
-}
-
-output "bq_embeddings_table_id" {
-  description = "The ID of the BigQuery embeddings table."
-  value       = google_bigquery_table.embeddings_table.table_id
 }

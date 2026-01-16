@@ -27,8 +27,6 @@ module.exports = {
       // Location to use in BigQuery
       datasetId: "dicom",
       metadataTableId: "metadata",
-      // Optional embeddings table name; if omitted code will use <metadataTableId>_embeddings
-      embeddingsTableId: "embeddings",
     },
     embeddings: {
       enabled: true, // Generate embeddings for text and images

@@ -79,28 +79,6 @@ resource "google_bigquery_table" "metadata_table" {
   schema              = file("${path.module}/init.schema.json")
 }
 
-resource "google_bigquery_table" "metadata_view" {
-  deletion_protection = false
-  dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
-  table_id            = "metadata_view_${random_string.bucket_suffix.result}"
-  view {
-    query          = <<-EOT
-      SELECT
-        * EXCEPT(_row_id)
-      FROM (
-        SELECT
-          ROW_NUMBER() OVER (PARTITION BY path, version ORDER BY timestamp DESC) AS _row_id,
-          *
-        FROM
-          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.metadata_table.table_id}`
-      )
-      WHERE _row_id = 1
-        AND metadata IS NOT NULL
-    EOT
-    use_legacy_sql = false
-  }
-}
-
 resource "google_bigquery_table" "dead_letter_table" {
   deletion_protection = false
   dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
@@ -112,14 +90,6 @@ resource "google_bigquery_table" "dead_letter_table" {
     { name = "subscription_name", type = "STRING" },
     { name = "publish_time", type = "TIMESTAMP" }
   ])
-}
-
-# Embeddings table
-resource "google_bigquery_table" "embeddings_table" {
-  deletion_protection = false
-  dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
-  table_id            = var.bq_embeddings_table_id != "" ? var.bq_embeddings_table_id : "embeddings_${random_string.bucket_suffix.result}"
-  schema              = file("${path.module}/embeddings.schema.json")
 }
 
 # Pub/Sub topics
@@ -208,9 +178,8 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
             projectId = var.project_id
             location  = var.region
             bigQuery = {
-              datasetId         = google_bigquery_dataset.dicom_dataset.dataset_id
-              metadataTableId   = google_bigquery_table.metadata_table.table_id
-              embeddingsTableId = google_bigquery_table.embeddings_table.table_id
+              datasetId       = google_bigquery_dataset.dicom_dataset.dataset_id
+              metadataTableId = google_bigquery_table.metadata_table.table_id
             }
             embeddings = {
               enabled       = true

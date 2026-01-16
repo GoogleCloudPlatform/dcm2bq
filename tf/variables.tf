@@ -65,12 +65,6 @@ variable "bq_location" {
   default     = "US"
 }
 
-variable "bq_embeddings_table_id" {
-  description = "BigQuery table id for embeddings"
-  type        = string
-  default     = ""
-}
-
 variable "debug_mode" {
   description = "Enable debug mode with verbose logging in Cloud Run service"
   type        = bool

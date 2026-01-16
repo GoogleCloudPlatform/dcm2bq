@@ -17,7 +17,7 @@
 const consts = require("./consts");
 const config = require("./config");
 const { DicomInMemory } = require("./dicomtojson");
-const bq = require("./bigquery");
+const { insert } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
 const { createVectorEmbedding } = require("./embeddings");
@@ -94,7 +94,7 @@ async function processDicom(buffer, uriPath) {
 }
 
 /**
- * Persist metadata row and optional embeddings row.
+ * Persist metadata and embeddings in a single row.
  * writeBase should contain timestamp, path, version.
  * infoObj will be JSON.stringified into the info field.
  * metadata is the JSON string (or null).
@@ -106,28 +106,23 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData, objectMe
   const idSource = `${writeBase.path}|${String(writeBase.version)}`;
   const id = crypto.createHash("sha256").update(idSource).digest("hex");
 
-  const metaRow = Object.assign({}, writeBase, {
+  const row = Object.assign({}, writeBase, {
     id,
     info: JSON.stringify(infoObj),
     metadata: metadata || null,
+    embeddingVector: embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding) 
+      ? embeddingsData.embedding 
+      : null,
+    embeddingObject: objectMetadata
+      ? {
+          path: objectMetadata.path || null,
+          size: objectMetadata.size || null,
+          mimeType: objectMetadata.mimeType || null,
+        }
+      : null,
   });
 
-  await bq.insertMetadata(metaRow);
-
-  if (embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding)) {
-    const embRow = {
-      id,
-      embedding: embeddingsData.embedding,
-      object: objectMetadata
-        ? {
-            path: objectMetadata.path || null,
-            size: objectMetadata.size || null,
-            mimeType: objectMetadata.mimeType || null,
-          }
-        : null,
-    };
-    await bq.insertEmbeddings(embRow);
-  }
+  await insert(row);
 }
 
 /**
