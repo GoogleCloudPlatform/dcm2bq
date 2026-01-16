@@ -235,7 +235,8 @@ Example `config.json` override:
       "input": {
         "gcsBucketPath": "gs://my-bucket/processed-data",
         "summarizeText": {
-          "model": "gemini-2.5-flash-lite"
+          "model": "gemini-2.5-flash-lite",
+          "maxLength": 1024
         },
         "vector": {
           "model": "multimodalembedding@001"
@@ -256,6 +257,7 @@ Example `config.json` override:
 ### Text Summarization Configuration
 
 - `embedding.input.summarizeText.model`: If present, long text extracted from SR/PDF will be summarized using the specified Gemini model before processing. Omit this section to skip summarization. This can be overridden at runtime by the CLI `--summary` flag.
+- `embedding.input.summarizeText.maxLength`: Maximum character length for summarized text (default: 1024). The summarization prompt instructs the model to keep output under this limit. This also controls when summarization is triggered: text longer than `maxLength` will be summarized when embedding compatibility is required.
 
 ## Development
 
