@@ -20,14 +20,15 @@ const { DicomInMemory } = require("./dicomtojson");
 const { insert } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
-const { createVectorEmbedding } = require("./embeddings");
+const { createVectorEmbedding, createEmbeddingInput } = require("./embeddings");
 const { deepAssign, DEBUG_MODE } = require("./utils");
 const crypto = require("crypto");
 const fs = require("fs").promises;
 const path = require("path");
 const os = require("os");
 const AdmZip = require("adm-zip");
-const embedConfig = config.get().gcpConfig.embeddings;
+const { gcpConfig } = config.get();
+const embeddingInputConfig = gcpConfig.embedding?.input;
 
 // TODO: Include the metaHash for all files
 
@@ -49,10 +50,19 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
   
   const { metadata, embeddings } = await processDicom(dicomBuffer, uriPath);
   
+  const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType)
+    ? { path: embeddings.objectPath, size: embeddings.objectSize, mimeType: embeddings.objectMimeType }
+    : null;
+  
+  const embeddingVectorModel = embeddingInputConfig?.vector?.model;
+  
   const infoObj = {
     event: eventType,
-    storage: { size: fileSize, type: storageType },
-    embeddings: { model: embedConfig.model },
+    input: { size: fileSize, type: storageType },
+    embedding: {
+      model: embeddingVectorModel || null,
+      input: objectMetadata,
+    },
   };
   
   const writeObj = {
@@ -61,19 +71,15 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
     version,
   };
   
-  const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType)
-    ? { path: embeddings.objectPath, size: embeddings.objectSize, mimeType: embeddings.objectMimeType }
-    : null;
-  
   if (DEBUG_MODE) {
     console.log(`Persisting DICOM: ${uriPath}, embedding: ${embeddings ? 'yes' : 'no'}`);
   }
   
-  await persistRow(writeObj, infoObj, metadata, embeddings, objectMetadata);
+  await persistRow(writeObj, infoObj, metadata, embeddings);
 }
 
 /**
- * Processes a DICOM file buffer to extract metadata and optionally generate a vector embedding.
+ * Processes a DICOM file buffer to extract metadata and optionally generate embedding input and vector embedding.
  * @param {Buffer} buffer The DICOM file content as a buffer.
  * @param {string} uriPath The URI of the DICOM file.
  * @returns {Promise<{metadata: string, size: number, embeddings?: object}>} An object containing the stringified JSON metadata, buffer size, and optional embeddings.
@@ -85,7 +91,22 @@ async function processDicom(buffer, uriPath) {
   const outputOptions = deepAssign({}, configProvidedOptions, { bulkDataRoot });
   const reader = new DicomInMemory(buffer);
   const json = reader.toJson(outputOptions);
-  const embeddingsResult = embedConfig.enabled ? await createVectorEmbedding(json, buffer) : null;
+  
+  let embeddingsResult = null;
+  
+  // Check if we should create embedding input (extract and save text/images)
+  const shouldCreateInput = embeddingInputConfig?.gcsBucketPath;
+  // Check if we should generate actual embeddings (call Vertex AI)
+  const shouldGenerateEmbedding = embeddingInputConfig?.embeddingVector?.model;
+  
+  if (shouldGenerateEmbedding) {
+    // Generate full embedding (includes input creation + vector generation)
+    embeddingsResult = await createVectorEmbedding(json, buffer);
+  } else if (shouldCreateInput) {
+    // Only create embedding input (extract and save, but don't generate vector)
+    embeddingsResult = await createEmbeddingInput(json, buffer);
+  }
+  
   return {
     metadata: JSON.stringify(json),
     size: buffer.length,
@@ -96,29 +117,21 @@ async function processDicom(buffer, uriPath) {
 /**
  * Persist metadata and embeddings in a single row.
  * writeBase should contain timestamp, path, version.
- * infoObj will be JSON.stringified into the info field.
+ * infoObj is a structured object with event, input, and embedding info.
  * metadata is the JSON string (or null).
  * embeddingsData is an object with { embedding: array } (or null).
- * objectMetadata is an object with { path, size, mimeType } for the embedding's associated object (or null).
  */
-async function persistRow(writeBase, infoObj, metadata, embeddingsData, objectMetadata) {
+async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
   // Compute deterministic id from path + version
   const idSource = `${writeBase.path}|${String(writeBase.version)}`;
   const id = crypto.createHash("sha256").update(idSource).digest("hex");
 
   const row = Object.assign({}, writeBase, {
     id,
-    info: JSON.stringify(infoObj),
+    info: infoObj,
     metadata: metadata || null,
     embeddingVector: embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding) 
       ? embeddingsData.embedding 
-      : null,
-    embeddingObject: objectMetadata
-      ? {
-          path: objectMetadata.path || null,
-          size: objectMetadata.size || null,
-          mimeType: objectMetadata.mimeType || null,
-        }
       : null,
   });
 
@@ -223,10 +236,10 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     case consts.GCS_OBJ_DELETE: {
       const infoObj = {
         event: eventType,
-        storage: { type: consts.STORAGE_TYPE_GCS },
+        input: { type: consts.STORAGE_TYPE_GCS },
       };
       const writeObj = { timestamp, path: basePath, version };
-      await persistRow(writeObj, infoObj, null, null, null);
+      await persistRow(writeObj, infoObj, null, null);
       perfCtx.addRef("afterBqInsert");
       break;
     }

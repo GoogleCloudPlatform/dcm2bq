@@ -29,30 +29,37 @@ addSchema(
     properties: {
       gcpConfig: {
         type: "object",
-        required: ["projectId", "location", "bigQuery", "embeddings"],
+        required: ["projectId", "location", "bigQuery"],
         properties: {
           projectId: { type: "string" },
           location: { type: "string" },
           bigQuery: {
             type: "object",
-            required: ["datasetId", "metadataTableId"],
+            required: ["datasetId", "instancesTableId"],
             properties: {
               datasetId: { type: "string" },
-              metadataTableId: { type: "string" }
+              instancesTableId: { type: "string" }
             }
           },
-          embeddings: {
+          embedding: {
             type: "object",
-            required: ["enabled", "model"],
             properties: {
-              enabled: { type: "boolean" },
-              model: { type: "string" },
-              summarizeText: {
+              input: {
                 type: "object",
-                required: ["enabled", "model"],
                 properties: {
-                  enabled: { type: "boolean" },
-                  model: { type: "string" }
+                  gcsBucketPath: { type: "string" },
+                  summarizeText: {
+                    type: "object",
+                    properties: {
+                      model: { type: "string" }
+                    }
+                  },
+                  vector: {
+                    type: "object",
+                    properties: {
+                      model: { type: "string" }
+                    }
+                  }
                 }
               }
             }

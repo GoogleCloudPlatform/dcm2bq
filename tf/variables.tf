@@ -41,8 +41,8 @@ variable "bq_dataset_id" {
   default     = ""
 }
 
-variable "bq_metadata_table_id" {
-  description = "The BigQuery table ID for DICOM metadata."
+variable "bq_instances_table_id" {
+  description = "BigQuery table id for DICOM instances"
   type        = string
   default     = ""
 }

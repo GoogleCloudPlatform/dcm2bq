@@ -20,12 +20,12 @@ const config = require("./config");
 const bigquery = new BigQuery();
 const cfg = config.get().gcpConfig.bigQuery || {};
 const datasetId = cfg.datasetId;
-const metadataTable = cfg.metadataTableId;
+const instancesTable = cfg.instancesTableId;
 
 async function insert(obj) {
-  if (!datasetId || !metadataTable) throw new Error('BigQuery metadata table not configured');
+  if (!datasetId || !instancesTable) throw new Error('BigQuery instances table not configured');
   try {
-    await bigquery.dataset(datasetId).table(metadataTable).insert(obj);
+    await bigquery.dataset(datasetId).table(instancesTable).insert(obj);
   } catch (error) {
     const errorDetails = error.errors ? error.errors.map(e => e.message).join('; ') : error.message;
     const err = new Error(`Failed to insert DICOM record: ${errorDetails}`);

@@ -17,7 +17,7 @@ limitations under the License.
 SELECT
      *
 FROM
-     `dicom.metadata`
+     `dicom.instances`
 ORDER BY
      timestamp DESC
 LIMIT
@@ -28,7 +28,7 @@ SELECT
      COUNT(*) as count,
      JSON_VALUE (`info`, "$.event") AS eventType
 FROM
-     `dicom.metadata`
+     `dicom.instances`
 GROUP BY
      eventType;
 
@@ -36,7 +36,7 @@ GROUP BY
 SELECT
      *
 FROM
-     `dicom.metadataView`
+     `dicom.instancesView`
 ORDER BY
      timestamp DESC
 LIMIT
@@ -48,7 +48,7 @@ SELECT
      JSON_VALUE (`metadata`, "$.StudyInstanceUID") AS StudyUID,
      SUM(LAX_INT64 (JSON_QUERY (`info`, "$.storage.size"))) AS StorageSize
 FROM
-     `dicom.metadataView`
+     `dicom.instancesView`
 GROUP BY
      StudyUID
 ORDER BY
@@ -61,13 +61,13 @@ SELECT
      COUNT(*) as TotalInstances,
      SUM(LAX_INT64 (JSON_QUERY (`info`, "$.storage.size"))) AS StorageSize
 FROM
-     `dicom.metadataView`;
+     `dicom.instancesView`;
 
 -- Find a particular study by StudyUID
 SELECT
      *
 from
-     `dicom.metadataView`
+     `dicom.instancesView`
 WHERE
      JSON_VALUE (`metadata`, '$.StudyInstanceUID') = '1.2.840.123456789456789456789.2.2223447302877.1';
 
@@ -82,7 +82,7 @@ SELECT
           JSON_VALUE (`attributes`, '$.objectId')
      ) AS gcsPath
 FROM
-     `pubsub.deadletter`
+     `dicom.dead_letter`
 GROUP BY
      gcsPath
 ORDER BY
@@ -90,36 +90,28 @@ ORDER BY
 LIMIT
      10;
 
--- Check pubsub messages (if replicated)
-SELECT
-     *
-FROM
-     `pubsub.messages`
-ORDER BY
-     publish_time DESC
-LIMIT
-     10;
-
--- If doing a vector search on the embeddings table, make sure to create an embeddings model connection and a vector index first.
+-- If doing a vector search on the instances table, make sure to create an embeddings model connection and a vector index first.
 CREATE
 OR REPLACE MODEL `dicom.embedding_model` REMOTE
 WITH
      CONNECTION DEFAULT OPTIONS (ENDPOINT = 'multimodalembedding@001');
 
 CREATE
-OR REPLACE VECTOR INDEX `dicom.embedding_index` ON `dicom.embeddings` (embeddings) OPTIONS (index_type = 'IVF', distance_type = 'COSINE');
+OR REPLACE VECTOR INDEX `dicom.embedding_index` ON `dicom.instances` (embeddingVector) OPTIONS (index_type = 'IVF', distance_type = 'COSINE');
 
--- Show embeddings table
+-- Show instances with embeddings
 SELECT
      *
 FROM
-     `dicom.embeddings`
+     `dicom.instances`
+WHERE
+     embeddingVector IS NOT NULL
 ORDER BY
      timestamp DESC
 LIMIT
      10;
 
--- And finally, how about combining a metadata and symantic search
+-- And finally, how about combining a metadata and semantic search
 SELECT
      ANY_VALUE (JSON_VALUE (meta.metadata, '$.PatientID')) AS PatientID,
      ANY_VALUE (JSON_VALUE (meta.metadata, '$.PatientName')) AS PatientName,
@@ -140,10 +132,10 @@ SELECT
           ELSE MIN(vectorSearch.distance)
      END AS TextSearchDistance
 FROM
-     `dicom.metadataView` AS meta
+     `dicom.instancesView` AS meta
      LEFT JOIN VECTOR_SEARCH (
-          TABLE `dicom.embeddings`,
-          'embedding',
+          TABLE `dicom.instances`,
+          'embeddingVector',
           (
                SELECT
                     ml_generate_embedding_result,
@@ -161,9 +153,9 @@ FROM
           options = > '{"fraction_lists_to_search": 0.01}'
      ) AS vectorSearch ON meta.id = vectorSearch.base.id
 WHERE
-     JSON_VALUE (metadata, '$.PatientSex') = 'F'
+     JSON_VALUE (meta.metadata, '$.PatientSex') = 'F'
      AND SAFE_CAST (
-          JSON_VALUE (metadata, '$.PatientAge') AS BIGNUMERIC
+          JSON_VALUE (meta.metadata, '$.PatientAge') AS BIGNUMERIC
      ) BETWEEN 30 AND 50
 GROUP BY
      StudyInstanceUID

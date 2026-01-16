@@ -22,9 +22,9 @@ output "cloud_run_service_url" {
   value       = google_cloud_run_v2_service.dcm2bq_service.uri
 }
 
-output "bigquery_metadata_table" {
-  description = "The ID of the BigQuery metadata table."
-  value       = google_bigquery_table.metadata_table.id
+output "bigquery_instances_table" {
+  description = "The ID of the BigQuery instances table."
+  value       = google_bigquery_table.instances_table.id
 }
 
 output "bigquery_dead_letter_table" {
@@ -42,7 +42,7 @@ output "bq_dataset_id" {
   value       = google_bigquery_dataset.dicom_dataset.dataset_id
 }
 
-output "bq_metadata_table_id" {
-  description = "The ID of the BigQuery metadata table (includes embeddings)."
-  value       = google_bigquery_table.metadata_table.table_id
+output "bq_instances_table_id" {
+  description = "The ID of the BigQuery instances table (includes embeddings)."
+  value       = google_bigquery_table.instances_table.table_id
 }
