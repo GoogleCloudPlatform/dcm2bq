@@ -34,10 +34,18 @@ async function insert(obj) {
       name: error.name,
       code: error.code
     }, null, 2));
+    console.error('Row data being inserted:', JSON.stringify(obj, null, 2));
     
-    let errorDetails = error.message || 'Unknown error';
+    let errorDetails = 'Unknown error';
     if (error.errors && Array.isArray(error.errors) && error.errors.length > 0) {
-      errorDetails = error.errors.map(e => `${e.reason}: ${e.message}${e.location ? ` (${e.location})` : ''}`).join('; ');
+      errorDetails = error.errors.map(e => {
+        const reason = e.reason || 'unknown';
+        const message = e.message || 'no message';
+        const location = e.location ? ` (${e.location})` : '';
+        return `${reason}: ${message}${location}`;
+      }).join('; ');
+    } else if (error.message) {
+      errorDetails = error.message;
     }
     
     const err = new Error(`Failed to insert DICOM record: ${errorDetails}`);
