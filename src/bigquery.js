@@ -27,7 +27,19 @@ async function insert(obj) {
   try {
     await bigquery.dataset(datasetId).table(instancesTable).insert(obj);
   } catch (error) {
-    const errorDetails = error.errors ? error.errors.map(e => e.message).join('; ') : error.message;
+    // Enhanced error logging
+    console.error('BigQuery insert error:', JSON.stringify({
+      message: error.message,
+      errors: error.errors,
+      name: error.name,
+      code: error.code
+    }, null, 2));
+    
+    let errorDetails = error.message || 'Unknown error';
+    if (error.errors && Array.isArray(error.errors) && error.errors.length > 0) {
+      errorDetails = error.errors.map(e => `${e.reason}: ${e.message}${e.location ? ` (${e.location})` : ''}`).join('; ');
+    }
+    
     const err = new Error(`Failed to insert DICOM record: ${errorDetails}`);
     err.originalError = error;
     err.rowData = obj;
