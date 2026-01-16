@@ -23,11 +23,13 @@ const { processImage } = require("../src/processors/image");
 const { processPdf } = require("../src/processors/pdf");
 const { processSR } = require("../src/processors/sr");
 const { SOP_CLASS_UIDS, createVectorEmbedding } = require("../src/embeddings");
+const sinon = require("sinon");
 
 const testFiles = glob("./test/files/dcm/*.dcm");
 
 describe("embeddings", () => {
   let imageTestData, srTestData, pdfTestData;
+  let storageStub, doRequestStub;
 
   const findAllTestDataBySopClass = (sopClassUids) => {
     if (!Array.isArray(sopClassUids)) {
@@ -57,6 +59,30 @@ describe("embeddings", () => {
     imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
     srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
     pdfTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
+
+    // Mock Storage class to prevent real GCS operations
+    const { Storage } = require("@google-cloud/storage");
+    const mockBucket = {
+      file: sinon.stub().returns({
+        save: sinon.stub().resolves(),
+        getSignedUrl: sinon.stub().resolves(["gs://mock-bucket/path/to/file"])
+      })
+    };
+    storageStub = sinon.stub(Storage.prototype, "bucket").returns(mockBucket);
+
+    // Stub model request to avoid external API calls; return deterministic vector
+    const embeddingsModule = require("../src/embeddings");
+    const mockVec = Array.from({ length: 1408 }, (_, i) => Math.sin(i) * 0.001);
+    if (embeddingsModule.doRequest && embeddingsModule.doRequest.restore) embeddingsModule.doRequest.restore();
+    doRequestStub = sinon.stub(embeddingsModule, "doRequest").resolves({
+      predictions: [{ imageEmbedding: mockVec, textEmbedding: mockVec }],
+    });
+
+    // Stub Gemini ask function to avoid external summarization calls from SR/PDF text processing
+    const geminiPath = require.resolve("../src/gemini");
+    delete require.cache[geminiPath];
+    const askGeminiStub = sinon.stub().resolves("Summarized text");
+    require.cache[geminiPath] = { exports: askGeminiStub };
   });
 
   describe("processors", () => {
@@ -84,6 +110,16 @@ describe("embeddings", () => {
         assert.ok(result.text, `processPdf failed for ${file}`);
       }
     });
+  });
+
+  after(() => {
+    // Restore stubs - critical to restore Storage stub so it doesn't interfere with other tests
+    if (storageStub) {
+      storageStub.restore();
+    }
+    if (doRequestStub) {
+      doRequestStub.restore();
+    }
   });
 
   describe("createVectorEmbedding", () => {
