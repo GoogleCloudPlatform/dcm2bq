@@ -193,6 +193,9 @@ async function handleZipFile(zipBuffer, bucketId, objectId, timestamp, version, 
     }
     
     // Process each DICOM file; continue on per-file failure
+    let successCount = 0;
+    let errorCount = 0;
+    
     for (const dcmFile of dcmFiles) {
       try {
         const fileBuffer = await fs.readFile(dcmFile);
@@ -208,11 +211,17 @@ async function handleZipFile(zipBuffer, bucketId, objectId, timestamp, version, 
           fileBuffer.length,
           consts.STORAGE_TYPE_GCS
         );
+        successCount++;
       } catch (error) {
+        errorCount++;
         const errorMsg = error instanceof Error ? error.message : String(error);
         const errorStack = error instanceof Error ? error.stack : '';
-        console.error(`Error processing DICOM ${dcmFile}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
+        console.error(`Error processing DICOM ${path.basename(dcmFile)}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
       }
+    }
+    
+    if (DEBUG_MODE) {
+      console.log(`Zip processing complete for ${zipUriPath}: ${successCount} succeeded, ${errorCount} failed out of ${dcmFiles.length} total`);
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
