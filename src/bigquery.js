@@ -21,17 +21,18 @@ const bigquery = new BigQuery();
 const cfg = config.get().gcpConfig.bigQuery || {};
 const datasetId = cfg.datasetId;
 const metadataTable = cfg.metadataTableId;
-const embeddingsTable = cfg.embeddingsTableId || `${metadataTable}_embeddings`;
 
-async function insertMetadata(obj) {
+async function insert(obj) {
   if (!datasetId || !metadataTable) throw new Error('BigQuery metadata table not configured');
-  await bigquery.dataset(datasetId).table(metadataTable).insert(obj);
+  try {
+    await bigquery.dataset(datasetId).table(metadataTable).insert(obj);
+  } catch (error) {
+    const errorDetails = error.errors ? error.errors.map(e => e.message).join('; ') : error.message;
+    const err = new Error(`Failed to insert DICOM record: ${errorDetails}`);
+    err.originalError = error;
+    err.rowData = obj;
+    throw err;
+  }
 }
 
-async function insertEmbeddings(obj) {
-  if (!datasetId || !embeddingsTable) throw new Error('BigQuery embeddings table not configured');
-  await bigquery.dataset(datasetId).table(embeddingsTable).insert(obj);
-}
-
-// Backwards compatible default
-module.exports = { insertMetadata, insertEmbeddings, insert: insertMetadata };
+module.exports = { insert };

@@ -26,15 +26,13 @@ const embeddings = require("../src/embeddings");
 const consts = require("../src/consts");
 
 describe("eventhandlers", () => {
-  let bqInsertMetadataStub;
-  let bqInsertEmbeddingsStub;
+  let bqInsertStub;
   let createVectorEmbeddingStub;
   let eventhandlers;
 
   before(() => {
-    // Stub BigQuery methods to avoid actual database operations
-    bqInsertMetadataStub = sinon.stub(bq, "insertMetadata").resolves();
-    bqInsertEmbeddingsStub = sinon.stub(bq, "insertEmbeddings").resolves();
+    // Stub BigQuery insert method to avoid actual database operations
+    bqInsertStub = sinon.stub(bq, "insert").resolves();
     
     // Stub embeddings to avoid actual API calls
     createVectorEmbeddingStub = sinon.stub(embeddings, "createVectorEmbedding").resolves(null);
@@ -45,15 +43,13 @@ describe("eventhandlers", () => {
 
   after(() => {
     // Restore stubs
-    bqInsertMetadataStub.restore();
-    bqInsertEmbeddingsStub.restore();
+    bqInsertStub.restore();
     createVectorEmbeddingStub.restore();
   });
 
   beforeEach(() => {
     // Reset call history before each test
-    bqInsertMetadataStub.resetHistory();
-    bqInsertEmbeddingsStub.resetHistory();
+    bqInsertStub.resetHistory();
     createVectorEmbeddingStub.resetHistory();
   });
 
@@ -91,29 +87,29 @@ describe("eventhandlers", () => {
       try {
         await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
 
-        // Verify that BigQuery insertMetadata was called for each DICOM file in the zip
-        assert(bqInsertMetadataStub.called, 
-          `insertMetadata should be called. Actual calls: ${bqInsertMetadataStub.callCount}`);
+        // Verify that BigQuery insert was called for each DICOM file in the zip
+        assert(bqInsertStub.called, 
+          `insert should be called. Actual calls: ${bqInsertStub.callCount}`);
         
-        // Get the number of times insertMetadata was called (one for each DICOM file)
-        const callCount = bqInsertMetadataStub.callCount;
+        // Get the number of times insert was called (one for each DICOM file)
+        const callCount = bqInsertStub.callCount;
         assert(callCount > 0, "Should process at least one DICOM file from zip");
 
         // Check that each call has the correct path format (basePath#fileName.dcm)
         for (let i = 0; i < callCount; i++) {
-          const call = bqInsertMetadataStub.getCall(i);
-          const metaRow = call.args[0];
+          const call = bqInsertStub.getCall(i);
+          const row = call.args[0];
           
-          assert.ok(metaRow.path, "Should have path");
-          assert.ok(metaRow.id, "Should have id");
-          assert.ok(metaRow.timestamp, "Should have timestamp");
-          assert.ok(metaRow.version, "Should have version");
-          assert.ok(metaRow.info, "Should have info");
-          assert.ok(metaRow.metadata, "Should have metadata");
+          assert.ok(row.path, "Should have path");
+          assert.ok(row.id, "Should have id");
+          assert.ok(row.timestamp, "Should have timestamp");
+          assert.ok(row.version, "Should have version");
+          assert.ok(row.info, "Should have info");
+          assert.ok(row.metadata, "Should have metadata");
           
           // Verify the path format is correct for zip files (uriPath = basePath#fileName)
-          assert.ok(metaRow.path.startsWith("test-bucket/test.zip#"), "Path should include zip base path with #fileName");
-          assert.ok(metaRow.path.endsWith(".dcm"), "Path should end with .dcm");
+          assert.ok(row.path.startsWith("test-bucket/test.zip#"), "Path should include zip base path with #fileName");
+          assert.ok(row.path.endsWith(".dcm"), "Path should end with .dcm");
         }
 
       } finally {
@@ -155,8 +151,8 @@ describe("eventhandlers", () => {
         // Should not throw, but should log error
         await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
 
-        // Should not have called insertMetadata since zip extraction failed
-        assert.strictEqual(bqInsertMetadataStub.callCount, 0, 
+        // Should not have called insert since zip extraction failed
+        assert.strictEqual(bqInsertStub.callCount, 0, 
           "Should not process any files when zip extraction fails");
 
       } finally {
@@ -196,12 +192,12 @@ describe("eventhandlers", () => {
       try {
         await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
 
-        // Verify that BigQuery insertMetadata was called once
-        assert.strictEqual(bqInsertMetadataStub.callCount, 1, 
+        // Verify that BigQuery insert was called once
+        assert.strictEqual(bqInsertStub.callCount, 1, 
           "Should process exactly one DICOM file");
 
-        const metaRow = bqInsertMetadataStub.getCall(0).args[0];
-        assert.strictEqual(metaRow.path, "gs://test-bucket/ct.dcm", 
+        const row = bqInsertStub.getCall(0).args[0];
+        assert.strictEqual(row.path, "gs://test-bucket/ct.dcm", 
           "Path should be the DICOM file uriPath");
 
       } finally {

@@ -54,7 +54,7 @@ describe("config", () => {
       gcpConfig: {
         projectId: "test-project",
         location: "us-central1",
-        bigQuery: { datasetId: "dicom", metadataTableId: "metadata", embeddingsTableId: "embeddings" },
+        bigQuery: { datasetId: "dicom", metadataTableId: "metadata" },
         embeddings: { enabled: true, model: "multimodalembedding@001", gcsBucketPath: "gs://test-bucket/extract" },
       },
       jsonOutput: { ignoreBinary: true },
@@ -73,7 +73,7 @@ describe("config", () => {
       gcpConfig: {
         projectId: "test-project",
         location: "us-central1",
-        bigQuery: { datasetId: "dicom", metadataTableId: "metadata", embeddingsTableId: "embeddings" },
+        bigQuery: { datasetId: "dicom", metadataTableId: "metadata" },
         embeddings: { enabled: true, model: "multimodalembedding@001", gcsBucketPath: "gs://test-bucket/extract" },
       },
       jsonOutput: { ignoreBinary: true },
