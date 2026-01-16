@@ -99,12 +99,19 @@ async function processDicom(buffer, uriPath) {
   // Check if we should generate actual embeddings (call Vertex AI)
   const shouldGenerateEmbedding = embeddingInputConfig?.vector?.model;
   
-  if (shouldGenerateEmbedding) {
-    // Generate full embedding (includes input creation + vector generation)
-    embeddingsResult = await createVectorEmbedding(json, buffer);
-  } else if (shouldCreateInput) {
-    // Only create embedding input (extract and save, but don't generate vector)
-    embeddingsResult = await createEmbeddingInput(json, buffer);
+  // Try to generate embeddings, but don't fail the entire processing if it fails
+  try {
+    if (shouldGenerateEmbedding) {
+      // Generate full embedding (includes input creation + vector generation)
+      embeddingsResult = await createVectorEmbedding(json, buffer);
+    } else if (shouldCreateInput) {
+      // Only create embedding input (extract and save, but don't generate vector)
+      embeddingsResult = await createEmbeddingInput(json, buffer);
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to generate embeddings for ${uriPath}: ${errorMsg}`);
+    // Continue without embeddings - we still want to save the metadata
   }
   
   return {
