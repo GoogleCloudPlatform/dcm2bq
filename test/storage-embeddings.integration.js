@@ -246,7 +246,9 @@ describe("Storage and Embedding Integration Tests", function () {
       await saveToGCS(imageBuffer, fileName, "image/jpeg", "test");
       
       // Track for cleanup
-      const basePath = gcpConfig.embedding.input.gcsBucketPath.replace(/^gs:\/\/[^\/]+\//, "");
+      // Extract the path after the bucket name (if any)
+      const bucketMatch = gcpConfig.embedding.input.gcsBucketPath.match(/^gs:\/\/[^\/]+(\/(.*))?$/);
+      const basePath = bucketMatch && bucketMatch[2] ? bucketMatch[2] : "";
       const fullPath = basePath ? `${basePath}/test/${fileName}` : `test/${fileName}`;
       uploadedFiles.push(fullPath);
 
@@ -286,7 +288,9 @@ describe("Storage and Embedding Integration Tests", function () {
       await saveToGCS(textResult.text, fileName, "text/plain", "test");
       
       // Track for cleanup
-      const basePath = gcpConfig.embedding.input.gcsBucketPath.replace(/^gs:\/\/[^\/]+\//, "");
+      // Extract the path after the bucket name (if any)
+      const bucketMatch = gcpConfig.embedding.input.gcsBucketPath.match(/^gs:\/\/[^\/]+(\/(.*))?$/);
+      const basePath = bucketMatch && bucketMatch[2] ? bucketMatch[2] : "";
       const fullPath = basePath ? `${basePath}/test/${fileName}` : `test/${fileName}`;
       uploadedFiles.push(fullPath);
 

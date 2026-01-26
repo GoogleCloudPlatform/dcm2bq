@@ -259,11 +259,12 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     case consts.GCS_OBJ_ARCHIVE:
     // The object has been removed
     case consts.GCS_OBJ_DELETE: {
+      const uriPath = gcs.createUriPath(bucketId, objectId);
       const infoObj = {
         event: eventType,
         input: { type: consts.STORAGE_TYPE_GCS },
       };
-      const writeObj = { timestamp, path: basePath, version };
+      const writeObj = { timestamp, path: uriPath, version };
       await persistRow(writeObj, infoObj, null, null);
       perfCtx.addRef("afterBqInsert");
       break;
@@ -280,7 +281,13 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         await handleZipFile(buffer, bucketId, objectId, timestamp, version, eventType);
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
-        await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
+        try {
+          await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(`Error processing file ${uriPath}: ${errorMsg}`);
+          // Don't throw - just log and continue
+        }
       }
       perfCtx.addRef("afterProcessDicom");
       perfCtx.addRef("afterBqInsert");

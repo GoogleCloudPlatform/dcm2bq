@@ -320,6 +320,77 @@ describe("End-to-End Pipeline Integration Tests", function () {
       assert.ok(rows[0].count >= testFiles.length, 
         `Should have processed at least ${testFiles.length} files, found ${rows[0].count}`);
     });
+
+    it("should process zip files containing DICOM files", async function () {
+      if (!testBucket) {
+        this.skip();
+      }
+
+      const zipPath = path.join(__dirname, "files/zip/study.zip");
+      const zipBuffer = fs.readFileSync(zipPath);
+      
+      const timestamp = Date.now();
+      const zipFileName = `test-zip-${timestamp}.zip`;
+
+      // Upload zip file to GCS
+      await testBucket.upload(zipPath, {
+        destination: zipFileName,
+        metadata: {
+          contentType: "application/zip",
+        },
+      });
+
+      uploadedFiles.push(zipFileName);
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: testBucket.name,
+            objectId: zipFileName,
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: testBucket.name,
+            name: zipFileName,
+            generation: Date.now().toString(),
+          })).toString("base64"),
+        },
+      };
+
+      const perfCtx = { addRef: () => {} };
+
+      // Process the zip file
+      await handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      // Wait for async processing
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Query BigQuery to verify DICOM files from zip were processed
+      // Zip files are stored with format: gs://bucket/zipfile.zip#filename.dcm
+      const query = `
+        SELECT path, metadata
+        FROM \`${gcpConfig.projectId}.${gcpConfig.bigQuery.datasetId}.${gcpConfig.bigQuery.instancesTableId}\`
+        WHERE path LIKE @pattern
+        ORDER BY timestamp DESC
+      `;
+
+      const [rows] = await bigquery.query({
+        query: query,
+        params: { pattern: `%${zipFileName}#%` },
+      });
+
+      // The zip contains 12 DICOM files (excluding notdicom.txt)
+      // Verify at least some were processed
+      assert.ok(rows.length > 0, "Should have processed DICOM files from zip");
+      
+      // Verify path format includes the # separator for zip contents
+      rows.forEach(row => {
+        assert.ok(row.path.includes("#"), `Path should include # separator for zip contents: ${row.path}`);
+        assert.ok(row.path.includes(zipFileName), `Path should include zip file name: ${row.path}`);
+      });
+
+      console.log(`  ✓ Processed ${rows.length} DICOM files from zip archive`);
+    });
   });
 
   describe("Error Handling", function () {
@@ -392,7 +463,7 @@ describe("End-to-End Pipeline Integration Tests", function () {
 
       // Query for the delete event
       const query = `
-        SELECT id, path, metadata, JSON_VALUE(info, '$.event') as event
+        SELECT id, path, metadata, info.event as event
         FROM \`${gcpConfig.projectId}.${gcpConfig.bigQuery.datasetId}.${gcpConfig.bigQuery.instancesTableId}\`
         WHERE path = @path
         ORDER BY timestamp DESC

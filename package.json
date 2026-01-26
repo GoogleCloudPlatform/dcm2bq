@@ -6,7 +6,7 @@
   "scripts": {
     "test": "./helpers/run-unit-tests.sh",
     "test:integration": "./helpers/run-integration-tests.sh",
-    "release": "DCM2BQ_CONFIG_FILE=test/testconfig.json release-it --ci"
+    "release": "release-it --ci"
   },
   "bin": {
     "dcm2bq": "src/index.js"
