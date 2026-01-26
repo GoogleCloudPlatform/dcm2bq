@@ -80,9 +80,12 @@ describe("BigQuery insert payload matches schema", () => {
       src: "TEST",
     });
 
-    // Save original bigquery module
+    // Save original bigquery module and clear require cache for fresh load
     const bigqueryPath = require.resolve("../src/bigquery");
     originalBigQueryModule = require.cache[bigqueryPath];
+    try { delete require.cache[bigqueryPath]; } catch (err) {
+      // Ignore errors if module was not previously loaded
+    }
     
     // Stub modules before requiring eventhandlers
     delete require.cache[bigqueryPath];

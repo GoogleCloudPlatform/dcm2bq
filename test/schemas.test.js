@@ -47,7 +47,9 @@ describe("schemas", () => {
     data.message.attributes.objectId = "test.jpg";
     try {
       matchEventSchema(data);
-      assert.fail();
-    } catch (e) {}
+      assert.fail("Should have thrown an error for invalid object type");
+    } catch (e) {
+      assert.ok(e, "Should throw an error for schema validation failure");
+    }
   });
 });

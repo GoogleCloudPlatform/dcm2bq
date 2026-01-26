@@ -90,6 +90,8 @@ describe("config", () => {
       src: "ENV_VAR_FILE",
     };
     fs.writeFileSync(CONFIG_FILE_NAME, JSON.stringify(configContent));
+    // Clear DCM2BQ_CONFIG so that DCM2BQ_CONFIG_FILE takes precedence
+    delete process.env.DCM2BQ_CONFIG;
     process.env.DCM2BQ_CONFIG_FILE = CONFIG_FILE_NAME;
     const conf = require("../src/config").get({ ignoreCache: true });
     assert.ok(conf);
