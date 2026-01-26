@@ -35,7 +35,6 @@ async function doRequest(endpoint, payload) {
         delay = delay * 2;
         continue;
       }
-      console.error('API request failed:', error.message);
       throw error;
     }
   }
