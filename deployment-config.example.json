@@ -1,0 +1,7 @@
+{
+  "gcs_bucket_name": "dcm2bq-dicom-bucket-example",
+  "bq_dataset_id": "dicom",
+  "bq_instances_table_id": "instances",
+  "cloud_run_service_url": "https://dcm2bq-service-example-us-central1.a.run.app",
+  "gcs_processed_data_bucket_name": "dcm2bq-processed-data-example"
+}

@@ -131,22 +131,11 @@ The workflow is as follows:
 
 **Note:** When deploying to Cloud Run, ensure the container has enough memory allocated to handle your largest DICOM files.
 
-### Archive Support (.zip, .tar.gz, .tgz)
-
-The service can process archives containing multiple DICOM files. When a `.zip`, `.tar.gz`, or `.tgz` file is uploaded to the configured GCS bucket:
-
-1. The archive is downloaded to memory
-2. All `.dcm` files are extracted to a temporary directory
-3. Each DICOM file is processed individually (metadata extraction and optional embedding generation)
-4. All files share the same base path (the archive file path) for tracking purposes
-5. Temporary files are automatically cleaned up after processing
-
-This feature is useful for batch uploads or when DICOM files are already archived. All DICOM files within the archive will be processed as separate entries in BigQuery, maintaining the original archive file path as the base path for version tracking.
+The service also supports processing archives (`.zip`, `.tar.gz`, `.tgz`) containing multiple DICOM files. See [docs/ARCHIVE_SUPPORT.md](docs/ARCHIVE_SUPPORT.md) for details.
 
 ### As a CLI
 
 The CLI is useful for testing, development, and batch processing.
-
 
 **Example: Dump DICOM metadata as JSON**
 
@@ -187,6 +176,14 @@ dcm2bq extract test/files/dcm/sr.dcm
 ```
 
 If you do not pass `--summary`, the full extracted text will be saved (subject to length limits for embedding).
+
+**Example: Process a DICOM file and retrieve results from BigQuery**
+
+```bash
+dcm2bq process test/files/dcm/ct.dcm
+```
+
+This command uploads a DICOM file to GCS, triggers CloudRun processing via Pub/Sub, polls BigQuery for results, and displays a formatted overview. It uses `test/testconfig.json` if available, or you can specify a config file with `--config deployment-config.json`. See [docs/PROCESS_COMMAND.md](docs/PROCESS_COMMAND.md) for detailed usage and archive file support.
 
 ## Configuration
 
@@ -258,6 +255,21 @@ Example `config.json` override:
 
 - `embedding.input.summarizeText.model`: If present, long text extracted from SR/PDF will be summarized using the specified Gemini model before processing. Omit this section to skip summarization. This can be overridden at runtime by the CLI `--summary` flag.
 - `embedding.input.summarizeText.maxLength`: Maximum character length for summarized text (default: 1024). The summarization prompt instructs the model to keep output under this limit. This also controls when summarization is triggered: text longer than `maxLength` will be summarized when embedding compatibility is required.
+
+## Documentation
+
+Additional documentation on new features and development guides can be found in the [docs](docs/) directory:
+
+### CLI Process Command
+- **[docs/PROCESS_COMMAND.md](docs/PROCESS_COMMAND.md)** - Overview and usage of the `dcm2bq process` command for uploading DICOM files and retrieving results
+- **[docs/PROCESS_COMMAND_IMPLEMENTATION.md](docs/PROCESS_COMMAND_IMPLEMENTATION.md)** - Implementation details of the process command
+
+### Archive Support
+- **[docs/ARCHIVE_SUPPORT.md](docs/ARCHIVE_SUPPORT.md)** - Comprehensive guide to archive file processing (.zip, .tar.gz, .tgz), including usage, timeouts, and troubleshooting
+- **[docs/QUICK_REFERENCE_ARCHIVE.md](docs/QUICK_REFERENCE_ARCHIVE.md)** - Quick examples and reference table for common archive scenarios
+
+### Testing
+- **[docs/TEST_COVERAGE_PROCESS_COMMAND.md](docs/TEST_COVERAGE_PROCESS_COMMAND.md)** - Comprehensive test coverage documentation for the process command, including unit and integration tests
 
 ## Development
 
