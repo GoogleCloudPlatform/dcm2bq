@@ -133,4 +133,22 @@ program
     server.start();
   });
 
+program
+  .command("process")
+  .description("upload a DICOM file to GCS, process via deployed CloudRun, and retrieve results from BigQuery")
+  .argument("<inputFile>", "DICOM file to process")
+  .option("-c, --config <deploymentConfig>", "path to deployment config file (optional; uses test/testconfig.json if available)")
+  .option("--poll-interval <ms>", "polling interval in milliseconds", "2000")
+  .option("--poll-timeout <ms>", "maximum polling time in milliseconds (scales with file size)", "60000")
+  .option("--poll-timeout-per-mb <ms>", "additional polling time per MB of file size", "10000")
+  .action(async (fileName, options) => {
+    const processCommand = require("./process-command");
+    try {
+      await processCommand.execute(fileName, options);
+    } catch (error) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
 program.parse();

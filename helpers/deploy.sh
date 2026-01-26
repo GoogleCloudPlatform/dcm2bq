@@ -178,6 +178,7 @@ fi
 # 7. Update test/testconfig.json
 DATASET_ID=$(terraform output -raw bq_dataset_id)
 TABLE_ID=$(terraform output -raw bq_instances_table_id)
+DICOM_BUCKET=$(terraform output -raw gcs_bucket_name)
 PROCESSED_DATA_BUCKET=$(terraform output -raw gcs_processed_data_bucket_name 2>/dev/null || true)
 TEST_CONFIG_FILE="../test/testconfig.json"
 TEMP_JSON=$(mktemp)
@@ -192,8 +193,9 @@ jq \
   --arg project_id "$PROJECT_ID" \
   --arg dataset_id "$DATASET_ID" \
   --arg table_id "$TABLE_ID" \
+  --arg dicom_bucket "$DICOM_BUCKET" \
   --arg gcs_bucket_path "gs://${PROCESSED_DATA_BUCKET}" \
-  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.instancesTableId = $table_id | .gcpConfig.embedding.input.gcsBucketPath = $gcs_bucket_path' \
+  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.instancesTableId = $table_id | .gcpConfig.gcs_bucket_name = $dicom_bucket | .gcpConfig.embedding.input.gcsBucketPath = $gcs_bucket_path' \
   "$TEST_CONFIG_FILE" > "$TEMP_JSON" && mv "$TEMP_JSON" "$TEST_CONFIG_FILE"
 
 echo "Updated test/testconfig.json."
