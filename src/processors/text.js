@@ -15,9 +15,9 @@
  */
 
 const { gcpConfig } = require("../config").get();
-const askGemini = require("../gemini");
 
 async function createEmbedText(text) {
+  const askGemini = require("../gemini");
   const maxLength = gcpConfig.embedding?.input?.summarizeText?.maxLength || 1024;
   const prompt = `Summarize the following medical text for embedding. Keep it under ${maxLength} characters and retain important clinical details:\n\n${text}`;
   return await askGemini(prompt);

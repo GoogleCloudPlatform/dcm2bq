@@ -95,7 +95,9 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
   const gcsBucketPath = gcpConfig.embedding?.input?.gcsBucketPath;
   
   if (!gcsBucketPath) {
-    console.warn("gcpConfig.embedding.input.gcsBucketPath is not configured. Skipping file save to GCS.");
+    if (DEBUG_MODE) {
+      console.debug("gcpConfig.embedding.input.gcsBucketPath is not configured. Skipping file save to GCS.");
+    }
     return;
   }
 
@@ -201,6 +203,18 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
 }
 
 async function createVectorEmbedding(metadata, dicomBuffer) {
+  // Validate GCP configuration
+  if (!gcpConfig.embedding?.input?.vector?.model) {
+    console.error("Vector embedding is not configured. Please set gcpConfig.embedding.input.vector.model in your configuration.");
+    return null;
+  }
+
+  if (gcpConfig.projectId === 'my-gcp-project') {
+    console.error("Error: GCP project ID is not configured. Please set the GCP_PROJECT environment variable or configure gcpConfig.projectId in your configuration file.");
+    console.error("Example: export GCP_PROJECT=your-actual-gcp-project");
+    return null;
+  }
+
   const inputResult = await createEmbeddingInput(metadata, dicomBuffer);
   if (!inputResult) {
     return null;
@@ -218,7 +232,21 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
       return null;
     }
   } catch (e) {
-    console.error("Error generating vector embedding:", e);
+    // Provide more helpful error messages for common issues
+    const errorMessage = e.message || '';
+    if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
+      console.error(`Error: The Vertex AI API is not enabled for project '${gcpConfig.projectId}'.`);
+      console.error(`Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`);
+      console.error("After enabling, wait a few minutes for the change to propagate.");
+    } else if (errorMessage.includes('401') || errorMessage.includes('permission denied')) {
+      console.error(`Error: Authentication failed for project '${gcpConfig.projectId}'.`);
+      console.error("Please check your Google Cloud credentials and ensure you have the required permissions.");
+    } else if (errorMessage.includes('403')) {
+      console.error(`Error: Access denied for project '${gcpConfig.projectId}'.`);
+      console.error("Please check that you have the required IAM roles (e.g., roles/aiplatform.user).");
+    } else {
+      console.error("Error generating vector embedding:", e.message);
+    }
     return null;
   }
 }
