@@ -22,14 +22,51 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Mocha Tests",
+      "name": "Unit Tests",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
-      "args": ["--colors", "--bail", "--timeout", "30000"],
+      "args": [
+        "test/bq-schema.test.js",
+        "test/config.test.js",
+        "test/dicomtojson.test.js",
+        "test/embeddings.test.js",
+        "test/eventhandlers.test.js",
+        "test/http-retry.test.js",
+        "test/perf.test.js",
+        "test/schemas.test.js",
+        "test/text-processor.test.js",
+        "test/utils.test.js",
+        "--colors",
+        "--timeout",
+        "30000"
+      ],
+      "env": {
+        "DCM2BQ_CONFIG": "{\"gcpConfig\":{\"projectId\":\"test-project-12345\",\"location\":\"us-central1\",\"bigQuery\":{\"datasetId\":\"dicom\",\"instancesTableId\":\"instances\"},\"embedding\":{\"input\":{\"gcsBucketPath\":\"gs://test-bucket/extract\",\"summarizeText\":{\"model\":\"gemini-2.5-flash-lite\",\"maxLength\":1024},\"vector\":{\"model\":\"multimodalembedding@001\"}}}},\"dicomParser\":{},\"jsonOutput\":{\"useArrayWithSingleValue\":false,\"ignoreGroupLength\":true,\"ignoreMetaHeader\":false,\"ignorePrivate\":false,\"ignoreBinary\":false,\"useCommonNames\":true,\"explicitBulkDataRoot\":false}}"
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Integration Tests",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
+      "args": [
+        "test/config-validation.integration.js",
+        "test/pipeline.integration.js",
+        "test/semantic_compare.integration.js",
+        "test/storage-embeddings.integration.js",
+        "--colors",
+        "--timeout",
+        "60000"
+      ],
       "env": {
         "DEBUG": "true",
-        "DCM2BQ_CONFIG_FILE": "test/testconfig.json"
-      }
+        "DCM2BQ_CONFIG_FILE": "test/testconfig.json",
+        "GEMINI_API_KEY": "",
+        "GOOGLE_API_KEY": ""
+      },
+      "cwd": "${workspaceFolder}"
     }
   ]
 }
