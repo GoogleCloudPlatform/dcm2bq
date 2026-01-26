@@ -266,8 +266,8 @@ describe("process-command", () => {
       const formatted = processCommand.formatResultRow(row);
       assert(formatted.includes("Embedding:"));
       assert(formatted.includes("Model: multimodalembedding@001"));
-      assert(formatted.includes("Input: extracted.jpg"));
-      assert(formatted.includes("Type: image/jpeg"));
+      assert(formatted.includes("Path: gs://bucket/extracted.jpg"));
+      assert(formatted.includes("Mime Type: image/jpeg"));
     });
 
     it("should parse and include metadata information", () => {
@@ -331,6 +331,93 @@ describe("process-command", () => {
       
       const formatted = processCommand.formatResultRow(row);
       assert(formatted.includes("Path: N/A"));
+    });
+
+    it("should display detailed embedding information with input details", () => {
+      const row = {
+        path: "gs://bucket/file.dcm",
+        timestamp: "2024-01-12T15:40:00Z",
+        version: 0,
+        embedding: {
+          model: "multimodalembedding@001",
+          input: {
+            path: "gs://bucket/extracted.jpg",
+            size: 50000,
+            mimeType: "image/jpeg"
+          }
+        }
+      };
+      
+      const formatted = processCommand.formatResultRow(row);
+      assert(formatted.includes("Embedding:"));
+      assert(formatted.includes("Model: multimodalembedding@001"));
+      assert(formatted.includes("Path: gs://bucket/extracted.jpg"));
+      assert(formatted.includes("Size: 48.83 KB"));
+      assert(formatted.includes("Mime Type: image/jpeg"));
+      assert(formatted.includes("Embedding Vector: Not available"));
+    });
+
+    it("should display embedding vector status when present", () => {
+      const row = {
+        path: "gs://bucket/file.dcm",
+        timestamp: "2024-01-12T15:40:00Z",
+        version: 0,
+        embedding: {
+          model: "multimodalembedding@001",
+          input: {
+            path: "gs://bucket/extracted.jpg",
+            size: 50000,
+            mimeType: "image/jpeg"
+          }
+        },
+        embeddingVector: [0.1, 0.2, 0.3, 0.4, 0.5]
+      };
+      
+      const formatted = processCommand.formatResultRow(row);
+      assert(formatted.includes("Embedding:"));
+      assert(formatted.includes("Model: multimodalembedding@001"));
+      assert(formatted.includes("Embedding Vector: Present (5 values)"));
+    });
+
+    it("should display embedding info from info.embedding when no direct embedding", () => {
+      const row = {
+        path: "gs://bucket/file.dcm",
+        timestamp: "2024-01-12T15:40:00Z",
+        version: 0,
+        info: {
+          embedding: {
+            model: "multimodalembedding@001",
+            input: {
+              path: "gs://bucket/extracted.jpg",
+              size: 30000,
+              mimeType: "image/jpeg"
+            }
+          }
+        }
+      };
+      
+      const formatted = processCommand.formatResultRow(row);
+      assert(formatted.includes("Embedding:"));
+      assert(formatted.includes("Model: multimodalembedding@001"));
+      assert(formatted.includes("Path: gs://bucket/extracted.jpg"));
+      assert(formatted.includes("Size: 29.30 KB"));
+    });
+
+    it("should show N/A for embedding input when not available", () => {
+      const row = {
+        path: "gs://bucket/file.dcm",
+        timestamp: "2024-01-12T15:40:00Z",
+        version: 0,
+        embedding: {
+          model: "multimodalembedding@001"
+        }
+      };
+      
+      const formatted = processCommand.formatResultRow(row);
+      assert(formatted.includes("Embedding:"));
+      assert(formatted.includes("Model: multimodalembedding@001"));
+      assert(formatted.includes("Input: Not available"));
+      assert(formatted.includes("Embedding Vector: Not available"));
     });
   });
 
