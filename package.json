@@ -4,7 +4,6 @@
   "description": "A tool and service to process DICOM files, extract metadata into BigQuery, and generate vector embeddings for machine learning analysis on Google Cloud.",
   "main": "src/index.js",
   "scripts": {
-    "start": "DCM2BQ_CONFIG_FILE=test/testconfig.json node src/index.js",
     "test": "./helpers/run-unit-tests.sh",
     "test:integration": "./helpers/run-integration-tests.sh",
     "release": "DCM2BQ_CONFIG_FILE=test/testconfig.json release-it --ci"
