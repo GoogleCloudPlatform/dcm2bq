@@ -35,6 +35,7 @@ async function doRequest(endpoint, payload) {
         delay = delay * 2;
         continue;
       }
+      console.error('HTTP request failed:', error.message);
       throw error;
     }
   }
