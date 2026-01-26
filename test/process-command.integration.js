@@ -44,10 +44,14 @@ describe("process-command integration", () => {
 
     // Create test config
     const config = {
-      gcs_bucket_name: "test-bucket",
-      bq_dataset_id: "test_dataset",
-      bq_instances_table_id: "instances",
-      cloud_run_service_url: "https://test.run.app"
+      gcpConfig: {
+        projectId: "test-project",
+        gcs_bucket_name: "test-bucket",
+        bigQuery: {
+          datasetId: "test_dataset",
+          instancesTableId: "instances"
+        }
+      }
     };
     fs.writeFileSync(testConfigFile, JSON.stringify(config));
 
@@ -56,7 +60,10 @@ describe("process-command integration", () => {
     const { BigQuery } = require("@google-cloud/bigquery");
     
     gcsStub = sinon.stub(Storage.prototype, "bucket").returns({
-      upload: sinon.stub().resolves()
+      upload: sinon.stub().resolves(),
+      file: sinon.stub().returns({
+        getMetadata: sinon.stub().resolves([{ generation: "12345" }])
+      })
     });
     
     bigQueryStub = sinon.stub(BigQuery.prototype, "query").resolves([[]]);
@@ -95,7 +102,7 @@ describe("process-command integration", () => {
       // Execute would normally be called here, but we're testing the underlying functions
       const config = processCommand.loadDeploymentConfig(testConfigFile);
       assert.ok(config);
-      assert.strictEqual(config.gcs_bucket_name, "test-bucket");
+      assert.strictEqual(config.gcpConfig.gcs_bucket_name, "test-bucket");
     });
 
     it("should upload file with proper GCS bucket", async function() {

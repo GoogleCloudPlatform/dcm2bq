@@ -121,7 +121,9 @@ async function uploadToGCS(filePath, bucketName) {
     const file = bucket.file(objectName);
     
     // Upload the file
-    await file.save(require('fs').readFileSync(filePath));
+    await bucket.upload(filePath, {
+      destination: objectName
+    });
     
     // Get the file metadata to retrieve the generation ID
     const [metadata] = await file.getMetadata();
@@ -356,7 +358,7 @@ function formatResultOverview(results, isArchive = false, totalElapsedMs = 0) {
     
     // Summary statistics
     const modalities = new Set();
-    const totalSize = rows.reduce((sum, row) => sum + (row.info?.input?.size || 0), 0);
+    const totalSize = rows.reduce((sum, row) => sum + (row.input?.size || 0), 0);
     rows.forEach(row => {
       try {
         const metadata = typeof row.metadata === "string" 
