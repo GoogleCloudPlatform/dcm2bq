@@ -391,6 +391,70 @@ describe("End-to-End Pipeline Integration Tests", function () {
 
       console.log(`  ✓ Processed ${rows.length} DICOM files from zip archive`);
     });
+
+    it("should process tar.gz and tgz files containing DICOM files", async function () {
+      if (!testBucket) {
+        this.skip();
+      }
+
+      const tarPath = path.join(__dirname, "files/tar/study.tar.gz");
+      const timestamp = Date.now();
+      const tarFileName = `test-tar-${timestamp}.tgz`;
+
+      // Upload tar.gz file to GCS with tgz extension
+      await testBucket.upload(tarPath, {
+        destination: tarFileName,
+        metadata: {
+          contentType: "application/gzip",
+        },
+      });
+
+      uploadedFiles.push(tarFileName);
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: testBucket.name,
+            objectId: tarFileName,
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: testBucket.name,
+            name: tarFileName,
+            generation: Date.now().toString(),
+          })).toString("base64"),
+        },
+      };
+
+      const perfCtx = { addRef: () => {} };
+
+      // Process the archive file
+      await handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      // Wait for async processing
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Query BigQuery to verify DICOM files from archive were processed
+      const query = `
+        SELECT path
+        FROM \`${gcpConfig.projectId}.${gcpConfig.bigQuery.datasetId}.${gcpConfig.bigQuery.instancesTableId}\`
+        WHERE path LIKE @pattern
+        ORDER BY timestamp DESC
+      `;
+
+      const [rows] = await bigquery.query({
+        query: query,
+        params: { pattern: `%${tarFileName}#%` },
+      });
+
+      assert.ok(rows.length > 0, "Should have processed DICOM files from tar.gz/tgz archive");
+      rows.forEach(row => {
+        assert.ok(row.path.includes("#"), `Path should include # separator for archive contents: ${row.path}`);
+        assert.ok(row.path.includes(tarFileName), `Path should include archive file name: ${row.path}`);
+      });
+
+      console.log(`  ✓ Processed ${rows.length} DICOM files from tar.gz/tgz archive`);
+    });
   });
 
   describe("Error Handling", function () {
