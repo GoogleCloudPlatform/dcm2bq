@@ -19,17 +19,14 @@ const fs = require("fs");
 const glob = require("glob").globSync;
 const config = require("../src/config");
 const { DicomInMemory } = require("../src/dicomtojson");
-const { processImage } = require("../src/processors/image");
-const { processPdf } = require("../src/processors/pdf");
-const { processSR } = require("../src/processors/sr");
-const { SOP_CLASS_UIDS, createVectorEmbedding } = require("../src/embeddings");
 const sinon = require("sinon");
 
 const testFiles = glob("./test/files/dcm/*.dcm");
 
 describe("embeddings", () => {
   let imageTestData, srTestData, pdfTestData;
-  let storageStub, doRequestStub;
+  let storageStub, doRequestStub, askGeminiStub;
+  let processImage, processPdf, processSR, SOP_CLASS_UIDS, createVectorEmbedding;
 
   const findAllTestDataBySopClass = (sopClassUids) => {
     if (!Array.isArray(sopClassUids)) {
@@ -56,33 +53,94 @@ describe("embeddings", () => {
     const hasEmbeddingVector = c.gcpConfig.embedding?.input?.vector?.model;
     assert.ok(hasEmbeddingVector, "Embeddings need to be configured (embedding.input.vector.model)");
 
-    imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
-    srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
-    pdfTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
+    // First clear all module caches that might depend on gemini or http-retry
+    const geminiPath = require.resolve("../src/gemini");
+    const textProcessorPath = require.resolve("../src/processors/text");
+    const pdfProcessorPath = require.resolve("../src/processors/pdf");
+    const srProcessorPath = require.resolve("../src/processors/sr");
+    const imagePath = require.resolve("../src/processors/image");
+    const embeddingsPath = require.resolve("../src/embeddings");
+    const httpRetryPath = require.resolve("../src/http-retry");
+    const storagePath = require.resolve("@google-cloud/storage");
+    
+    delete require.cache[httpRetryPath];
+    delete require.cache[geminiPath];
+    delete require.cache[textProcessorPath];
+    delete require.cache[pdfProcessorPath];
+    delete require.cache[srProcessorPath];
+    delete require.cache[imagePath];
+    delete require.cache[embeddingsPath];
+    delete require.cache[storagePath];
 
     // Mock Storage class to prevent real GCS operations
-    const { Storage } = require("@google-cloud/storage");
-    const mockBucket = {
-      file: sinon.stub().returns({
-        save: sinon.stub().resolves(),
-        getSignedUrl: sinon.stub().resolves(["gs://mock-bucket/path/to/file"])
-      })
+    // Create mock file and bucket objects
+    const mockFile = {
+      save: sinon.stub().resolves(),
+      getSignedUrl: sinon.stub().resolves(["gs://mock-bucket/path/to/file"])
     };
-    storageStub = sinon.stub(Storage.prototype, "bucket").returns(mockBucket);
+    const mockBucket = {
+      file: (filePath) => {
+        return mockFile;
+      }
+    };
+    
+    // Create a mock Storage class that returns our mocked bucket
+    const mockStorageClass = function() {
+      this.bucket = (bucketName) => {
+        return mockBucket;
+      };
+    };
+    
+    // Replace the Storage module in require.cache BEFORE embeddings.js is loaded
+    const storageModulePath = require.resolve("@google-cloud/storage");
+    const originalStorageModule = require.cache[storageModulePath];
+    const mockStorageModule = {
+      exports: {
+        Storage: mockStorageClass,
+        Bucket: function() {},
+        File: function() {},
+      },
+    };
+    if (originalStorageModule) {
+      mockStorageModule.paths = originalStorageModule.paths;
+      mockStorageModule.filename = originalStorageModule.filename;
+    }
+    require.cache[storageModulePath] = mockStorageModule;
+    
+    // Keep a reference to restore later
+    storageStub = { restore: () => {
+      if (originalStorageModule) {
+        require.cache[storageModulePath] = originalStorageModule;
+      } else {
+        delete require.cache[storageModulePath];
+      }
+    }};
 
-    // Stub model request to avoid external API calls; return deterministic vector
-    const embeddingsModule = require("../src/embeddings");
+    // Stub GoogleGenAI to prevent real Gemini API calls
+    const genaiModule = require("@google/genai");
+    const mockModels = {
+      generateContent: sinon.stub().resolves({ text: "Summarized text" })
+    };
+    sinon.stub(genaiModule, "GoogleGenAI").returns({
+      models: mockModels
+    });
+
+    // Stub http-retry's doRequest to prevent real API calls to Vertex AI
     const mockVec = Array.from({ length: 1408 }, (_, i) => Math.sin(i) * 0.001);
-    if (embeddingsModule.doRequest && embeddingsModule.doRequest.restore) embeddingsModule.doRequest.restore();
-    doRequestStub = sinon.stub(embeddingsModule, "doRequest").resolves({
+    const httpRetryModule = require("../src/http-retry");
+    doRequestStub = sinon.stub(httpRetryModule, "doRequest").resolves({
       predictions: [{ imageEmbedding: mockVec, textEmbedding: mockVec }],
     });
 
-    // Stub Gemini ask function to avoid external summarization calls from SR/PDF text processing
-    const geminiPath = require.resolve("../src/gemini");
-    delete require.cache[geminiPath];
-    const askGeminiStub = sinon.stub().resolves("Summarized text");
-    require.cache[geminiPath] = { exports: askGeminiStub };
+    // NOW load the modules that depend on gemini and http-retry (they will use stubbed versions)
+    ({ processImage } = require("../src/processors/image"));
+    ({ processPdf } = require("../src/processors/pdf"));
+    ({ processSR } = require("../src/processors/sr"));
+    ({ SOP_CLASS_UIDS, createVectorEmbedding } = require("../src/embeddings"));
+
+    imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
+    srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
+    pdfTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
   });
 
   describe("processors", () => {
@@ -120,6 +178,25 @@ describe("embeddings", () => {
     if (doRequestStub) {
       doRequestStub.restore();
     }
+    // Restore GoogleGenAI stub
+    const genaiModule = require("@google/genai");
+    if (genaiModule.GoogleGenAI.restore) {
+      genaiModule.GoogleGenAI.restore();
+    }
+    // Restore module caches
+    const geminiPath = require.resolve("../src/gemini");
+    const textProcessorPath = require.resolve("../src/processors/text");
+    const pdfProcessorPath = require.resolve("../src/processors/pdf");
+    const srProcessorPath = require.resolve("../src/processors/sr");
+    const httpRetryPath = require.resolve("../src/http-retry");
+    const embeddingsPath = require.resolve("../src/embeddings");
+    
+    delete require.cache[httpRetryPath];
+    delete require.cache[geminiPath];
+    delete require.cache[textProcessorPath];
+    delete require.cache[pdfProcessorPath];
+    delete require.cache[srProcessorPath];
+    delete require.cache[embeddingsPath];
   });
 
   describe("createVectorEmbedding", () => {

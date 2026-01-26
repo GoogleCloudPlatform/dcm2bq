@@ -21,16 +21,24 @@ describe("text processor with partial config", () => {
   let originalConfigEnv;
   let consoleLogStub;
   let consoleErrorStub;
+  let geminiStub;
 
   beforeEach(() => {
     originalConfigEnv = process.env.DCM2BQ_CONFIG;
     // Clear require cache
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/processors/text")];
+    delete require.cache[require.resolve("../src/gemini")];
     
     // Stub console methods
     consoleLogStub = sinon.stub(console, "log");
     consoleErrorStub = sinon.stub(console, "error");
+    
+    // Stub Gemini API
+    geminiStub = sinon.stub();
+    require.cache[require.resolve("../src/gemini")] = {
+      exports: geminiStub
+    };
   });
 
   afterEach(() => {
@@ -42,6 +50,7 @@ describe("text processor with partial config", () => {
     // Clear require cache
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/processors/text")];
+    delete require.cache[require.resolve("../src/gemini")];
     
     // Restore stubs
     consoleLogStub.restore();
@@ -174,15 +183,15 @@ describe("text processor with partial config", () => {
     assert.ok(result1);
     assert.strictEqual(result1.text, shortText);
     
-    // Text > 500 should attempt summarization (will fail since we don't have a stub, but we can check the log)
+    // Text > 500 should attempt summarization - stub Gemini to return a summary
+    geminiStub.resolves("Summarized text");
     consoleLogStub.resetHistory();
     const longText = "X".repeat(600);
-    try {
-      await createTextInstance(longText, true);
-    } catch (e) {
-      // Expected to fail since Gemini API is not available in test
-    }
+    const result2 = await createTextInstance(longText, true);
+    assert.ok(result2);
+    assert.strictEqual(result2.text, "Summarized text");
     assert.ok(consoleLogStub.calledWith(sinon.match(/exceeds maxLength \(500\)/)));
+    assert.ok(geminiStub.called);
   });
 
   it("should use default maxLength when summarizeText has model but no maxLength", async () => {
@@ -210,15 +219,15 @@ describe("text processor with partial config", () => {
     assert.ok(result);
     assert.strictEqual(result.text, shortText);
     
-    // Text > 1024 should attempt summarization with default maxLength
+    // Text > 1024 should attempt summarization with default maxLength - stub to return success
+    geminiStub.resolves("Summarized text for default maxLength");
     consoleLogStub.resetHistory();
     const longText = "X".repeat(1500);
-    try {
-      await createTextInstance(longText, true);
-    } catch (e) {
-      // Expected to fail since Gemini API is not available in test
-    }
+    const result2 = await createTextInstance(longText, true);
+    assert.ok(result2);
+    assert.strictEqual(result2.text, "Summarized text for default maxLength");
     assert.ok(consoleLogStub.calledWith(sinon.match(/exceeds maxLength \(1024\)/)));
+    assert.ok(geminiStub.called);
   });
 
   it("should return text as-is when requireEmbeddingCompatible is false", async () => {
