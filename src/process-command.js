@@ -319,16 +319,30 @@ function formatResultRow(row) {
     }
   }
   
-  // Display embedding info if available
-  if (row.embedding && row.embedding.model) {
+  // Display embedding info if available - check both direct embedding and info.embedding
+  const embedding = row.embedding || (row.info && row.info.embedding) || null;
+  
+  if (embedding) {
     lines.push(`\nEmbedding:`);
-    lines.push(`  Model: ${row.embedding.model}`);
-    if (row.embedding.input && row.embedding.input.path) {
-      const inputFile = row.embedding.input.path.split("/").pop();
-      lines.push(`  Input: ${inputFile}`);
-      if (row.embedding.input.mimeType) {
-        lines.push(`  Type: ${row.embedding.input.mimeType}`);
-      }
+    lines.push(`  Model: ${embedding.model || "N/A"}`);
+    
+    // Display embedding input information
+    if (embedding.input) {
+      lines.push(`  Input:`);
+      lines.push(`    Path: ${embedding.input.path || "N/A"}`);
+      lines.push(`    Size: ${embedding.input.size ? (embedding.input.size / 1024).toFixed(2) + " KB" : "N/A"}`);
+      lines.push(`    Mime Type: ${embedding.input.mimeType || "N/A"}`);
+    } else {
+      lines.push(`  Input: Not available`);
+    }
+    
+    // Display embedding vector status - check both direct embeddingVector and nested
+    const embeddingVectorExists = row.embeddingVector || (embedding && embedding.embeddingVector);
+    if (embeddingVectorExists) {
+      const vector = row.embeddingVector || embedding.embeddingVector;
+      lines.push(`  Embedding Vector: Present (${Array.isArray(vector) ? vector.length : "object"} values)`);
+    } else {
+      lines.push(`  Embedding Vector: Not available`);
     }
   }
   
