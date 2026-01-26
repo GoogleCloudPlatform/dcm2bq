@@ -199,7 +199,7 @@ describe("Configuration and Validation Integration Tests", function () {
         path: "STRING",
         version: "STRING",
         info: "RECORD",
-        metadata: "STRING"
+        metadata: "JSON"
       };
 
       for (const [fieldName, expectedType] of Object.entries(requiredFields)) {
@@ -276,9 +276,8 @@ describe("Configuration and Validation Integration Tests", function () {
         info: {
           event: "TEST",
           input: {
-            type: "TEST",
-            bucket: "test-bucket",
-            object: "test.dcm"
+            size: 1024,
+            type: "application/dicom"
           }
         },
         metadata: null
