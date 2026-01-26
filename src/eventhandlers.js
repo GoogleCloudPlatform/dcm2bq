@@ -27,6 +27,7 @@ const fs = require("fs").promises;
 const path = require("path");
 const os = require("os");
 const AdmZip = require("adm-zip");
+const tar = require("tar");
 const { gcpConfig } = config.get();
 const embeddingInputConfig = gcpConfig.embedding?.input;
 
@@ -174,29 +175,63 @@ async function findDcmFiles(dir) {
   return files;
 }
 
+function getArchiveType(objectId) {
+  const lower = objectId.toLowerCase();
+  if (lower.endsWith('.zip')) {
+    return 'zip';
+  }
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    return 'tar';
+  }
+  return null;
+}
+
 /**
- * Handle a zip file containing DICOM files.
- * @param {Buffer} zipBuffer The zip file content
+ * Extract supported archive to a temporary directory.
+ * @param {('zip'|'tar')} archiveType The archive format
+ * @param {Buffer} archiveBuffer The archive contents
+ * @param {string} tempDir Path to extract into
+ */
+async function extractArchiveToTempDir(archiveType, archiveBuffer, tempDir) {
+  if (archiveType === 'zip') {
+    const zip = new AdmZip(archiveBuffer);
+    zip.extractAllTo(tempDir, true);
+    return;
+  }
+
+  if (archiveType === 'tar') {
+    const archivePath = path.join(tempDir, 'archive.tar.gz');
+    await fs.writeFile(archivePath, archiveBuffer);
+    await tar.x({ file: archivePath, cwd: tempDir });
+    return;
+  }
+
+  throw new Error(`Unsupported archive type: ${archiveType}`);
+}
+
+/**
+ * Handle a supported archive file containing DICOM files.
+ * @param {Buffer} archiveBuffer The archive file content
  * @param {string} bucketId The GCS bucket ID
- * @param {string} objectId The GCS object ID (zip file name)
+ * @param {string} objectId The GCS object ID (archive file name)
  * @param {Date} timestamp The timestamp of the event
  * @param {number} version The version identifier
  * @param {string} eventType The event type
+ * @param {('zip'|'tar')} archiveType The archive format
  */
-async function handleZipFile(zipBuffer, bucketId, objectId, timestamp, version, eventType) {
+async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, version, eventType, archiveType) {
   let tempDir = null;
-  const zipUriPath = gcs.createUriPath(bucketId, objectId);
+  const archiveUriPath = gcs.createUriPath(bucketId, objectId);
   try {
-    // Extract zip to temporary directory
+    // Extract archive to temporary directory
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
-    const zip = new AdmZip(zipBuffer);
-    zip.extractAllTo(tempDir, true);
+    await extractArchiveToTempDir(archiveType, archiveBuffer, tempDir);
     
     // Find all .dcm files
     const dcmFiles = await findDcmFiles(tempDir);
     
     if (DEBUG_MODE) {
-      console.log(`Found ${dcmFiles.length} DICOM files in zip: ${zipUriPath}`);
+      console.log(`Found ${dcmFiles.length} DICOM files in ${archiveType} archive: ${archiveUriPath}`);
     }
     
     // Process each DICOM file; continue on per-file failure
@@ -207,7 +242,7 @@ async function handleZipFile(zipBuffer, bucketId, objectId, timestamp, version, 
       try {
         const fileBuffer = await fs.readFile(dcmFile);
         const fileName = path.basename(dcmFile);
-        const uriPath = `${zipUriPath}#${fileName}`;
+        const uriPath = `${archiveUriPath}#${fileName}`;
         
         await processAndPersistDicom(
           version,
@@ -228,12 +263,12 @@ async function handleZipFile(zipBuffer, bucketId, objectId, timestamp, version, 
     }
     
     if (DEBUG_MODE) {
-      console.log(`Zip processing complete for ${zipUriPath}: ${successCount} succeeded, ${errorCount} failed out of ${dcmFiles.length} total`);
+      console.log(`${archiveType} processing complete for ${archiveUriPath}: ${successCount} succeeded, ${errorCount} failed out of ${dcmFiles.length} total`);
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : '';
-    console.error(`Error processing zip file ${zipUriPath}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
+    console.error(`Error processing ${archiveType} file ${archiveUriPath}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
   } finally {
     // Clean up temporary directory
     if (tempDir) {
@@ -277,8 +312,9 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       const buffer = await gcs.downloadToMemory(bucketId, objectId);
       perfCtx.addRef("afterGcsDownloadToMemory");
       
-      if (objectId.toLowerCase().endsWith('.zip')) {
-        await handleZipFile(buffer, bucketId, objectId, timestamp, version, eventType);
+      const archiveType = getArchiveType(objectId);
+      if (archiveType) {
+        await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType);
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
         try {

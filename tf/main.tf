@@ -185,7 +185,7 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
 
   template {
     service_account = google_service_account.cloudrun_sa.email
-    timeout         = "3600s" # 1 hour timeout for processing large zip files
+    timeout         = "3600s" # 1 hour timeout for processing large archive files
     containers {
       image = var.dcm2bq_image
       resources {

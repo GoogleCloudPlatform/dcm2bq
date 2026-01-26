@@ -96,7 +96,7 @@ describe("eventhandlers", () => {
     // Nothing to restore per-test now
   });
 
-  describe("zip file handling", () => {
+  describe("archive file handling", () => {
     it("should process a zip file containing DICOM files", async function() {
       this.timeout(10000);
       
@@ -149,10 +149,52 @@ describe("eventhandlers", () => {
         assert.ok(row.info, "Should have info");
         assert.ok(row.metadata, "Should have metadata");
         
-        // Verify the path format is correct for zip files (uriPath = basePath#fileName)
+        // Verify the path format is correct for archive files (uriPath = basePath#fileName)
         // The path should start with gs:// for GCS paths or just the bucket/object path
         assert.ok(row.path.includes("#") || row.path.includes(".dcm"), 
-          `Path should include # separator for zip files or end with .dcm. Got: ${row.path}`);
+          `Path should include # separator for archive files or end with .dcm. Got: ${row.path}`);
+      }
+    });
+
+    it("should process a tar.gz file containing DICOM files", async function() {
+      this.timeout(10000);
+      
+      const tarPath = path.join(__dirname, "files/tar/study.tar.gz");
+      const tarBuffer = fs.readFileSync(tarPath);
+
+      mockFile.download.resetHistory();
+      mockFile.download.resolves([tarBuffer]);
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: "test-bucket",
+            objectId: "test.tgz"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "test.tgz",
+            generation: "123456"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      assert(bqInsertStub.called, 
+        `insert should be called for tar.gz archive. Actual calls: ${bqInsertStub.callCount}`);
+      const callCount = bqInsertStub.callCount;
+      assert(callCount > 0, "Should process at least one DICOM file from tar.gz archive");
+
+      for (let i = 0; i < callCount; i++) {
+        const call = bqInsertStub.getCall(i);
+        const row = call.args[0];
+        assert.ok(row.path.includes("#"), `Path should include # separator for archive files. Got: ${row.path}`);
       }
     });
 
