@@ -358,7 +358,7 @@ function formatResultOverview(results, isArchive = false, totalElapsedMs = 0) {
     
     // Summary statistics
     const modalities = new Set();
-    const totalSize = rows.reduce((sum, row) => sum + (row.input?.size || 0), 0);
+    const totalSize = rows.reduce((sum, row) => sum + (row.input?.size || row.info?.input?.size || 0), 0);
     rows.forEach(row => {
       try {
         const metadata = typeof row.metadata === "string" 
