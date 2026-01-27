@@ -588,8 +588,7 @@ describe("process-command", () => {
       assert.strictEqual(callArgs.params.version, "12345");
     });
 
-    it("should use timestamp-based query for archives", async function() {
-      const uploadTime = Date.now();
+    it("should use pattern-based query for archives", async function() {
       bigQueryStub.resolves([[{ path: "gs://bucket/archive.zip/file.dcm" }]]);
 
       await processCommand.pollBigQueryForResult({
@@ -599,8 +598,7 @@ describe("process-command", () => {
         objectVersion: "67890",
         pollInterval: 100,
         maxPollTime: 1000,
-        isArchive: true,
-        uploadTime
+        isArchive: true
       });
 
       const callArgs = bigQueryStub.getCall(0).args[0];
@@ -646,8 +644,7 @@ describe("process-command", () => {
         objectPath: "bucket/archive.zip",
         pollInterval: 100,
         maxPollTime: 500,
-        isArchive: true,
-        uploadTime: Date.now()
+        isArchive: true
       });
 
       assert.ok(result);
@@ -693,7 +690,7 @@ describe("process-command", () => {
       assert.strictEqual(result.length, 1);
     });
 
-    it("should collect multiple results for archives with 5 second wait", async function() {
+    it("should collect multiple results for archives with 10 second wait after first result", async function() {
       this.timeout(15000);
       
       let callCount = 0;
@@ -711,13 +708,47 @@ describe("process-command", () => {
         tableId: "instances",
         objectPath: "bucket/archive.zip",
         pollInterval: 100,
-        maxPollTime: 10000,
-        isArchive: true,
-        uploadTime: Date.now()
+        maxPollTime: 12000,
+        isArchive: true
       });
 
       assert.ok(result);
       assert.strictEqual(result.length, 3);
+    });
+
+    it("should return immediately when expected file count is reached", async function() {
+      let callCount = 0;
+      bigQueryStub.callsFake(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve([[{ path: "gs://bucket/archive.zip/file1.dcm" }]]);
+        }
+        return Promise.resolve([[
+          { path: "gs://bucket/archive.zip/file1.dcm" },
+          { path: "gs://bucket/archive.zip/file2.dcm" },
+          { path: "gs://bucket/archive.zip/file3.dcm" }
+        ]]);
+      });
+
+      const result = await processCommand.pollBigQueryForResult({
+        datasetId: "test_dataset",
+        tableId: "instances",
+        objectPath: "bucket/archive.zip",
+        pollInterval: 100,
+        maxPollTime: 10000,
+        isArchive: true,
+        expectedFileCount: 3
+      });
+
+      assert.ok(result);
+      assert.strictEqual(result.length, 3);
+      // Should complete quickly without waiting full 10 seconds
+    });
+  });
+
+  describe("countDicomFilesInArchive", () => {
+    it("should be exported", () => {
+      assert.ok(typeof processCommand.countDicomFilesInArchive === "function");
     });
   });
 });
