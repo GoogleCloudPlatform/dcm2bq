@@ -490,10 +490,17 @@ describe("End-to-End Pipeline Integration Tests", function () {
 
       const perfCtx = { addRef: () => {} };
 
-      // Should not throw, but should log error and not insert to BigQuery
-      await handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+      // Should throw non-retryable error but with 422 status (graceful error handling)
+      try {
+        await handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+        assert.fail("Expected error for non-DICOM file");
+      } catch (error) {
+        // Expected: non-DICOM files should result in a non-retryable error
+        assert.strictEqual(error.code, 422, "Should return 422 Unprocessable Entity for non-DICOM files");
+        assert(error.message.includes("Failed to parse DICOM file"), "Should include parsing error message");
+      }
 
-      console.log("  ✓ Non-DICOM file handled without throwing error");
+      console.log("  ✓ Non-DICOM file handled with appropriate error code");
     });
 
     it("should handle OBJECT_DELETE events", async function () {
