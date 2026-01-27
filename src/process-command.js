@@ -37,6 +37,57 @@ function isArchiveFile(filePath) {
 }
 
 /**
+ * Count DICOM files in an archive
+ * @param {string} archivePath Path to the archive file
+ * @returns {Promise<number>} Number of .dcm files in the archive
+ */
+async function countDicomFilesInArchive(archivePath) {
+  const ext = path.extname(archivePath).toLowerCase();
+  let count = 0;
+  
+  if (ext === '.zip') {
+    // Use unzip to list files
+    const { execSync } = require('child_process');
+    try {
+      const output = execSync(`unzip -l "${archivePath}"`, { encoding: 'utf8' });
+      const lines = output.split('\n');
+      for (const line of lines) {
+        // Extract filename from unzip output (last column after spaces)
+        // Example line: "  12345  2024-01-15 10:30   path/to/file.dcm"
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const filename = parts[parts.length - 1];
+          if (filename.toLowerCase().endsWith('.dcm')) {
+            count++;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn(`Warning: Could not count files in archive: ${error.message}`);
+      return 0;
+    }
+  } else if (ext === '.tgz' || archivePath.toLowerCase().endsWith('.tar.gz')) {
+    // Use tar to list files
+    const { execSync } = require('child_process');
+    try {
+      const output = execSync(`tar -tzf "${archivePath}"`, { encoding: 'utf8' });
+      const lines = output.split('\n');
+      for (const line of lines) {
+        const filename = line.trim();
+        if (filename && filename.toLowerCase().endsWith('.dcm')) {
+          count++;
+        }
+      }
+    } catch (error) {
+      console.warn(`Warning: Could not count files in archive: ${error.message}`);
+      return 0;
+    }
+  }
+  
+  return count;
+}
+
+/**
  * Load deployment configuration from file or fallback to test config
  * @param {string} configPath Path to the deployment config file (optional)
  * @returns {Object} Deployment configuration
@@ -146,17 +197,18 @@ async function uploadToGCS(filePath, bucketName) {
  * @param {number} options.pollInterval Polling interval in ms
  * @param {number} options.maxPollTime Maximum polling time in ms
  * @param {boolean} options.isArchive Whether the uploaded file is an archive
- * @param {number} options.uploadTime Time when file was uploaded (in ms)
+ * @param {number} [options.expectedFileCount] Expected number of files for archive processing
  * @returns {Promise<Object[]|null>} Array of result rows or null if not found
  */
 async function pollBigQueryForResult(options) {
-  const { datasetId, tableId, objectPath, objectVersion, pollInterval, maxPollTime, isArchive, uploadTime } = options;
+  const { datasetId, tableId, objectPath, objectVersion, pollInterval, maxPollTime, isArchive, expectedFileCount } = options;
   
   const startTime = Date.now();
   let pollCount = 0;
   let firstResultTime = null;
   let results = [];
   let resultPaths = new Set(); // Track unique paths to avoid duplicates
+  let lastReportedCount = 0; // Track last reported count for progress updates
   
   while (Date.now() - startTime < maxPollTime) {
     pollCount++;
@@ -198,7 +250,11 @@ async function pollBigQueryForResult(options) {
         if (!firstResultTime) {
           firstResultTime = Date.now();
           const elapsedSec = ((firstResultTime - startTime) / 1000).toFixed(2);
-          console.log(`✓ Found first result in BigQuery after ${pollCount} polls (${elapsedSec}s)`);
+          if (isArchive && expectedFileCount) {
+            console.log(`✓ Found first result in BigQuery after ${pollCount} polls (${elapsedSec}s)`);
+          } else {
+            console.log(`✓ Found first result in BigQuery after ${pollCount} polls (${elapsedSec}s)`);
+          }
         }
         
         // For single files, return immediately
@@ -209,6 +265,7 @@ async function pollBigQueryForResult(options) {
         }
         
         // For archives, accumulate unique results across polls
+        const previousCount = results.length;
         for (const row of rows) {
           if (!resultPaths.has(row.path)) {
             resultPaths.add(row.path);
@@ -216,11 +273,29 @@ async function pollBigQueryForResult(options) {
           }
         }
         
-        // For archives, if we've waited 5 seconds after first result, we likely have all results
-        // But continue polling in case more results are still being written
-        if (firstResultTime && Date.now() - firstResultTime > 10000) {
-          // After 10 seconds, return what we have
-          console.log(`✓ Collected ${results.length} results from archive processing`);
+        // Show progress updates when new results are found
+        if (results.length > previousCount && results.length > lastReportedCount) {
+          if (expectedFileCount) {
+            // Show progress with expected count
+            const percentage = ((results.length / expectedFileCount) * 100).toFixed(0);
+            console.log(`  Progress: ${results.length} of ${expectedFileCount} files processed (${percentage}%)`);
+          } else {
+            // Show count without expected total
+            console.log(`  Progress: ${results.length} files processed so far...`);
+          }
+          lastReportedCount = results.length;
+        }
+        
+        // For archives, check if we've collected all expected results
+        if (expectedFileCount && results.length >= expectedFileCount) {
+          console.log(`✓ Collected all ${results.length} expected results from archive processing`);
+          return results;
+        }
+        
+        // If we don't know the expected count, wait at least 10 seconds after first result
+        // to give all files time to be processed, but still respect maxPollTime
+        if (!expectedFileCount && firstResultTime && Date.now() - firstResultTime > 10000) {
+          console.log(`✓ Collected ${results.length} results from archive processing (waited 10s after first result)`);
           return results;
         }
       }
@@ -425,8 +500,14 @@ async function execute(inputFile, options) {
   
   console.log(`Processing ${fileType}: ${inputFile}`);
   console.log(`File size: ${fileSizeBytes} bytes (${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB)`);
+  
+  let expectedFileCount = 0;
   if (isArchive) {
-    console.log(`Note: Archive files are expanded and processed as separate DICOM files`);
+    expectedFileCount = await countDicomFilesInArchive(inputFile);
+    if (expectedFileCount === 0) {
+      throw new Error(`Archive contains no DICOM files (.dcm) to process. Please verify the archive contents.`);
+    }
+    console.log(`Note: Archive contains ${expectedFileCount} DICOM file(s) to process`);
   }
   
   // Load deployment config (use --config if provided, otherwise try test/testconfig.json)
@@ -478,7 +559,7 @@ async function execute(inputFile, options) {
     pollInterval,
     maxPollTime,
     isArchive,
-    uploadTime: uploadTimeMs,
+    expectedFileCount: isArchive ? expectedFileCount : undefined,
   });
   
   if (results && results.length > 0) {
@@ -504,4 +585,5 @@ module.exports = {
   formatResultOverview,
   formatResultRow,
   isArchiveFile,
+  countDicomFilesInArchive,
 };
