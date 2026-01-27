@@ -15,7 +15,7 @@
  */
 
 const assert = require("assert");
-const { createHttpError, deepAssign, deepClone, DEBUG_MODE } = require("../src/utils");
+const { createHttpError, deepAssign, deepClone, DEBUG_MODE, createNonRetryableError } = require("../src/utils");
 
 describe("utils", () => {
   describe("deepClone", () => {
@@ -221,6 +221,58 @@ describe("utils", () => {
       assert(error instanceof Error);
       assert(error.hasOwnProperty("code"));
       assert(error.hasOwnProperty("message"));
+    });
+  });
+
+  describe("createNonRetryableError", () => {
+    it("should create an error with retryable flag set to false", () => {
+      const error = createNonRetryableError("Invalid DICOM file");
+      
+      assert(error instanceof Error);
+      assert.strictEqual(error.retryable, false);
+      assert.strictEqual(error.message, "Invalid DICOM file");
+    });
+
+    it("should default to status code 422", () => {
+      const error = createNonRetryableError("Parse error");
+      
+      assert.strictEqual(error.code, 422);
+    });
+
+    it("should accept custom status code", () => {
+      const error = createNonRetryableError("Bad request", 400);
+      
+      assert.strictEqual(error.code, 400);
+      assert.strictEqual(error.retryable, false);
+    });
+
+    it("should be distinguishable from retryable errors", () => {
+      const nonRetryable = createNonRetryableError("Corrupted file");
+      const retryable = createHttpError(500, "Timeout");
+      
+      assert.strictEqual(nonRetryable.retryable, false);
+      assert.strictEqual(retryable.retryable, undefined); // Not set
+    });
+
+    it("should be throwable", () => {
+      const error = createNonRetryableError("Unsupported format");
+      
+      assert.throws(
+        () => { throw error; },
+        (err) => {
+          return err instanceof Error && err.retryable === false;
+        }
+      );
+    });
+
+    it("should preserve properties when caught", () => {
+      try {
+        throw createNonRetryableError("Invalid data", 400);
+      } catch (e) {
+        assert.strictEqual(e.code, 400);
+        assert.strictEqual(e.retryable, false);
+        assert.strictEqual(e.message, "Invalid data");
+      }
     });
   });
 

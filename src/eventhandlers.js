@@ -21,7 +21,7 @@ const { insert } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
 const { createVectorEmbedding, createEmbeddingInput } = require("./embeddings");
-const { deepAssign, DEBUG_MODE } = require("./utils");
+const { deepAssign, createNonRetryableError, DEBUG_MODE } = require("./utils");
 const crypto = require("crypto");
 const fs = require("fs").promises;
 const path = require("path");
@@ -90,8 +90,16 @@ async function processDicom(buffer, uriPath) {
   const configProvidedOptions = configObject.jsonOutput;
   const bulkDataRoot = configProvidedOptions.explicitBulkDataRoot ? uriPath : "";
   const outputOptions = deepAssign({}, configProvidedOptions, { bulkDataRoot });
-  const reader = new DicomInMemory(buffer);
-  const json = reader.toJson(outputOptions);
+  
+  let json;
+  try {
+    const reader = new DicomInMemory(buffer);
+    json = reader.toJson(outputOptions);
+  } catch (error) {
+    // DICOM parsing errors are non-retryable - the file is permanently invalid
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw createNonRetryableError(`Failed to parse DICOM file: ${errorMsg}`);
+  }
   
   let embeddingsResult = null;
   
@@ -317,13 +325,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType);
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
-        try {
-          await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`Error processing file ${uriPath}: ${errorMsg}`);
-          // Don't throw - just log and continue
-        }
+        await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
       }
       perfCtx.addRef("afterProcessDicom");
       perfCtx.addRef("afterBqInsert");

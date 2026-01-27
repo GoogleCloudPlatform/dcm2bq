@@ -33,4 +33,19 @@ function createHttpError(code, message) {
   return err;
 }
 
-module.exports = { createHttpError, deepAssign, deepClone, DEBUG_MODE };
+/**
+ * Create a non-retryable error (4xx) for permanent failures.
+ * These errors indicate the request will never succeed and should not be retried by Pub/Sub.
+ * Use for: invalid file format, corrupted data, unsupported operations, etc.
+ * @param {string} message Error message
+ * @param {number} [code=422] HTTP status code (defaults to 422 Unprocessable Entity)
+ * @returns {Error} Error with code property set
+ */
+function createNonRetryableError(message, code = 422) {
+  const err = new Error(message);
+  err.code = code;
+  err.retryable = false;
+  return err;
+}
+
+module.exports = { createHttpError, createNonRetryableError, deepAssign, deepClone, DEBUG_MODE };

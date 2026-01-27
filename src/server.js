@@ -63,7 +63,19 @@ app.post("/", async (req, res) => {
 
 function handleHttpError(req, res, e) {
   const err = new Error(e.message || "unknown", { cause: e });
-  err.code = httpErrors[e.code] ? e.code : 500;
+  
+  // Determine appropriate HTTP status code
+  if (httpErrors[e.code]) {
+    // Error has a valid HTTP status code
+    err.code = e.code;
+  } else if (e.retryable === false) {
+    // Explicitly marked as non-retryable - use 422 (Unprocessable Entity)
+    err.code = 422;
+  } else {
+    // Default to 500 for unknown/retryable errors
+    err.code = 500;
+  }
+  
   err.messageId = req.body?.message?.messageId || "unknown";
   res.status(err.code).json({ code: err.code, messageId: err.messageId, reason: err.message });
   console.error(e);

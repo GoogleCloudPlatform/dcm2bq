@@ -19,21 +19,22 @@
     "@google-cloud/storage": "^7.17.0",
     "@google/genai": "^1.18.0",
     "adm-zip": "^0.5.16",
-    "tar": "^7.4.3",
     "ajv": "^8.17.1",
     "commander": "^14.0.0",
     "dicom-parser": "^1.8.21",
     "express": "^5.1.0",
     "express-json-validator-middleware": "^3.0.1",
     "google-auth-library": "^10.3.0",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "tar": "^7.4.3"
   },
   "devDependencies": {
     "axios": "^1.11.0",
     "glob": "^13.0.0",
     "mocha": "^11.3.0",
     "release-it": "^19.0.4",
-    "sinon": "^21.0.1"
+    "sinon": "^21.0.1",
+    "supertest": "^7.2.2"
   },
   "release-it": {
     "github": {
