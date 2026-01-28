@@ -87,19 +87,35 @@ echo "Using dcm2bq image: ${DCM2BQ_IMAGE}"
 
 # Parse options
 DEBUG_MODE="false"
+CREATE_EMBEDDINGS="true"
+CREATE_EMBEDDING_INPUT="true"
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
     -h | --help )
       echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
-      echo "  upload                   Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
-      echo "  destroy                  Destroy all previously created assets."
-      echo "  --debug                  Enable debug mode in Cloud Run service (verbose logging)."
-      echo "  --help, -h               Show this help message."
+      echo "Options:"
+      echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
+      echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
+      echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
+      echo "  -h, --help                   Show this help message."
+      echo ""
+      echo "Commands:"
+      echo "  upload                       Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
+      echo "  destroy                      Destroy all previously created assets."
       exit 0
       ;;
     --debug )
       DEBUG_MODE="true"
       echo "Debug mode enabled."
+      ;;
+    --no-embeddings )
+      CREATE_EMBEDDINGS="false"
+      echo "Embeddings disabled."
+      ;;
+    --no-embedding-input )
+      CREATE_EMBEDDING_INPUT="false"
+      CREATE_EMBEDDINGS="false"
+      echo "Embedding input disabled (embeddings also disabled)."
       ;;
   esac
   shift
@@ -152,14 +168,24 @@ terraform init
 
 if [ "$MODE" == "destroy" ]; then
   echo "Destroying infrastructure..."
-  terraform destroy -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}" -var="debug_mode=${DEBUG_MODE}"
+  terraform destroy -auto-approve \
+    -var="project_id=${PROJECT_ID}" \
+    -var="dcm2bq_image=${DCM2BQ_IMAGE}" \
+    -var="debug_mode=${DEBUG_MODE}" \
+    -var="create_embedding_input=${CREATE_EMBEDDING_INPUT}" \
+    -var="create_embeddings=${CREATE_EMBEDDINGS}"
   echo "Cleanup complete."
   exit 0
 fi
 
 if [ "$MODE" == "deploy" ]; then
   echo "Deploying infrastructure..."
-  terraform apply -auto-approve -var="project_id=${PROJECT_ID}" -var="dcm2bq_image=${DCM2BQ_IMAGE}" -var="debug_mode=${DEBUG_MODE}"
+  terraform apply -auto-approve \
+    -var="project_id=${PROJECT_ID}" \
+    -var="dcm2bq_image=${DCM2BQ_IMAGE}" \
+    -var="debug_mode=${DEBUG_MODE}" \
+    -var="create_embedding_input=${CREATE_EMBEDDING_INPUT}" \
+    -var="create_embeddings=${CREATE_EMBEDDINGS}"
 fi
 
 if [ "$MODE" == "upload" ]; then
@@ -180,6 +206,9 @@ DATASET_ID=$(terraform output -raw bq_dataset_id)
 TABLE_ID=$(terraform output -raw bq_instances_table_id)
 DICOM_BUCKET=$(terraform output -raw gcs_bucket_name)
 PROCESSED_DATA_BUCKET=$(terraform output -raw gcs_processed_data_bucket_name 2>/dev/null || true)
+PUBSUB_TOPIC=$(terraform output -raw pubsub_topic_name 2>/dev/null || echo "dcm2bq-gcs-events")
+DEAD_LETTER_TOPIC=$(terraform output -raw pubsub_dead_letter_topic_name 2>/dev/null || echo "dcm2bq-dead-letter-events")
+REGION=$(terraform output -raw region 2>/dev/null || echo "us-central1")
 TEST_CONFIG_FILE="../test/testconfig.json"
 TEMP_JSON=$(mktemp)
 
@@ -189,13 +218,39 @@ if [ ! -f "$TEST_CONFIG_FILE" ]; then
   node -e "const defaults = require('../src/config.defaults.js'); console.log(JSON.stringify(defaults, null, 2));" > "$TEST_CONFIG_FILE"
 fi
 
+# Build the jq filter based on embedding configuration
+JQ_FILTER='.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.instancesTableId = $table_id | .gcpConfig.gcs_bucket_name = $dicom_bucket | .projectId = $project_id | .bucketName = $dicom_bucket | .datasetId = $dataset_id | .topicName = $topic_name | .deadLetterTopicName = $dead_letter_topic | .deadLetterTableId = $dead_letter_table_id | .gcpConfig.location = $region'
+
+# Add embedding-related updates to the filter
+if [ "$CREATE_EMBEDDING_INPUT" == "true" ]; then
+  JQ_FILTER="${JQ_FILTER} | .gcpConfig.embedding.input.gcsBucketPath = \$gcs_bucket_path"
+else
+  # Remove the input section if not creating embedding input
+  JQ_FILTER="${JQ_FILTER} | .gcpConfig.embedding.input = {}"
+fi
+
+if [ "$CREATE_EMBEDDINGS" == "false" ]; then
+  # Remove the vector section if not creating embeddings
+  JQ_FILTER="${JQ_FILTER} | .gcpConfig.embedding.input.vector = null"
+fi
+
 jq \
   --arg project_id "$PROJECT_ID" \
   --arg dataset_id "$DATASET_ID" \
   --arg table_id "$TABLE_ID" \
   --arg dicom_bucket "$DICOM_BUCKET" \
   --arg gcs_bucket_path "gs://${PROCESSED_DATA_BUCKET}" \
-  '.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.instancesTableId = $table_id | .gcpConfig.gcs_bucket_name = $dicom_bucket | .gcpConfig.embedding.input.gcsBucketPath = $gcs_bucket_path' \
+  --arg topic_name "$PUBSUB_TOPIC" \
+  --arg dead_letter_topic "$DEAD_LETTER_TOPIC" \
+  --arg dead_letter_table_id "${DATASET_ID}.dead_letter" \
+  --arg region "$REGION" \
+  "$JQ_FILTER" \
   "$TEST_CONFIG_FILE" > "$TEMP_JSON" && mv "$TEMP_JSON" "$TEST_CONFIG_FILE"
 
 echo "Updated test/testconfig.json."
+if [ "$CREATE_EMBEDDING_INPUT" == "false" ]; then
+  echo "  - Embedding input disabled"
+fi
+if [ "$CREATE_EMBEDDINGS" == "false" ]; then
+  echo "  - Embeddings disabled"
+fi

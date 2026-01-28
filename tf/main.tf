@@ -45,6 +45,47 @@ resource "random_string" "bucket_suffix" {
 
 locals {
   bucket_name = var.create_gcs_bucket ? google_storage_bucket.dicom_bucket[0].name : data.google_storage_bucket.existing_dicom_bucket[0].name
+  
+  # Build embedding configuration dynamically based on flags
+  embedding_config = var.create_embedding_input ? {
+    input = merge(
+      {
+        gcsBucketPath = "gs://${google_storage_bucket.processed_data_bucket.name}"
+        summarizeText = {
+          model     = "gemini-2.5-flash-lite"
+          maxLength = 1024
+        }
+      },
+      var.create_embeddings ? {
+        vector = {
+          model = "multimodalembedding@001"
+        }
+      } : {}
+    )
+  } : {}
+  
+  # Complete DCM2BQ configuration
+  dcm2bq_config = {
+    gcpConfig = {
+      projectId = var.project_id
+      location  = var.region
+      bigQuery = {
+        datasetId        = google_bigquery_dataset.dicom_dataset.dataset_id
+        instancesTableId = google_bigquery_table.instances_table.table_id
+      }
+      embedding = local.embedding_config
+    }
+    dicomParser = {}
+    jsonOutput = {
+      useArrayWithSingleValue = false
+      ignoreGroupLength       = true
+      ignoreMetaHeader        = false
+      ignorePrivate           = false
+      ignoreBinary            = false
+      useCommonNames          = true
+      explicitBulkDataRoot    = false
+    }
+  }
 }
 
 # GCS bucket (optional create)
@@ -177,6 +218,23 @@ resource "google_pubsub_topic_iam_member" "gcs_events_publisher_member" {
   member = "serviceAccount:service-${data.google_project.project.number}@gs-project-accounts.iam.gserviceaccount.com"
 }
 
+# IAM permissions for dead letter functionality
+# Allow Pub/Sub to publish to the dead letter topic
+resource "google_pubsub_topic_iam_member" "dead_letter_publisher" {
+  topic  = google_pubsub_topic.dead_letter_topic.name
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+# Allow Pub/Sub to subscribe to the main subscription (to forward to dead letter)
+resource "google_pubsub_subscription_iam_member" "dead_letter_subscriber" {
+  subscription = google_pubsub_subscription.gcs_to_cloudrun.name
+  role         = "roles/pubsub.subscriber"
+  member       = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  
+  depends_on = [google_pubsub_subscription.gcs_to_cloudrun]
+}
+
 # Cloud Run service
 resource "google_cloud_run_v2_service" "dcm2bq_service" {
   deletion_protection = false
@@ -184,50 +242,20 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
   location            = var.region
 
   template {
-    service_account = google_service_account.cloudrun_sa.email
-    timeout         = "3600s" # 1 hour timeout for processing large archive files
+    service_account                  = google_service_account.cloudrun_sa.email
+    timeout                          = "3600s" # 1 hour timeout for processing large archive files
+    max_instance_request_concurrency = 8       # Process up to 8 files concurrently per instance
     containers {
       image = var.dcm2bq_image
       resources {
         limits = {
-          cpu    = "2"
-          memory = "4Gi"
+          cpu    = "4"      # Increased CPU for concurrent processing
+          memory = "16Gi"   # ~2GB per request with concurrency of 8
         }
       }
       env {
-        name = "DCM2BQ_CONFIG"
-        value = jsonencode({
-          gcpConfig = {
-            projectId = var.project_id
-            location  = var.region
-            bigQuery = {
-              datasetId       = google_bigquery_dataset.dicom_dataset.dataset_id
-              instancesTableId = google_bigquery_table.instances_table.table_id
-            }
-            embedding = {
-              input = {
-                gcsBucketPath = "gs://${google_storage_bucket.processed_data_bucket.name}"
-                summarizeText = {
-                  model     = "gemini-2.5-flash-lite"
-                  maxLength = 1024
-                }
-                vector = {
-                  model = "multimodalembedding@001"
-                }
-              }
-            }
-          }
-          dicomParser = {}
-          jsonOutput = {
-            useArrayWithSingleValue = false
-            ignoreGroupLength       = true
-            ignoreMetaHeader        = false
-            ignorePrivate           = false
-            ignoreBinary            = false
-            useCommonNames          = true
-            explicitBulkDataRoot    = false
-          }
-        })
+        name  = "DCM2BQ_CONFIG"
+        value = jsonencode(local.dcm2bq_config)
       }
       env {
         name  = "DEBUG"
@@ -277,7 +305,11 @@ resource "google_pubsub_subscription" "gcs_to_cloudrun" {
     maximum_backoff = "600s"
   }
 
-  depends_on = [google_cloud_run_v2_service_iam_member.allow_pubsub_invoke, google_pubsub_topic.dead_letter_topic]
+  depends_on = [
+    google_cloud_run_v2_service_iam_member.allow_pubsub_invoke,
+    google_pubsub_topic.dead_letter_topic,
+    google_pubsub_topic_iam_member.dead_letter_publisher
+  ]
 }
 
 # Dead-letter subscription that writes to BigQuery (requires google-beta)
