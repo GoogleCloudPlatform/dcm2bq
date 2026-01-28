@@ -46,7 +46,7 @@ echo -e "${GREEN}Running integration tests against real GCP services...${NC}"
 echo ""
 
 # Run integration tests with proper config
-DCM2BQ_CONFIG_FILE=test/testconfig.json mocha --colors --timeout 60000 test/*.integration.js "$@"
+INTEGRATION_TEST=true DCM2BQ_CONFIG_FILE=test/testconfig.json mocha --colors --timeout 120000 test/*.integration.js "$@"
 
 exit_code=$?
 

@@ -46,3 +46,23 @@ output "bq_instances_table_id" {
   description = "The ID of the BigQuery instances table (includes embeddings)."
   value       = google_bigquery_table.instances_table.table_id
 }
+
+output "pubsub_topic_name" {
+  description = "The name of the main Pub/Sub topic for GCS events."
+  value       = google_pubsub_topic.gcs_events.name
+}
+
+output "pubsub_dead_letter_topic_name" {
+  description = "The name of the dead letter Pub/Sub topic."
+  value       = google_pubsub_topic.dead_letter_topic.name
+}
+
+output "project_id" {
+  description = "The GCP project ID."
+  value       = var.project_id
+}
+
+output "region" {
+  description = "The GCP region."
+  value       = var.region
+}

@@ -70,3 +70,15 @@ variable "debug_mode" {
   type        = bool
   default     = false
 }
+
+variable "create_embedding_input" {
+  description = "Create embedding input files (extract images/text to GCS)"
+  type        = bool
+  default     = true
+}
+
+variable "create_embeddings" {
+  description = "Generate vector embeddings from extracted content"
+  type        = bool
+  default     = true
+}

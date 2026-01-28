@@ -31,6 +31,9 @@ async function doRequest(endpoint, payload) {
         const jitter = Math.floor(Math.random() * delay);
         const sleepMs = delay + jitter;
         console.warn(`Request received 429; retry ${attempt}/${MAX_RETRIES} in ${sleepMs}ms`);
+        /*
+        TODO: HTTP request failed: Quota exceeded for aiplatform.googleapis.com/online_prediction_requests_per_base_model with base model: multimodalembedding. Please submit a quota increase request. https://cloud.google.com/vertex-ai/docs/generative-ai/quotas-genai.
+        */
         await new Promise((r) => setTimeout(r, sleepMs));
         delay = delay * 2;
         continue;

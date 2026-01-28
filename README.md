@@ -310,6 +310,8 @@ Available integration test suites:
 - **`pipeline.integration.js`** - End-to-end pipeline tests (GCS upload → processing → BigQuery insertion)
 - **`storage-embeddings.integration.js`** - Storage and embedding feature tests
 - **`config-validation.integration.js`** - Configuration, schema, and permissions validation tests
+- **`dead-letter.integration.js`** - Dead letter queue functionality (failed message handling, BigQuery writes, IAM permissions)
+- **`error-handling.integration.js`** - Error handling and HTTP status code validation
 
 To run all integration tests:
 

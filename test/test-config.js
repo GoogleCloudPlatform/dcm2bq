@@ -52,4 +52,11 @@ module.exports = {
     explicitBulkDataRoot: false,
   },
   src: "TEST",
+  // Integration test specific fields
+  projectId: "test-project-12345",
+  bucketName: "test-bucket",
+  datasetId: "dicom",
+  topicName: "dcm2bq-gcs-events",
+  deadLetterTopicName: "dcm2bq-dead-letter-events",
+  deadLetterTableId: "dicom.dead_letter",
 };
