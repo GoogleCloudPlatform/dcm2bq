@@ -51,6 +51,7 @@ COPY --from=builder /usr/local /usr/local
 WORKDIR /usr/src/app
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/src ./src
+COPY --from=builder /usr/src/app/tag-lookup.min.json ./
 COPY --from=builder /usr/src/app/package*.json ./
 
 # Set up permissions
