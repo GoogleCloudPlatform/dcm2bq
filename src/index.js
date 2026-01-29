@@ -151,4 +151,20 @@ program
     }
   });
 
+program
+  .command("dlq")
+  .description("manage dead letter queue")
+  .argument("<action>", "action to perform: 'list' or 'requeue'")
+  .option("-c, --config <deploymentConfig>", "path to deployment config file (optional; uses test/testconfig.json if available)")
+  .option("--limit <number>", "limit number of items to process", "100")
+  .action(async (action, options) => {
+    const dlqCommand = require("./dlq-command");
+    try {
+      await dlqCommand.execute(action, options);
+    } catch (error) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
 program.parse();

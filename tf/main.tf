@@ -244,13 +244,18 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
   template {
     service_account                  = google_service_account.cloudrun_sa.email
     timeout                          = "3600s" # 1 hour timeout for processing large archive files
-    max_instance_request_concurrency = 8       # Process up to 8 files concurrently per instance
+    max_instance_request_concurrency = 4       # Process up to 4 files concurrently per instance
+    
+    scaling {
+      max_instance_count = 10 # Allow up to 10 instances (40 concurrent requests)
+    }
+    
     containers {
       image = var.dcm2bq_image
       resources {
         limits = {
-          cpu    = "4"      # Increased CPU for concurrent processing
-          memory = "16Gi"   # ~2GB per request with concurrency of 8
+          cpu    = "1"     # 1 CPU per instance
+          memory = "4Gi"   # ~1GB per request with concurrency of 4
         }
       }
       env {

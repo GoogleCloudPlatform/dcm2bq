@@ -185,6 +185,22 @@ dcm2bq process test/files/dcm/ct.dcm
 
 This command uploads a DICOM file to GCS, triggers CloudRun processing via Pub/Sub, polls BigQuery for results, and displays a formatted overview. It uses `test/testconfig.json` if available, or you can specify a config file with `--config deployment-config.json`. See [docs/PROCESS_COMMAND.md](docs/PROCESS_COMMAND.md) for detailed usage and archive file support.
 
+**Example: List items in the dead letter queue**
+
+```bash
+dcm2bq dlq list
+```
+
+This command queries the BigQuery dead letter table and displays a summary showing the total count of failed messages and a list of distinct failed files with their failure counts. Useful for monitoring and troubleshooting processing failures.
+
+**Example: Requeue failed items from the dead letter queue**
+
+```bash
+dcm2bq dlq requeue
+```
+
+This command reads the dead letter queue, identifies the failed GCS files, and triggers reprocessing by updating their metadata. Each file will be reprocessed via Cloud Run. You can limit the number of items with `--limit 50`.
+
 ## Configuration
 
 Configuration options can be found in the [default config file](./src/config.defaults.js).
