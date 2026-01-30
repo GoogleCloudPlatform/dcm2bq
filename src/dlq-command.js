@@ -198,7 +198,8 @@ async function requeueDLQ(config, options) {
     SELECT 
       data,
       attributes,
-      message_id
+      message_id,
+      publish_time
     FROM \`${deadLetterTableId}\`
     ORDER BY publish_time DESC
     LIMIT ${limit}
@@ -213,15 +214,25 @@ async function requeueDLQ(config, options) {
 
   // Extract unique files
   // Even if a file appears multiple times in DLQ, we only requeue it once
-  const files = new Map(); // key: bucket/name, value: fileInfo
+  const files = new Map(); // key: bucket/name, value: { fileInfo, publishTime, messageIds }
   let parseErrors = 0;
 
   for (const row of rows) {
     const fileInfo = extractFileInfo(row);
     if (fileInfo) {
       const key = `${fileInfo.bucket}/${fileInfo.name}`;
-      if (!files.has(key)) {
-        files.set(key, fileInfo);
+      const rowPublishTime = row.publish_time ? new Date(row.publish_time.value || row.publish_time).getTime() : 0;
+      const messageId = row.message_id;
+      const existing = files.get(key);
+      
+      if (!existing) {
+        files.set(key, { fileInfo, publishTime: rowPublishTime, messageIds: [messageId] });
+      } else {
+        // Keep the latest publish_time and accumulate all message_ids
+        existing.messageIds.push(messageId);
+        if (rowPublishTime > existing.publishTime) {
+          existing.publishTime = rowPublishTime;
+        }
       }
     } else {
       parseErrors++;
@@ -236,8 +247,12 @@ async function requeueDLQ(config, options) {
   // Requeue files by updating metadata
   let succeeded = 0;
   let failed = 0;
+  const messageIdsToDelete = [];
 
-  for (const [path, fileInfo] of files.entries()) {
+  const orderedFiles = Array.from(files.entries()).sort((a, b) => b[1].publishTime - a[1].publishTime);
+
+  for (const [path, entry] of orderedFiles) {
+    const fileInfo = entry.fileInfo;
     try {
       const bucket = storage.bucket(fileInfo.bucket);
       const file = bucket.file(fileInfo.name);
@@ -261,9 +276,28 @@ async function requeueDLQ(config, options) {
 
       console.log(`   ✅ Requeued: gs://${path}`);
       succeeded++;
+      
+      // Track message IDs for deletion
+      messageIdsToDelete.push(...entry.messageIds);
     } catch (error) {
       console.log(`   ❌ Failed: gs://${path} - ${error.message}`);
       failed++;
+    }
+  }
+
+  // Delete successfully requeued items from DLQ
+  if (messageIdsToDelete.length > 0) {
+    try {
+      const messageIdsList = messageIdsToDelete.map(id => `'${id}'`).join(', ');
+      const deleteQuery = `
+        DELETE FROM \`${deadLetterTableId}\`
+        WHERE message_id IN (${messageIdsList})
+      `;
+      
+      await bigquery.query({ query: deleteQuery });
+      console.log(`\n🗑️  Deleted ${messageIdsToDelete.length} records from dead letter table`);
+    } catch (error) {
+      console.error(`⚠️  Failed to delete records from DLQ: ${error.message}`);
     }
   }
 
