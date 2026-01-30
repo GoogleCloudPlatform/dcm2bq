@@ -244,18 +244,14 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
   template {
     service_account                  = google_service_account.cloudrun_sa.email
     timeout                          = "3600s" # 1 hour timeout for processing large archive files
-    max_instance_request_concurrency = 4       # Process up to 4 files concurrently per instance
-    
-    scaling {
-      max_instance_count = 10 # Allow up to 10 instances (40 concurrent requests)
-    }
+    max_instance_request_concurrency = 16      # Process up to 16 files concurrently per instance
     
     containers {
       image = var.dcm2bq_image
       resources {
         limits = {
           cpu    = "1"     # 1 CPU per instance
-          memory = "4Gi"   # ~1GB per request with concurrency of 4
+          memory = "4Gi"   # ~256MB per request with concurrency of 16
         }
       }
       env {
@@ -267,6 +263,10 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
         value = var.debug_mode ? "true" : "false"
       }
     }
+  }
+
+  scaling {
+    max_instance_count = 30 # Allow up to 30 instances (480 concurrent requests)
   }
 }
 
@@ -295,6 +295,10 @@ resource "google_pubsub_subscription" "gcs_to_cloudrun" {
   ack_deadline_seconds       = 600 # 10 minutes to process before retry
   message_retention_duration = "86400s" # 1 day
 
+  expiration_policy {
+    ttl = ""
+  }
+
   push_config {
     push_endpoint = google_cloud_run_v2_service.dcm2bq_service.uri
     oidc_token { service_account_email = google_service_account.cloudrun_sa.email }
@@ -322,6 +326,10 @@ resource "google_pubsub_subscription" "dead_letter_subscription" {
   provider = google-beta
   name     = "dcm2bq-dead-letter-bq-subscription"
   topic    = google_pubsub_topic.dead_letter_topic.name
+
+  expiration_policy {
+    ttl = ""
+  }
 
   bigquery_config {
     table            = "${google_bigquery_table.dead_letter_table.project}:${google_bigquery_table.dead_letter_table.dataset_id}.${google_bigquery_table.dead_letter_table.table_id}"

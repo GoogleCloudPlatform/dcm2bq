@@ -119,7 +119,8 @@ async function processDicom(buffer, uriPath) {
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to generate embeddings for ${uriPath}: ${errorMsg}`);
+    const action = shouldGenerateEmbedding ? "generate embeddings" : "create embedding input";
+    console.error(`Failed to ${action} for ${uriPath}: ${errorMsg}`);
     // Continue without embeddings - we still want to save the metadata
   }
   
@@ -235,6 +236,9 @@ async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, v
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
     await extractArchiveToTempDir(archiveType, archiveBuffer, tempDir);
     
+    // Clear archive buffer from memory immediately after extraction
+    archiveBuffer = null;
+    
     // Find all .dcm files
     const dcmFiles = await findDcmFiles(tempDir);
     
@@ -247,8 +251,9 @@ async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, v
     let errorCount = 0;
     
     for (const dcmFile of dcmFiles) {
+      let fileBuffer = null;
       try {
-        const fileBuffer = await fs.readFile(dcmFile);
+        fileBuffer = await fs.readFile(dcmFile);
         const fileName = path.basename(dcmFile);
         const uriPath = `${archiveUriPath}#${fileName}`;
         
@@ -267,6 +272,16 @@ async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, v
         const errorMsg = error instanceof Error ? error.message : String(error);
         const errorStack = error instanceof Error ? error.stack : '';
         console.error(`Error processing DICOM ${path.basename(dcmFile)}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
+      } finally {
+        // Clear file buffer immediately after processing
+        fileBuffer = null;
+        
+        // Delete processed file to free disk space
+        try {
+          await fs.unlink(dcmFile);
+        } catch (e) {
+          // Ignore cleanup errors
+        }
       }
     }
     
@@ -317,15 +332,19 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     // The object has been replaced with a new version
     case consts.GCS_OBJ_FINALIZE: {
       // Use memory to read, avoiding volume mount in container
-      const buffer = await gcs.downloadToMemory(bucketId, objectId);
+      let buffer = await gcs.downloadToMemory(bucketId, objectId);
       perfCtx.addRef("afterGcsDownloadToMemory");
       
       const archiveType = getArchiveType(objectId);
       if (archiveType) {
         await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType);
+        // Clear buffer after archive processing to free memory
+        buffer = null;
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
         await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
+        // Clear buffer after single file processing to free memory
+        buffer = null;
       }
       perfCtx.addRef("afterProcessDicom");
       perfCtx.addRef("afterBqInsert");
