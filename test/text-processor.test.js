@@ -19,16 +19,19 @@ const sinon = require("sinon");
 
 describe("text processor with partial config", () => {
   let originalConfigEnv;
+  let originalDebugEnv;
   let consoleLogStub;
   let consoleErrorStub;
   let geminiStub;
 
   beforeEach(() => {
     originalConfigEnv = process.env.DCM2BQ_CONFIG;
+    originalDebugEnv = process.env.DEBUG;
     // Clear require cache
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/processors/text")];
     delete require.cache[require.resolve("../src/gemini")];
+    delete require.cache[require.resolve("../src/utils")];
     
     // Stub console methods
     consoleLogStub = sinon.stub(console, "log");
@@ -47,10 +50,16 @@ describe("text processor with partial config", () => {
     } else {
       delete process.env.DCM2BQ_CONFIG;
     }
+    if (originalDebugEnv) {
+      process.env.DEBUG = originalDebugEnv;
+    } else {
+      delete process.env.DEBUG;
+    }
     // Clear require cache
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/processors/text")];
     delete require.cache[require.resolve("../src/gemini")];
+    delete require.cache[require.resolve("../src/utils")];
     
     // Restore stubs
     consoleLogStub.restore();
@@ -158,6 +167,7 @@ describe("text processor with partial config", () => {
 
   it("should handle different maxLength values in config", async () => {
     // Test with custom maxLength of 500
+    process.env.DEBUG = "true";
     process.env.DCM2BQ_CONFIG = JSON.stringify({
       gcpConfig: {
         projectId: "test-project",
@@ -195,6 +205,7 @@ describe("text processor with partial config", () => {
   });
 
   it("should use default maxLength when summarizeText has model but no maxLength", async () => {
+    process.env.DEBUG = "true";
     process.env.DCM2BQ_CONFIG = JSON.stringify({
       gcpConfig: {
         projectId: "test-project",
