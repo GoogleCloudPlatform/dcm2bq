@@ -15,6 +15,7 @@
  */
 
 const { gcpConfig } = require("../config").get();
+const { DEBUG_MODE } = require("../utils");
 
 async function createEmbedText(text) {
   const askGemini = require("../gemini");
@@ -33,7 +34,9 @@ async function createTextInstance(text, requireEmbeddingCompatible = false) {
   // If text is too long for embedding and we need embedding compatibility
   if (requireEmbeddingCompatible && text.length > maxLength) {
     if (gcpConfig.embedding?.input?.summarizeText?.model) {
-      console.log(`Text length (${text.length}) exceeds maxLength (${maxLength}), attempting to summarize...`);
+      if (DEBUG_MODE) {
+        console.log(`Text length (${text.length}) exceeds maxLength (${maxLength}), attempting to summarize...`);
+      }
       const embedText = await createEmbedText(text);
       if (embedText) {
         return { text: embedText };
