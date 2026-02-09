@@ -32,6 +32,32 @@ provider "google-beta" {
 
 data "google_project" "project" {}
 
+# Enable required APIs
+resource "google_project_service" "cloudrun_api" {
+  service            = "run.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "pubsub_api" {
+  service            = "pubsub.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "storage_api" {
+  service            = "storage.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "bigquery_api" {
+  service            = "bigquery.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "aiplatform_api" {
+  service            = "aiplatform.googleapis.com"
+  disable_on_destroy = false
+}
+
 data "google_storage_bucket" "existing_dicom_bucket" {
   count = var.create_gcs_bucket ? 0 : 1
   name  = var.gcs_bucket_name
@@ -160,18 +186,17 @@ resource "google_bigquery_table" "dead_letter_table" {
 resource "google_pubsub_topic" "gcs_events" { name = "dcm2bq-gcs-events" }
 resource "google_pubsub_topic" "dead_letter_topic" { name = "dcm2bq-dead-letter-events" }
 
-# IAM for project-level service accounts used by Cloud Storage and Pub/Sub
-resource "google_project_iam_member" "gcs_pubsub_publisher" {
-  project = var.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gs-project-accounts.iam.gserviceaccount.com"
-}
-
-# Pub/Sub topic IAM
+# Grant the GCS service account permission to publish to the Pub/Sub topic
+# This service account is automatically created when the Storage API is enabled
 resource "google_pubsub_topic_iam_member" "gcs_events_publisher" {
   topic  = google_pubsub_topic.gcs_events.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.project.number}@gs-project-accounts.iam.gserviceaccount.com"
+  
+  depends_on = [
+    google_project_service.storage_api,
+    google_project_service.pubsub_api
+  ]
 }
 
 # Service account for Cloud Run
@@ -210,13 +235,10 @@ resource "google_project_iam_member" "pubsub_bq_writer" {
   project = var.project_id
   role    = "roles/bigquery.dataEditor"
   member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  
+  depends_on = [google_project_service.pubsub_api]
 }
 
-resource "google_pubsub_topic_iam_member" "gcs_events_publisher_member" {
-  topic  = google_pubsub_topic.gcs_events.name
-  role   = "roles/pubsub.publisher"
-  member = "serviceAccount:service-${data.google_project.project.number}@gs-project-accounts.iam.gserviceaccount.com"
-}
 
 # IAM permissions for dead letter functionality
 # Allow Pub/Sub to publish to the dead letter topic
@@ -224,6 +246,8 @@ resource "google_pubsub_topic_iam_member" "dead_letter_publisher" {
   topic  = google_pubsub_topic.dead_letter_topic.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  
+  depends_on = [google_project_service.pubsub_api]
 }
 
 # Allow Pub/Sub to subscribe to the main subscription (to forward to dead letter)
@@ -240,6 +264,8 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
   deletion_protection = false
   name                = "dcm2bq-service-${random_string.bucket_suffix.result}"
   location            = var.region
+  
+  depends_on = [google_project_service.cloudrun_api]
 
   template {
     service_account                  = google_service_account.cloudrun_sa.email
@@ -280,12 +306,17 @@ resource "google_cloud_run_v2_service_iam_member" "allow_pubsub_invoke" {
 }
 
 # Storage notification to Pub/Sub
+# Requires the GCS service account to have publish permission on the topic
 resource "google_storage_notification" "bucket_notification" {
   bucket         = local.bucket_name
   payload_format = "JSON_API_V1"
   topic          = google_pubsub_topic.gcs_events.id
   event_types    = ["OBJECT_FINALIZE", "OBJECT_DELETE", "OBJECT_ARCHIVE", "OBJECT_METADATA_UPDATE"]
-  depends_on     = [google_pubsub_topic.gcs_events, google_pubsub_topic_iam_member.gcs_events_publisher]
+  
+  depends_on = [
+    google_pubsub_topic.gcs_events,
+    google_pubsub_topic_iam_member.gcs_events_publisher
+  ]
 }
 
 # Subscription to push GCS events to Cloud Run

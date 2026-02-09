@@ -14,10 +14,18 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch Program",
+      "name": "Launch Service",
       "skipFiles": ["<node_internals>/**"],
-      "program": "${workspaceFolder}/index.js",
+      "program": "${workspaceFolder}/src/index.js",
       "args": ["service"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch CLI:Dump",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/src/index.js",
+      "args": ["dump", "../testdata/testfile.dcm"]
     },
     {
       "type": "node",
