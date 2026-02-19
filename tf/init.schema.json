@@ -15,7 +15,8 @@
         "mode": "NULLABLE",
         "fields": [
           { "name": "size", "type": "INT64", "mode": "NULLABLE" },
-          { "name": "type", "type": "STRING", "mode": "NULLABLE" }
+          { "name": "type", "type": "STRING", "mode": "NULLABLE" },
+          { "name": "storageClass", "type": "STRING", "mode": "NULLABLE" }
         ]
       },
       {
