@@ -42,9 +42,10 @@ const embeddingInputConfig = gcpConfig.embedding?.input;
  * @param {string} eventType The event type
  * @param {number} fileSize The size of the file
  * @param {string} storageType The type of storage (GCS, DICOMWEB, etc)
+ * @param {string} storageClass The storage class of the object (e.g., STANDARD, NEARLINE, COLDLINE, ARCHIVE)
  * @returns {Promise<void>}
  */
-async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType) {
+async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType, storageClass) {
   if (DEBUG_MODE) {
     console.log(`Processing DICOM: ${uriPath} (size: ${fileSize} bytes)`);
   }
@@ -57,9 +58,10 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
   
   const embeddingVectorModel = embeddingInputConfig?.vector?.model;
   
+  // Fixes issue https://github.com/GoogleCloudPlatform/dcm2bq/issues/22
   const infoObj = {
     event: eventType,
-    input: { size: fileSize, type: storageType },
+    input: { size: fileSize, type: storageType, storageClass: storageClass || null },
     embedding: {
       model: embeddingVectorModel || null,
       input: objectMetadata,
@@ -227,8 +229,9 @@ async function extractArchiveToTempDir(archiveType, archiveBuffer, tempDir) {
  * @param {number} version The version identifier
  * @param {string} eventType The event type
  * @param {('zip'|'tar')} archiveType The archive format
+ * @param {string} storageClass The storage class of the archive object
  */
-async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, version, eventType, archiveType) {
+async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass) {
   let tempDir = null;
   const archiveUriPath = gcs.createUriPath(bucketId, objectId);
   try {
@@ -264,7 +267,8 @@ async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, v
           uriPath,
           eventType,
           fileBuffer.length,
-          consts.STORAGE_TYPE_GCS
+          consts.STORAGE_TYPE_GCS,
+          storageClass
         );
         successCount++;
       } catch (error) {
@@ -311,6 +315,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
   const basePath = `${msgData.bucket}/${msgData.name}`;
   const timestamp = new Date();
   const version = msgData.generation;
+  const storageClass = msgData.storageClass || null;
   
   switch (eventType) {
     // The object is no longer current
@@ -320,7 +325,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       const uriPath = gcs.createUriPath(bucketId, objectId);
       const infoObj = {
         event: eventType,
-        input: { type: consts.STORAGE_TYPE_GCS },
+        input: { type: consts.STORAGE_TYPE_GCS, storageClass },
       };
       const writeObj = { timestamp, path: uriPath, version };
       await persistRow(writeObj, infoObj, null, null);
@@ -337,12 +342,12 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
       
       const archiveType = getArchiveType(objectId);
       if (archiveType) {
-        await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType);
+        await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass);
         // Clear buffer after archive processing to free memory
         buffer = null;
       } else {
         const uriPath = gcs.createUriPath(bucketId, objectId);
-        await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS);
+        await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS, storageClass);
         // Clear buffer after single file processing to free memory
         buffer = null;
       }
@@ -363,9 +368,10 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   perfCtx.addRef("afterHcapiDownloadToMemory");
 
   const timestamp = new Date();
-  const version = Date.now(); // TODO: Fix when HCAPI supports versions
+  const version = ctx.message.attributes?.versionId || Date.now();
+  const storageClass = ctx.message.attributes?.storageClass || null;
 
-  await processAndPersistDicom(version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB);
+  await processAndPersistDicom(version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB, storageClass);
   perfCtx.addRef("afterProcessDicom");
   perfCtx.addRef("afterBqInsert");
   if (DEBUG_MODE) {
