@@ -71,7 +71,7 @@ resource "random_string" "bucket_suffix" {
 
 locals {
   bucket_name = var.create_gcs_bucket ? google_storage_bucket.dicom_bucket[0].name : data.google_storage_bucket.existing_dicom_bucket[0].name
-  
+
   # Build embedding configuration dynamically based on flags
   embedding_config = var.create_embedding_input ? {
     input = merge(
@@ -89,7 +89,7 @@ locals {
       } : {}
     )
   } : {}
-  
+
   # Complete DCM2BQ configuration
   dcm2bq_config = {
     gcpConfig = {
@@ -146,24 +146,39 @@ resource "google_bigquery_table" "instances_table" {
   schema              = file("${path.module}/init.schema.json")
 }
 
+// Fixes issue https://github.com/GoogleCloudPlatform/dcm2bq/issues/23
 resource "google_bigquery_table" "instances_view" {
   deletion_protection = false
   dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
   table_id            = "instancesView"
-  
+
   view {
     query          = <<-EOT
-      SELECT
-        * EXCEPT(_row_id)
-      FROM (
+      WITH latest_by_path AS (
         SELECT
           ROW_NUMBER() OVER (PARTITION BY path, version ORDER BY timestamp DESC) AS _row_id,
           *
         FROM
           `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}`
       )
-      WHERE _row_id = 1
-        AND metadata IS NOT NULL
+      SELECT
+        l.* EXCEPT(_row_id)
+      FROM
+        latest_by_path l
+      WHERE
+        l._row_id = 1
+        AND l.metadata IS NOT NULL
+        AND NOT EXISTS (
+          SELECT
+            1
+          FROM
+            `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}` tombstone
+          WHERE
+            tombstone.path = SPLIT(l.path, '#')[SAFE_OFFSET(0)]
+            AND tombstone.version = l.version
+            AND tombstone.metadata IS NULL
+            AND tombstone.timestamp >= l.timestamp
+        )
     EOT
     use_legacy_sql = false
   }
@@ -192,7 +207,7 @@ resource "google_pubsub_topic_iam_member" "gcs_events_publisher" {
   topic  = google_pubsub_topic.gcs_events.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.project.number}@gs-project-accounts.iam.gserviceaccount.com"
-  
+
   depends_on = [
     google_project_service.storage_api,
     google_project_service.pubsub_api
@@ -235,7 +250,7 @@ resource "google_project_iam_member" "pubsub_bq_writer" {
   project = var.project_id
   role    = "roles/bigquery.dataEditor"
   member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-  
+
   depends_on = [google_project_service.pubsub_api]
 }
 
@@ -246,7 +261,7 @@ resource "google_pubsub_topic_iam_member" "dead_letter_publisher" {
   topic  = google_pubsub_topic.dead_letter_topic.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-  
+
   depends_on = [google_project_service.pubsub_api]
 }
 
@@ -255,7 +270,7 @@ resource "google_pubsub_subscription_iam_member" "dead_letter_subscriber" {
   subscription = google_pubsub_subscription.gcs_to_cloudrun.name
   role         = "roles/pubsub.subscriber"
   member       = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-  
+
   depends_on = [google_pubsub_subscription.gcs_to_cloudrun]
 }
 
@@ -264,20 +279,20 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
   deletion_protection = false
   name                = "dcm2bq-service-${random_string.bucket_suffix.result}"
   location            = var.region
-  
+
   depends_on = [google_project_service.cloudrun_api]
 
   template {
     service_account                  = google_service_account.cloudrun_sa.email
     timeout                          = "3600s" # 1 hour timeout for processing large archive files
     max_instance_request_concurrency = 16      # Process up to 16 files concurrently per instance
-    
+
     containers {
       image = var.dcm2bq_image
       resources {
         limits = {
-          cpu    = "1"     # 1 CPU per instance
-          memory = "4Gi"   # ~256MB per request with concurrency of 16
+          cpu    = "1"   # 1 CPU per instance
+          memory = "4Gi" # ~256MB per request with concurrency of 16
         }
       }
       env {
@@ -312,7 +327,7 @@ resource "google_storage_notification" "bucket_notification" {
   payload_format = "JSON_API_V1"
   topic          = google_pubsub_topic.gcs_events.id
   event_types    = ["OBJECT_FINALIZE", "OBJECT_DELETE", "OBJECT_ARCHIVE", "OBJECT_METADATA_UPDATE"]
-  
+
   depends_on = [
     google_pubsub_topic.gcs_events,
     google_pubsub_topic_iam_member.gcs_events_publisher
@@ -323,7 +338,7 @@ resource "google_storage_notification" "bucket_notification" {
 resource "google_pubsub_subscription" "gcs_to_cloudrun" {
   name                       = "dcm2bq-gcs-to-cloudrun-subscription"
   topic                      = google_pubsub_topic.gcs_events.name
-  ack_deadline_seconds       = 600 # 10 minutes to process before retry
+  ack_deadline_seconds       = 600      # 10 minutes to process before retry
   message_retention_duration = "86400s" # 1 day
 
   expiration_policy {
