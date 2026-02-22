@@ -34,7 +34,7 @@ fi
 
 INPUT_FILE="$1"
 OUTPUT_JPG_FILE="$2"
-FRAME_NUMBER=""
+FRAME_NUMBER="1" # Default to first frame (dcm2img uses 1-based frame index)
 if [ "$#" -eq 3 ]; then
     FRAME_NUMBER="$3"
 fi
@@ -53,14 +53,17 @@ echo "Converting ${INPUT_FILE} to ${OUTPUT_JPG_FILE}..."
 
 TEMP_DCM_FILE=$(mktemp --suffix=.dcm)
 
-# Convert DICOM to JPEG-compressed DICOM
-gdcmconv --jpeg "${INPUT_FILE}" "${TEMP_DCM_FILE}"
+# Convert to explicit raw (uncompressed) DICOM to preserve grayscale fidelity.
+gdcmconv --raw "${INPUT_FILE}" "${TEMP_DCM_FILE}"
 
-# If frame number is provided, use dcm2img --frame <n>
-if [ -n "$FRAME_NUMBER" ]; then
-    dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"
-else
-    dcm2img --scale-x-size 512 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"
+# Apply modality LUT + first VOI window when present; fallback to computed windows.
+if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --use-window 1 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"; then
+    if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --histogram-window 1 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"; then
+        if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --min-max-window "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"; then
+            # Final fallback for color / non-VOI cases.
+            dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"
+        fi
+    fi
 fi
 
 rm -f "${TEMP_DCM_FILE}"

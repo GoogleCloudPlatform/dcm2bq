@@ -30,6 +30,7 @@
       currentData: null,
       objectUrl: null,
       copyFeedbackTimeoutId: null,
+      errorDetails: null,
     };
 
     const WS_PROTOCOL_VERSION = 1;
@@ -40,6 +41,23 @@
     const WS_EMPTY_MESSAGE_ID = new Uint8Array(16);
     const textEncoder = new TextEncoder();
     const textDecoder = new TextDecoder();
+
+    function createWsRequestError(message, fields = {}) {
+      const error = new Error(message || 'WebSocket request failed');
+      if (typeof fields.code !== 'undefined') error.code = fields.code;
+      if (fields.action) error.action = fields.action;
+      if (fields.requestId) error.requestId = fields.requestId;
+      if (typeof fields.details !== 'undefined') error.details = fields.details;
+      return error;
+    }
+
+    function formatRequestError(error) {
+      const message = String(error?.message || 'Unknown error');
+      const parts = [];
+      if (typeof error?.code !== 'undefined') parts.push(`code ${error.code}`);
+      if (error?.requestId) parts.push(`request ${error.requestId}`);
+      return parts.length ? `${message} (${parts.join(', ')})` : message;
+    }
 
     function setModalCopyButtonState(stateName) {
       const btn = document.getElementById('modal-copy-btn');
@@ -78,6 +96,50 @@
       }, durationMs);
     }
 
+    function getModalErrorDetails(data, title = '') {
+      if (!data || typeof data !== 'object') return null;
+      const isErrorDialog = String(title || '').toLowerCase().includes('error');
+      if (!isErrorDialog) return null;
+
+      const details = {
+        message: data.error || data.message || null,
+        code: typeof data.code !== 'undefined' ? data.code : null,
+        action: data.action || null,
+        requestId: data.requestId || null,
+        details: typeof data.details !== 'undefined' ? data.details : null,
+      };
+
+      const hasAnyValue = Object.values(details).some((value) => value !== null);
+      return hasAnyValue ? details : null;
+    }
+
+    function hideModalErrorPanel() {
+      const panel = document.getElementById('modal-error-panel');
+      const btn = document.getElementById('modal-error-btn');
+      if (panel) panel.style.display = 'none';
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function renderModalErrorPanel(errorDetails) {
+      const panelContent = document.getElementById('modal-error-panel-content');
+      if (!panelContent) return;
+      panelContent.textContent = JSON.stringify(errorDetails, null, 2);
+    }
+
+    function syncModalErrorControls() {
+      const btn = document.getElementById('modal-error-btn');
+      if (!btn) return;
+
+      if (modalState.errorDetails) {
+        btn.style.display = 'inline-flex';
+        btn.setAttribute('aria-expanded', 'false');
+        renderModalErrorPanel(modalState.errorDetails);
+      } else {
+        btn.style.display = 'none';
+        hideModalErrorPanel();
+      }
+    }
+
     function activateTab(tabName) {
       tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.tab === tabName));
       panels.forEach((panel) => panel.classList.toggle('active', panel.id === tabName));
@@ -87,6 +149,7 @@
 
     function openModal(title, html, mode = 'default', data = null, objectUrl = null) {
       modalState.currentData = data;
+      modalState.errorDetails = getModalErrorDetails(data, title);
       setModalObjectUrl(objectUrl);
       document.getElementById('modal-title').textContent = title;
       document.getElementById('modal-copy-btn').style.display = data ? 'inline-block' : 'none';
@@ -95,6 +158,7 @@
         modalState.copyFeedbackTimeoutId = null;
       }
       setModalCopyButtonState('default');
+      syncModalErrorControls();
       document.getElementById('modal-content').innerHTML = html;
       const modalContent = document.querySelector('#modal .modal-content');
       modalContent.classList.toggle('compact', mode === 'compact');
@@ -105,9 +169,21 @@
 
     document.getElementById('modal-close').addEventListener('click', () => {
       const modalContent = document.querySelector('#modal .modal-content');
-      modalContent.classList.remove('compact', 'image-fit');
+      modalContent.classList.remove('compact', 'image-fit', 'content-fit');
       document.getElementById('modal').classList.remove('open');
+      hideModalErrorPanel();
       releaseModalObjectUrl();
+    });
+
+    document.getElementById('modal-error-btn').addEventListener('click', () => {
+      if (!modalState.errorDetails) return;
+      const panel = document.getElementById('modal-error-panel');
+      const btn = document.getElementById('modal-error-btn');
+      if (!panel || !btn) return;
+
+      const isOpen = panel.style.display !== 'none';
+      panel.style.display = isOpen ? 'none' : 'block';
+      btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
     });
 
     document.getElementById('modal-copy-btn').addEventListener('click', async () => {
@@ -128,9 +204,18 @@
     document.getElementById('modal').addEventListener('click', (event) => {
       if (event.target.id !== 'modal') return;
       const modalContent = document.querySelector('#modal .modal-content');
-      modalContent.classList.remove('compact', 'image-fit');
+      modalContent.classList.remove('compact', 'image-fit', 'content-fit');
       document.getElementById('modal').classList.remove('open');
+      hideModalErrorPanel();
       releaseModalObjectUrl();
+    });
+
+    document.addEventListener('click', (event) => {
+      const panel = document.getElementById('modal-error-panel');
+      const button = document.getElementById('modal-error-btn');
+      if (!panel || !button || panel.style.display === 'none') return;
+      if (panel.contains(event.target) || button.contains(event.target)) return;
+      hideModalErrorPanel();
     });
 
     function setModalObjectUrl(url) {
@@ -339,7 +424,10 @@
                 message = JSON.parse(textDecoder.decode(frame.payloadBytes));
               } catch (_) {
                 wsState.pending.delete(frame.messageIdHex);
-                pending.reject(new Error('Invalid JSON response from WebSocket'));
+                pending.reject(createWsRequestError('Invalid JSON response from WebSocket', {
+                  action: pending.action,
+                  requestId: frame.messageIdHex,
+                }));
                 return;
               }
 
@@ -356,8 +444,20 @@
 
               if (message.type === 'error') {
                 wsState.pending.delete(frame.messageIdHex);
-                pending.reject(new Error(message.error || 'WebSocket request failed'));
+                pending.reject(createWsRequestError(message.error || 'WebSocket request failed', {
+                  code: message.code,
+                  action: message.action || pending.action,
+                  requestId: message.requestId || frame.messageIdHex,
+                  details: message.details,
+                }));
+                return;
               }
+
+              wsState.pending.delete(frame.messageIdHex);
+              pending.reject(createWsRequestError(`Unsupported WebSocket message type: ${message.type || 'unknown'}`, {
+                action: pending.action,
+                requestId: frame.messageIdHex,
+              }));
               return;
             }
 
@@ -389,13 +489,21 @@
                 ({ meta, dataBytes } = parseBinaryPayload(frame.payloadBytes));
               } catch (error) {
                 wsState.pending.delete(frame.messageIdHex);
-                pending.reject(new Error('Invalid binary response from WebSocket'));
+                pending.reject(createWsRequestError('Invalid binary response from WebSocket', {
+                  action: pending.action,
+                  requestId: frame.messageIdHex,
+                }));
                 return;
               }
 
               if (meta?.type === 'error') {
                 wsState.pending.delete(frame.messageIdHex);
-                pending.reject(new Error(meta.error || 'WebSocket request failed'));
+                pending.reject(createWsRequestError(meta.error || 'WebSocket request failed', {
+                  code: meta.code,
+                  action: meta.action || pending.action,
+                  requestId: meta.requestId || frame.messageIdHex,
+                  details: meta.details,
+                }));
                 return;
               }
 
@@ -419,7 +527,10 @@
               }
 
               wsState.pending.delete(frame.messageIdHex);
-              pending.reject(new Error('Unsupported binary response type'));
+              pending.reject(createWsRequestError('Unsupported binary response type', {
+                action: pending.action,
+                requestId: frame.messageIdHex,
+              }));
             }
           });
 
@@ -428,7 +539,7 @@
             setWsStatus('disconnected');
             wsState.connectPromise = null;
             for (const [, pending] of wsState.pending) {
-              pending.reject(new Error('WebSocket disconnected'));
+              pending.reject(createWsRequestError('WebSocket disconnected', { action: pending.action }));
             }
             wsState.pending.clear();
             setTimeout(() => connectWebSocket().catch(() => {}), 1200);
@@ -461,6 +572,7 @@
         wsState.pending.set(idHex, {
           resolve,
           reject,
+          action,
           onProgress: options.onProgress,
         });
 
@@ -590,6 +702,20 @@
         selectAllHeader.checked = allSelected;
         selectAllHeader.indeterminate = anySelected && !allSelected;
       }
+
+      const bulkAction = document.getElementById('study-bulk-action');
+      const bulkApply = document.getElementById('study-bulk-apply');
+      const hasSelectedStudies = state.selectedStudyIds.size > 0;
+      if (bulkAction) {
+        bulkAction.disabled = !hasSelectedStudies;
+        if (!hasSelectedStudies) {
+          bulkAction.value = '';
+        }
+      }
+      if (bulkApply) {
+        const selectedAction = bulkAction ? bulkAction.value : '';
+        bulkApply.disabled = !hasSelectedStudies || !selectedAction;
+      }
     }
 
     function inferContentKind(item) {
@@ -644,9 +770,10 @@
         <div style="flex: 0 0 130px;">Study Date</div>
         <div style="flex: 0 0 85px;">Study Time</div>
         <div style="flex: 1; min-width: 0;">Study Description</div>
+        <div style="flex: 0 0 110px;">Modalities</div>
         <div style="flex: 0 0 70px; display: flex; align-items: center; justify-content: center;" title="Number of series" aria-label="Number of series"><i class="fa-solid fa-cubes" aria-hidden="true"></i></div>
         <div style="flex: 0 0 80px; display: flex; align-items: center; justify-content: center;" title="Number of instances" aria-label="Number of instances"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></div>
-        <div style="flex: 0 0 90px; text-align: right;">Actions</div>
+        <div style="flex: 0 0 90px; text-align: center;">Actions</div>
       `;
       container.appendChild(header);
 
@@ -671,9 +798,13 @@
         const studyTime = study.studyTime || '—';
         const studyDate = study.studyDate || 'Unknown date';
         const studyDesc = study.studyDescription || '';
+        const studyModalities = study.studyModalities || '';
+        const modalitiesDisplay = studyModalities || '—';
+        const studyDescDisplay = studyDesc || '—';
         const instanceCount = Number(study.instanceCount || 0);
         const seriesCount = Number(study.seriesCount || 0);
         const studyChecked = state.selectedStudyIds.has(studyUid) ? 'checked' : '';
+        const downloadTitle = 'Download study source data';
         studySummary.innerHTML = `
           <div style="flex: 0 0 40px; text-align: center;"><input type="checkbox" class="study-check" data-study-id="${escapeHtml(studyUid)}" ${studyChecked} /></div>
           <div style="flex: 0 0 20px; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-chevron-right chevron" aria-hidden="true"></i></div>
@@ -682,11 +813,13 @@
           <div style="flex: 0 0 120px;"><span class="cell-ellipsis" title="${escapeHtml(accessionNumber)}">${escapeHtml(accessionNumber)}</span></div>
           <div style="flex: 0 0 130px;"><span class="cell-ellipsis" title="${escapeHtml(studyDate)}">${escapeHtml(studyDate)}</span></div>
           <div style="flex: 0 0 85px;"><span class="cell-ellipsis" title="${escapeHtml(studyTime)}">${escapeHtml(studyTime)}</span></div>
-          <div style="flex: 1; min-width: 0;"><span class="cell-ellipsis" title="${escapeHtml(studyDesc || '')}">${escapeHtml(studyDesc || '')}</span></div>
+          <div style="flex: 1; min-width: 0;"><span class="cell-ellipsis" title="${escapeHtml(studyDescDisplay)}">${escapeHtml(studyDescDisplay)}</span></div>
+          <div style="flex: 0 0 110px;"><span class="cell-ellipsis" title="${escapeHtml(modalitiesDisplay)}">${escapeHtml(modalitiesDisplay)}</span></div>
           <div style="flex: 0 0 70px; text-align: center;"><strong>${seriesCount}</strong></div>
           <div style="flex: 0 0 80px; text-align: center;"><strong>${instanceCount}</strong></div>
-          <div style="flex: 0 0 90px; text-align: right;">
+          <div style="flex: 0 0 90px; text-align: center;">
             <div class="icon-btn-group">
+              <button class="icon-btn" data-action="study-download" data-study-id="${escapeHtml(studyUid)}" title="${escapeHtml(downloadTitle)}" aria-label="${escapeHtml(downloadTitle)}"><i class="fa-solid fa-download" aria-hidden="true"></i></button>
               <button class="icon-btn" data-action="study-metadata" data-study-id="${escapeHtml(studyUid)}" title="View normalized study metadata"><i class="fa-solid fa-code" aria-hidden="true"></i></button>
             </div>
           </div>
@@ -845,6 +978,7 @@
 
       state.lastSearchParams = { key, value, studyLimit, studyOffset };
       const searchBtn = document.getElementById('search-btn');
+      const searchStatus = document.getElementById('search-status');
       searchBtn.disabled = true;
       try {
         const result = await wsCall('studies.search', { key, value, studyLimit, studyOffset });
@@ -862,8 +996,14 @@
 
         renderStudies();
         updatePaginationControls();
+        if (searchStatus) {
+          searchStatus.textContent = '';
+        }
       } catch (error) {
         console.error('Search failed:', error);
+        if (searchStatus) {
+          searchStatus.textContent = `Search failed: ${formatRequestError(error)}`;
+        }
       } finally {
         searchBtn.disabled = false;
       }
@@ -894,9 +1034,48 @@
         state.studyLoadState.delete(studyId);
         renderStudies();
       } catch (error) {
-        state.studyLoadState.set(studyId, { status: 'error', message: error.message });
+        state.studyLoadState.set(studyId, { status: 'error', message: formatRequestError(error) });
         renderStudies();
       }
+    }
+
+    function parseDownloadFilename(contentDisposition, fallback = 'study-archive') {
+      if (!contentDisposition) return fallback;
+      const match = String(contentDisposition).match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      if (!match) return fallback;
+      const value = match[1] || match[2] || fallback;
+      try {
+        return decodeURIComponent(value);
+      } catch (_) {
+        return value;
+      }
+    }
+
+    async function downloadStudyArchive(studyId) {
+      const response = await fetch(`/api/studies/${encodeURIComponent(studyId)}/download`);
+      if (!response.ok) {
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (_) {}
+        throw createWsRequestError(payload?.reason || payload?.error || `HTTP ${response.status}`, {
+          code: response.status,
+          action: 'studies.download',
+          details: payload || undefined,
+        });
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition');
+      const fileName = parseDownloadFilename(disposition, `${studyId}.zip`);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
     }
 
     document.getElementById('search-btn').addEventListener('click', runSearch);
@@ -931,8 +1110,37 @@
           const normalized = await wsCall('studies.metadata', { studyId });
           openModal('Study Metadata (Normalized JSON)', renderCollapsibleJson(normalized), 'default', normalized);
         } catch (error) {
-          const errorData = { error: error.message };
+          const errorData = {
+            error: formatRequestError(error),
+            code: error.code,
+            action: error.action,
+            requestId: error.requestId,
+            details: error.details,
+          };
           openModal('Error', renderCollapsibleJson(errorData), 'default', errorData);
+        }
+        return;
+      }
+
+      if (action === 'study-download') {
+        evt.preventDefault();
+        evt.stopPropagation();
+        const studyId = button.dataset.studyId;
+        if (!studyId) return;
+        button.disabled = true;
+        try {
+          await downloadStudyArchive(studyId);
+        } catch (error) {
+          const errorData = {
+            error: formatRequestError(error),
+            code: error.code,
+            action: error.action,
+            requestId: error.requestId,
+            details: error.details,
+          };
+          openModal('Error', renderCollapsibleJson(errorData), 'default', errorData);
+        } finally {
+          button.disabled = false;
         }
         return;
       }
@@ -968,7 +1176,13 @@
           }
         }
       } catch (error) {
-        const errorData = { error: error.message };
+        const errorData = {
+          error: formatRequestError(error),
+          code: error.code,
+          action: error.action,
+          requestId: error.requestId,
+          details: error.details,
+        };
         openModal('Error', renderCollapsibleJson(errorData), 'default', errorData);
       }
     });
@@ -1037,34 +1251,72 @@
       }
     });
 
-    document.getElementById('delete-selected-btn').addEventListener('click', async () => {
+    document.getElementById('study-bulk-action').addEventListener('change', () => {
+      syncSelectionControls();
+    });
+
+    document.getElementById('study-bulk-apply').addEventListener('click', async () => {
       const studyIds = [...state.selectedStudyIds];
       const instanceIds = [...state.selectedInstanceIds].filter((id) => {
         const studyId = state.instanceToStudy.get(id);
         return !studyId || !state.selectedStudyIds.has(studyId);
       });
 
-      if (!studyIds.length && !instanceIds.length) return;
-      const parts = [];
-      if (studyIds.length) parts.push(`${studyIds.length} study(ies)`);
-      if (instanceIds.length) parts.push(`${instanceIds.length} instance(s)`);
-      if (!confirm(`Delete ${parts.join(' and ')}?`)) return;
+      const bulkAction = document.getElementById('study-bulk-action');
+      const action = bulkAction?.value || '';
+      if (!action || !studyIds.length) return;
 
-      const btn = document.getElementById('delete-selected-btn');
+      if (action === 'delete') {
+        const parts = [];
+        if (studyIds.length) parts.push(`${studyIds.length} study(ies)`);
+        if (instanceIds.length) parts.push(`${instanceIds.length} instance(s)`);
+        if (!confirm(
+          `You are about to permanently delete ${parts.join(' and ')}.\n\n` +
+          `This action cannot be undone. Continue?`,
+        )) return;
+      }
+
+      if (action === 'reprocess' && !confirm(
+        `You are about to request reprocessing for ${studyIds.length} study(ies).\n\n` +
+        `This will update source-object metadata and trigger processing. Continue?`,
+      )) {
+        return;
+      }
+
+      const btn = document.getElementById('study-bulk-apply');
       btn.disabled = true;
       try {
-        if (studyIds.length) {
-          await wsCall('studies.delete', { studyIds });
+        if (action === 'delete') {
+          if (studyIds.length) {
+            await wsCall('studies.delete', { studyIds });
+          }
+          if (instanceIds.length) {
+            await wsCall('instances.delete', { ids: instanceIds });
+          }
+          state.selectedStudyIds.clear();
+          state.selectedInstanceIds.clear();
+          renderStudies();
+          updatePaginationControls();
+          if (bulkAction) bulkAction.value = '';
+          syncSelectionControls();
+          return;
         }
-        if (instanceIds.length) {
-          await wsCall('instances.delete', { ids: instanceIds });
+
+        if (action === 'reprocess') {
+          const result = await wsCall('studies.reprocess', { studyIds });
+          const failureCount = Array.isArray(result.failures) ? result.failures.length : 0;
+          const missingCount = Array.isArray(result.missingStudyIds) ? result.missingStudyIds.length : 0;
+          alert(
+            `Reprocessing requested for ${result.reprocessedStudyCount || 0} study(ies), ` +
+            `${result.reprocessedFileCount || 0} file(s). ` +
+            `Missing studies: ${missingCount}. Failures: ${failureCount}.`,
+          );
+          if (bulkAction) bulkAction.value = '';
+          syncSelectionControls();
         }
-        state.selectedStudyIds.clear();
-        state.selectedInstanceIds.clear();
-        renderStudies();
-        updatePaginationControls();
       } catch (error) {
-        console.error('Delete failed:', error);
+        const label = action === 'reprocess' ? 'Reprocess' : 'Delete';
+        alert(`${label} failed: ${formatRequestError(error)}`);
       } finally {
         btn.disabled = false;
       }
@@ -1165,7 +1417,7 @@
         await refreshDlp();
         alert(`Requeued ${result.requeuedCount} file(s), deleted ${result.deletedMessageCount} message(s).`);
       } catch (error) {
-        alert(`Requeue failed: ${error.message}`);
+        alert(`Requeue failed: ${formatRequestError(error)}`);
       } finally {
         btn.disabled = false;
       }
@@ -1182,7 +1434,7 @@
         await refreshDlp();
         alert(`Deleted ${result.deletedCount} message(s).`);
       } catch (error) {
-        alert(`Delete failed: ${error.message}`);
+        alert(`Delete failed: ${formatRequestError(error)}`);
       } finally {
         btn.disabled = false;
       }
@@ -1228,7 +1480,7 @@
 
         output.textContent = `${progressLines.join('\n')}\n\n${JSON.stringify(result, null, 2)}`;
       } catch (error) {
-        output.textContent = `Failed: ${error.message}`;
+        output.textContent = `Failed: ${formatRequestError(error)}`;
       } finally {
         btn.disabled = false;
       }
@@ -1369,7 +1621,7 @@
     }
 
     connectWebSocket().catch((error) => {
-      setWsStatus('error', error.message);
+      setWsStatus('error', formatRequestError(error));
     });
     runSearch();
 

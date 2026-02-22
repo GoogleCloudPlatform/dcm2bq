@@ -20,6 +20,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs").promises;
 const os = require("os");
+const AdmZip = require("adm-zip");
 const { BigQuery } = require("@google-cloud/bigquery");
 const { Storage } = require("@google-cloud/storage");
 const { WebSocketServer } = require("ws");
@@ -41,7 +42,7 @@ const {
   decodeWsFrame,
   buildBinaryPayload,
 } = require("./admin/ws-frame");
-const { buildNormalizedStudyMetadata } = require("./admin/study-metadata");
+const { buildNormalizedStudyMetadata, parseJsonValue } = require("./admin/study-metadata");
 const { parseGsPath, extractDlqFileInfo } = require("./admin/dlq-utils");
 const {
   loadDeploymentConfig,
@@ -216,6 +217,82 @@ function isSafeProjectId(value) {
   return typeof value === "string" && PROJECT_ID_REGEX.test(value);
 }
 
+function stripGsPathFragment(gsPath) {
+  if (typeof gsPath !== "string") return null;
+  const trimmed = gsPath.trim();
+  if (!trimmed.startsWith("gs://")) return null;
+  const hashIndex = trimmed.indexOf("#");
+  return hashIndex >= 0 ? trimmed.slice(0, hashIndex) : trimmed;
+}
+
+function isArchiveObjectPath(gsPath) {
+  const normalized = String(gsPath || "").toLowerCase();
+  return normalized.endsWith(".zip") || normalized.endsWith(".tgz") || normalized.endsWith(".tar.gz");
+}
+
+function getMimeTypeForArchive(objectPath) {
+  const normalized = String(objectPath || "").toLowerCase();
+  if (normalized.endsWith(".zip")) return "application/zip";
+  if (normalized.endsWith(".tgz") || normalized.endsWith(".tar.gz")) return "application/gzip";
+  return "application/octet-stream";
+}
+
+const CLINICAL_MODALITY_ORDER = Object.freeze([
+  "CT",
+  "MR",
+  "PT",
+  "NM",
+  "US",
+  "XA",
+  "RF",
+  "CR",
+  "DX",
+  "MG",
+  "SC",
+  "PR",
+  "KO",
+  "SR",
+  "SEG",
+  "RTSTRUCT",
+  "RTPLAN",
+  "RTDOSE",
+  "RTIMAGE",
+  "OT",
+]);
+
+const CLINICAL_MODALITY_RANK = new Map(
+  CLINICAL_MODALITY_ORDER.map((code, index) => [code, index]),
+);
+
+function normalizeStudyModalities(value) {
+  const rawTokens = String(value || "")
+    .split(",")
+    .map((token) => token.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (rawTokens.length === 0) {
+    return null;
+  }
+
+  const uniqueTokens = [...new Set(rawTokens)];
+  uniqueTokens.sort((left, right) => {
+    const leftRank = CLINICAL_MODALITY_RANK.has(left)
+      ? CLINICAL_MODALITY_RANK.get(left)
+      : Number.MAX_SAFE_INTEGER;
+    const rightRank = CLINICAL_MODALITY_RANK.has(right)
+      ? CLINICAL_MODALITY_RANK.get(right)
+      : Number.MAX_SAFE_INTEGER;
+
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+
+    return left.localeCompare(right);
+  });
+
+  return uniqueTokens.join(", ");
+}
+
 function buildQualifiedTable(tableId, runtimeCfg = getRuntimeTablesConfig()) {
   if (!tableId) {
     throw new Error("BigQuery tableId is not configured");
@@ -287,6 +364,31 @@ function getSearchExpression(key) {
   }
 
   return `JSON_VALUE(metadata, '$.${key}')`;
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildSearchFilter(key, value) {
+  const whereExpr = getSearchExpression(key);
+  const normalizedKey = String(key || "").trim().toLowerCase();
+  const trimmedValue = String(value || "").trim();
+  const isModalityKey = normalizedKey === "modality" || normalizedKey === "metadata.modality";
+
+  if (isModalityKey && trimmedValue) {
+    const escaped = escapeRegExp(trimmedValue.toUpperCase());
+    const modalityPattern = `(^|\\\\|,|\\s)${escaped}($|\\\\|,|\\s)`;
+    return {
+      whereClause: `REGEXP_CONTAINS(UPPER(COALESCE(${whereExpr}, '')), @modalityPattern)`,
+      params: { modalityPattern },
+    };
+  }
+
+  return {
+    whereClause: `${whereExpr} LIKE @valuePattern`,
+    params: { valuePattern: `%${trimmedValue}%` },
+  };
 }
 
 async function queryInstancesByIds(ids) {
@@ -434,6 +536,7 @@ async function proxyApiThroughHttp(port, action, payload, wsMessageId = null, ws
       method: "GET",
       path: `/studies/${encodeURIComponent(String(payload?.studyId || ""))}/metadata?limit=${encodeURIComponent(String(payload?.limit || "20000"))}`,
     },
+    "studies.reprocess": { method: "POST", path: "/api/studies/reprocess" },
     "studies.delete": { method: "POST", path: "/api/studies/delete" },
     "dlq.summary": { method: "GET", path: `/api/dlq/summary?limit=${encodeURIComponent(String(payload?.limit || "500"))}` },
     "dlq.items": {
@@ -473,6 +576,13 @@ async function proxyApiThroughHttp(port, action, payload, wsMessageId = null, ws
   if (!response.ok) {
     const err = new Error(json.reason || json.error || json.message || `HTTP ${response.status}`);
     err.code = response.status;
+    err.details = {
+      status: response.status,
+      response: json,
+      action,
+      path: route.path,
+      method: route.method,
+    };
     throw err;
   }
   return json;
@@ -530,7 +640,7 @@ app.post("/api/instances/search", async (req, res) => {
     }
 
     const viewTable = buildQualifiedTable(runtimeCfg.instancesViewId, runtimeCfg);
-    const whereExpr = getSearchExpression(key);
+    const searchFilter = buildSearchFilter(key, value);
     
     // Step 1: Get the list of matching studies (lightweight query)
     const studiesQuery = `
@@ -539,7 +649,7 @@ app.post("/api/instances/search", async (req, res) => {
         MAX(timestamp) as max_timestamp,
         COUNT(*) as instance_count
       FROM ${viewTable}
-      WHERE ${whereExpr} LIKE @valuePattern
+      WHERE ${searchFilter.whereClause}
       GROUP BY study_id
       ORDER BY max_timestamp DESC
       LIMIT @studyLimit
@@ -548,7 +658,7 @@ app.post("/api/instances/search", async (req, res) => {
     const [studyRows] = await bigquery.query({
       query: studiesQuery,
       params: {
-        valuePattern: `%${value}%`,
+        ...searchFilter.params,
         studyLimit,
       },
     });
@@ -600,11 +710,11 @@ app.post("/api/instances/search", async (req, res) => {
       const countQuery = `
         SELECT COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN')) as total
         FROM ${viewTable}
-        WHERE ${whereExpr} LIKE @valuePattern
+        WHERE ${searchFilter.whereClause}
       `;
       const [countRows] = await bigquery.query({
         query: countQuery,
-        params: { valuePattern: `%${value}%` },
+        params: { ...searchFilter.params },
       });
       totalStudies = Number(countRows[0]?.total || studyLimit);
     }
@@ -646,18 +756,18 @@ app.post("/api/instances/search/counts", async (req, res) => {
     }
 
     const viewTable = buildQualifiedTable(runtimeCfg.instancesViewId, runtimeCfg);
-    const whereExpr = getSearchExpression(key);
+    const searchFilter = buildSearchFilter(key, value);
     const countQuery = `
       SELECT
         COUNT(*) as totalInstances,
         COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN')) as totalStudies
       FROM ${viewTable}
-      WHERE ${whereExpr} LIKE @valuePattern
+      WHERE ${searchFilter.whereClause}
     `;
 
     const [rows] = await bigquery.query({
       query: countQuery,
-      params: { valuePattern: `%${value}%` },
+      params: { ...searchFilter.params },
     });
 
     const totals = rows[0] || {};
@@ -682,7 +792,7 @@ app.post("/api/studies/search", async (req, res) => {
     }
 
     const viewTable = buildQualifiedTable(runtimeCfg.instancesViewId, runtimeCfg);
-    const whereExpr = getSearchExpression(key);
+    const searchFilter = buildSearchFilter(key, value);
 
     const studiesQuery = `
       SELECT
@@ -690,6 +800,20 @@ app.post("/api/studies/search", async (req, res) => {
         MAX(timestamp) as max_timestamp,
         COUNT(*) as instance_count,
         COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.SeriesInstanceUID'), 'UNKNOWN')) as series_count,
+        COUNT(DISTINCT CASE
+          WHEN ENDS_WITH(LOWER(REGEXP_REPLACE(path, r'#.*$', '')), '.zip')
+            OR ENDS_WITH(LOWER(REGEXP_REPLACE(path, r'#.*$', '')), '.tgz')
+            OR ENDS_WITH(LOWER(REGEXP_REPLACE(path, r'#.*$', '')), '.tar.gz')
+            THEN REGEXP_REPLACE(path, r'#.*$', '')
+          ELSE NULL
+        END) as archive_source_count,
+        ANY_VALUE(CASE
+          WHEN ENDS_WITH(LOWER(REGEXP_REPLACE(path, r'#.*$', '')), '.zip')
+            OR ENDS_WITH(LOWER(REGEXP_REPLACE(path, r'#.*$', '')), '.tgz')
+            OR ENDS_WITH(LOWER(REGEXP_REPLACE(path, r'#.*$', '')), '.tar.gz')
+            THEN REGEXP_REPLACE(path, r'#.*$', '')
+          ELSE NULL
+        END) as archive_source_path,
         ANY_VALUE(JSON_VALUE(metadata, '$.PatientName')) as patient_name,
         ANY_VALUE(JSON_VALUE(metadata, '$.PatientID')) as patient_id,
         ANY_VALUE(JSON_VALUE(metadata, '$.AccessionNumber')) as accession_number,
@@ -697,9 +821,16 @@ app.post("/api/studies/search", async (req, res) => {
         ANY_VALUE(JSON_VALUE(metadata, '$.InstitutionName')) as institution_name,
         ANY_VALUE(JSON_VALUE(metadata, '$.StudyDate')) as study_date,
         ANY_VALUE(JSON_VALUE(metadata, '$.StudyTime')) as study_time,
-        ANY_VALUE(JSON_VALUE(metadata, '$.StudyDescription')) as study_description
+        ANY_VALUE(JSON_VALUE(metadata, '$.StudyDescription')) as study_description,
+        ARRAY_TO_STRING(
+          ARRAY_AGG(
+            DISTINCT NULLIF(UPPER(TRIM(JSON_VALUE(metadata, '$.Modality'))), '')
+            IGNORE NULLS
+          ),
+          ', '
+        ) as study_modalities
       FROM ${viewTable}
-      WHERE ${whereExpr} LIKE @valuePattern
+      WHERE ${searchFilter.whereClause}
       GROUP BY study_id
       ORDER BY max_timestamp DESC
       LIMIT @studyLimit OFFSET @studyOffset
@@ -710,17 +841,17 @@ app.post("/api/studies/search", async (req, res) => {
         COUNT(*) as totalInstances,
         COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN')) as totalStudies
       FROM ${viewTable}
-      WHERE ${whereExpr} LIKE @valuePattern
+      WHERE ${searchFilter.whereClause}
     `;
 
     const [studyRows, totalRows] = await Promise.all([
       bigquery.query({
         query: studiesQuery,
-        params: { valuePattern: `%${value}%`, studyLimit, studyOffset },
+        params: { ...searchFilter.params, studyLimit, studyOffset },
       }),
       bigquery.query({
         query: totalsQuery,
-        params: { valuePattern: `%${value}%` },
+        params: { ...searchFilter.params },
       }),
     ]);
 
@@ -728,6 +859,8 @@ app.post("/api/studies/search", async (req, res) => {
       studyId: row.study_id,
       instanceCount: Number(row.instance_count || 0),
       seriesCount: Number(row.series_count || 0),
+      archiveDownloadEligible: Number(row.archive_source_count || 0) === 1,
+      archiveSourcePath: Number(row.archive_source_count || 0) === 1 ? row.archive_source_path || null : null,
       patientName: row.patient_name || null,
       patientId: row.patient_id || null,
       accessionNumber: row.accession_number || null,
@@ -736,6 +869,7 @@ app.post("/api/studies/search", async (req, res) => {
       studyDate: row.study_date || null,
       studyTime: row.study_time || null,
       studyDescription: row.study_description || null,
+      studyModalities: normalizeStudyModalities(row.study_modalities),
     }));
 
     const totals = totalRows?.[0]?.[0] || {};
@@ -758,18 +892,18 @@ app.post("/api/studies/search/counts", async (req, res) => {
     }
 
     const viewTable = buildQualifiedTable(runtimeCfg.instancesViewId, runtimeCfg);
-    const whereExpr = getSearchExpression(key);
+    const searchFilter = buildSearchFilter(key, value);
     const countQuery = `
       SELECT
         COUNT(*) as totalInstances,
         COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN')) as totalStudies
       FROM ${viewTable}
-      WHERE ${whereExpr} LIKE @valuePattern
+      WHERE ${searchFilter.whereClause}
     `;
 
     const [rows] = await bigquery.query({
       query: countQuery,
-      params: { valuePattern: `%${value}%` },
+      params: { ...searchFilter.params },
     });
 
     const totals = rows[0] || {};
@@ -887,6 +1021,241 @@ app.post("/api/studies/delete", async (req, res) => {
     res.json({ deletedStudyCount: studyIds.length });
   } catch (error) {
     handleHttpError(req, res, error);
+  }
+});
+
+app.post("/api/studies/reprocess", async (req, res) => {
+  try {
+    const studyIds = Array.isArray(req.body?.studyIds)
+      ? req.body.studyIds
+        .filter((id) => typeof id === "string")
+        .map((id) => id.trim())
+        .filter(Boolean)
+      : [];
+    if (studyIds.length === 0) {
+      return res.status(400).json({ error: "No studyIds provided" });
+    }
+
+    const runtimeCfg = getRuntimeTablesConfig();
+    const viewTable = buildQualifiedTable(runtimeCfg.instancesViewId, runtimeCfg);
+    const query = `
+      SELECT
+        COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN') AS studyId,
+        path
+      FROM ${viewTable}
+      WHERE COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN') IN UNNEST(@studyIds)
+        AND path IS NOT NULL
+      LIMIT 50000
+    `;
+
+    const [rows] = await bigquery.query({ query, params: { studyIds } });
+
+    const studyPaths = new Map();
+    for (const row of rows) {
+      const studyId = typeof row.studyId === "string" ? row.studyId : "UNKNOWN";
+      const sourcePath = stripGsPathFragment(row.path);
+      if (!sourcePath) continue;
+      if (!studyPaths.has(studyId)) {
+        studyPaths.set(studyId, new Set());
+      }
+      studyPaths.get(studyId).add(sourcePath);
+    }
+
+    const missingStudyIds = studyIds.filter((studyId) => !studyPaths.has(studyId));
+    if (studyPaths.size === 0) {
+      return res.json({
+        requestedStudyCount: studyIds.length,
+        matchedStudyCount: 0,
+        reprocessedStudyCount: 0,
+        reprocessedFileCount: 0,
+        missingStudyIds,
+        failures: [],
+      });
+    }
+
+    const pathToStudies = new Map();
+    for (const [studyId, paths] of studyPaths.entries()) {
+      for (const sourcePath of paths) {
+        if (!pathToStudies.has(sourcePath)) {
+          pathToStudies.set(sourcePath, new Set());
+        }
+        pathToStudies.get(sourcePath).add(studyId);
+      }
+    }
+
+    const reprocessedStudies = new Set();
+    const failures = [];
+    let reprocessedFileCount = 0;
+
+    for (const [sourcePath, sourceStudies] of pathToStudies.entries()) {
+      const parsed = parseGsPath(sourcePath);
+      if (!parsed) {
+        failures.push({ path: sourcePath, error: "Invalid source path" });
+        continue;
+      }
+
+      try {
+        const file = storage.bucket(parsed.bucket).file(parsed.object);
+        const [exists] = await file.exists();
+        if (!exists) {
+          failures.push({ path: sourcePath, error: "File not found" });
+          continue;
+        }
+
+        await file.setMetadata({
+          metadata: {
+            "dcm2bq-reprocess": new Date().toISOString(),
+            "dcm2bq-requeue-source": "study-api",
+          },
+        });
+
+        reprocessedFileCount++;
+        for (const studyId of sourceStudies) {
+          reprocessedStudies.add(studyId);
+        }
+      } catch (error) {
+        failures.push({ path: sourcePath, error: error.message });
+      }
+    }
+
+    res.json({
+      requestedStudyCount: studyIds.length,
+      matchedStudyCount: studyPaths.size,
+      reprocessedStudyCount: reprocessedStudies.size,
+      reprocessedFileCount,
+      missingStudyIds,
+      failures,
+    });
+  } catch (error) {
+    handleHttpError(req, res, error);
+  }
+});
+
+app.get("/api/studies/:studyInstanceUid/download", async (req, res) => {
+  let tempDir = null;
+  try {
+    const runtimeCfg = getRuntimeTablesConfig();
+    const studyInstanceUid = String(req.params.studyInstanceUid || "").trim();
+    if (!studyInstanceUid) {
+      return res.status(400).json({ error: "Missing studyInstanceUid" });
+    }
+
+    const viewTable = buildQualifiedTable(runtimeCfg.instancesViewId, runtimeCfg);
+    const query = `
+      SELECT path
+      FROM ${viewTable}
+      WHERE COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN') = @studyInstanceUid
+        AND path IS NOT NULL
+      LIMIT 10000
+    `;
+    const [rows] = await bigquery.query({ query, params: { studyInstanceUid } });
+    if (!rows.length) {
+      return res.status(404).json({ error: "Study not found" });
+    }
+
+    const sourcePathSet = new Set();
+    for (const row of rows) {
+      const rawPath = stripGsPathFragment(row.path);
+      if (!rawPath) continue;
+      sourcePathSet.add(rawPath);
+    }
+
+    if (sourcePathSet.size === 0) {
+      return res.status(400).json({
+        error: "Study has no downloadable source paths",
+      });
+    }
+
+    const sourcePaths = [...sourcePathSet];
+
+    if (sourcePaths.length === 1) {
+      const sourcePath = sourcePaths[0];
+      const parsed = parseGsPath(sourcePath);
+      if (!parsed) {
+        return res.status(400).json({ error: `Invalid source path: ${sourcePath}` });
+      }
+
+      const file = storage.bucket(parsed.bucket).file(parsed.object);
+      const [exists] = await file.exists();
+      if (!exists) {
+        return res.status(404).json({ error: "Source file not found in storage" });
+      }
+
+      const [metadata] = await file.getMetadata();
+      const fileName = path.basename(parsed.object) || `${studyInstanceUid}.bin`;
+      const contentType = metadata?.contentType || (isArchiveObjectPath(parsed.object)
+        ? getMimeTypeForArchive(parsed.object)
+        : "application/octet-stream");
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `attachment; filename=\"${fileName.replace(/\"/g, "")}\"`);
+      if (metadata?.size) {
+        res.setHeader("Content-Length", String(metadata.size));
+      }
+
+      file.createReadStream()
+        .on("error", (streamError) => {
+          if (!res.headersSent) {
+            handleHttpError(req, res, streamError);
+          } else {
+            res.destroy(streamError);
+          }
+        })
+        .pipe(res);
+      return;
+    }
+
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "dcm2bq-study-download-"));
+    const zip = new AdmZip();
+    const usedNames = new Set();
+
+    for (let i = 0; i < sourcePaths.length; i++) {
+      const sourcePath = sourcePaths[i];
+      const parsed = parseGsPath(sourcePath);
+      if (!parsed) {
+        const err = new Error(`Invalid source path: ${sourcePath}`);
+        err.code = 400;
+        throw err;
+      }
+
+      const file = storage.bucket(parsed.bucket).file(parsed.object);
+      const [exists] = await file.exists();
+      if (!exists) {
+        const err = new Error(`Source file not found in storage: ${sourcePath}`);
+        err.code = 404;
+        throw err;
+      }
+
+      const baseName = path.basename(parsed.object) || `file-${i + 1}.bin`;
+      const safeBaseName = baseName.replace(/[^A-Za-z0-9._-]/g, "_");
+      let finalName = safeBaseName;
+      let suffix = 1;
+      while (usedNames.has(finalName)) {
+        const ext = path.extname(safeBaseName);
+        const stem = ext ? safeBaseName.slice(0, -ext.length) : safeBaseName;
+        finalName = `${stem}_${suffix}${ext}`;
+        suffix += 1;
+      }
+      usedNames.add(finalName);
+
+      const localPath = path.join(tempDir, finalName);
+      await file.download({ destination: localPath });
+      zip.addLocalFile(localPath, "", finalName);
+    }
+
+    const zipFileName = `${studyInstanceUid}.zip`.replace(/[^A-Za-z0-9._-]/g, "_");
+    const zipBuffer = zip.toBuffer();
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${zipFileName}\"`);
+    res.setHeader("Content-Length", String(zipBuffer.length));
+    res.send(zipBuffer);
+  } catch (error) {
+    handleHttpError(req, res, error);
+  } finally {
+    if (tempDir) {
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch (_) {}
+    }
   }
 });
 
@@ -1483,6 +1852,7 @@ class HttpServer {
                 action: "unknown",
                 error: errorMessage,
                 code: 400,
+                requestId,
               }),
               "utf8",
             ),
@@ -1669,6 +2039,8 @@ class HttpServer {
           await sendJson("error", {
             error: error.message || "Unknown websocket error",
             code: error.code || 500,
+            details: error.details || undefined,
+            requestId: requestId || undefined,
           }, { status: "error", durationMs });
         }
       });
