@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dcm2bq Admin Console</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="./admin.css" />
+
+</head>
+<body>
+  <header>
+    <strong>dcm2bq Admin Console</strong>
+    <span class="ws-status connecting" id="ws-status" title="WebSocket: connecting" aria-label="WebSocket connecting"><i class="fa-solid fa-circle-notch" aria-hidden="true"></i></span>
+  </header>
+  <main>
+    <div class="tabs">
+      <button class="tab active" data-tab="instances">Search</button>
+      <button class="tab" data-tab="dlp">Failed Queue</button>
+      <button class="tab" data-tab="upload">Ingest</button>
+      <button class="tab" data-tab="monitoring">Monitoring</button>
+    </div>
+
+    <section id="instances" class="panel active">
+      <div class="row section-toolbar" style="margin-bottom: 0;" id="instances-toolbar">
+        <input id="search-key" value="PatientID" placeholder="key (e.g. PatientID, metadata.PatientName, info.event, path)" style="min-width:300px" onkeypress="if(event.key==='Enter') runSearch()" />
+        <input id="search-value" placeholder="value" style="min-width:220px" onkeypress="if(event.key==='Enter') runSearch()" />
+        <button class="primary" id="search-btn">Search</button>
+        <button class="danger" id="delete-selected-btn">Delete Selected</button>
+        <span class="toolbar-spacer" aria-hidden="true"></span>
+        <div class="pager-controls">
+          <button id="studies-prev">← Prev</button>
+          <button id="studies-next">Next →</button>
+          <span class="muted pager-info" id="study-page-info"></span>
+        </div>
+      </div>
+      <div class="muted section-status" id="search-status" style="margin-bottom: 16px; font-size: 14px;"></div>
+      <div id="instances-body" style="overflow: auto; flex: 1;"></div>
+      <template id="instance-empty-template">
+        <div class="muted">No instances found.</div>
+      </template>
+      <template id="study-group-template">
+        <div class="study-row" style="border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; overflow: hidden; background: var(--surface);">
+          <details class="study-group" style="border: none; margin: 0;">
+            <summary style="display: flex; gap: 10px; align-items: center; padding: 10px; background: var(--surface-alt); font-weight: 500; font-size: 13px; cursor: pointer; list-style: none;"></summary>
+            <div style="padding: 8px;" class="series-container"></div>
+          </details>
+        </div>
+      </template>
+      <template id="series-group-template">
+        <details class="study-group" style="margin-left: 0; margin-bottom: 4px; border: none;">
+          <summary style="display: flex; align-items: center; padding: 8px; background: var(--surface-muted); font-weight: 500; font-size: 12px; cursor: pointer; list-style: none; border-bottom: 1px solid var(--border); width: 100%; box-sizing: border-box;"></summary>
+          <div style="padding: 0;">
+            <table style="font-size: 13px; width: 100%;">
+              <thead>
+                <tr>
+                  <th style="width: 40px; padding: 8px; text-align: left;">Select</th>
+                  <th style="flex: 1; padding: 8px; text-align: left;">Instance UID</th>
+                  <th style="flex: 1; padding: 8px; text-align: left;">Instance Time</th>
+                  <th style="flex: 1; padding: 8px; text-align: left;">Embedding</th>
+                  <th style="width: 100px; padding: 8px; text-align: center;">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+      </template>
+      <template id="instance-row-template">
+        <tr>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td style="width: 100px; text-align: right;"></td>
+        </tr>
+      </template>
+      <table style="display:none;">
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="dlp" class="panel">
+      <div class="row section-toolbar">
+        <button class="primary" id="dlp-refresh">Refresh Queue</button>
+        <button class="secondary" id="dlp-requeue">Retry Selected</button>
+        <button class="danger" id="dlp-delete">Delete Selected</button>
+        <span class="toolbar-spacer" aria-hidden="true"></span>
+        <div class="pager-controls">
+          <button id="dlp-prev">← Prev</button>
+          <button id="dlp-next">Next →</button>
+          <span id="dlp-page-info" class="pager-info muted">0 of 0</span>
+        </div>
+      </div>
+      <div id="dlp-summary" class="muted section-status"></div>
+      <table class="dlp-table" style="margin-bottom: 0;">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="select-all-dlp" /></th>
+            <th>Message ID</th>
+            <th>Publish Time</th>
+            <th>GCS Path</th>
+            <th>Generation</th>
+          </tr>
+        </thead>
+      </table>
+      <div style="overflow: auto; flex: 1;"><table class="dlp-table" style="margin-top: 0;">
+        <tbody id="dlp-body"></tbody>
+      </table></div>
+    </section>
+
+    <section id="upload" class="panel">
+      <div class="row section-toolbar">
+        <input type="file" id="upload-file" />
+        <input id="upload-config" placeholder="Optional config path (e.g. deployment-config.json)" style="min-width:260px" />
+      </div>
+      <div class="row section-toolbar">
+        <input id="upload-poll-interval" type="number" value="2000" />
+        <input id="upload-poll-timeout" type="number" value="60000" />
+        <input id="upload-poll-timeout-mb" type="number" value="10000" />
+        <button class="primary" id="upload-run">Ingest</button>
+      </div>
+      <div class="muted section-note">pollInterval, pollTimeout, pollTimeoutPerMb (milliseconds)</div>
+      <pre id="upload-output">No run yet.</pre>
+    </section>
+
+    <section id="monitoring" class="panel">
+      <div class="row section-toolbar monitoring-controls">
+        <label><input type="checkbox" id="monitoring-enabled" /> Enable monitoring</label>
+        <label>Refresh interval (ms): <input id="monitoring-interval" type="number" value="10000" min="1000" /></label>
+        <button class="primary" id="monitoring-refresh">Refresh now</button>
+        <button id="monitoring-clear">Clear history</button>
+      </div>
+      <div class="muted section-status" id="monitoring-status" style="margin-bottom: 8px;"></div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <div class="monitoring-chart-panel">
+          <canvas id="chart-studies"></canvas>
+        </div>
+        <div class="monitoring-chart-panel">
+          <canvas id="chart-instances"></canvas>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr; gap: 16px;">
+        <div class="monitoring-chart-panel">
+          <canvas id="chart-dlq"></canvas>
+        </div>
+      </div>
+      <div class="muted" id="monitoring-history"></div>
+    </section>
+
+  <div id="modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <strong id="modal-title">Details</strong>
+        <div style="display: flex; gap: 8px;">
+          <button id="modal-copy-btn" class="icon-btn" style="display: none; font-size: 16px;" title="Copy JSON to clipboard" aria-label="Copy JSON"><i class="fa-solid fa-copy"></i></button>
+          <button id="modal-close" class="modal-close-x" aria-label="Close modal" title="Close">×</button>
+        </div>
+      </div>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="./admin.js"></script>
+</body>
+</html>

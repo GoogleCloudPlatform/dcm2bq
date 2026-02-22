@@ -42,11 +42,19 @@ if ! gcloud auth application-default print-access-token &>/dev/null; then
     exit 1
 fi
 
+# Check if docker is available (integration run includes docker smoke tests)
+if ! command -v docker &>/dev/null; then
+    echo -e "${RED}Error: docker CLI not found${NC}"
+    echo "Please install Docker and ensure 'docker' is available on PATH"
+    exit 1
+fi
+
 echo -e "${GREEN}Running integration tests against real GCP services...${NC}"
+echo -e "${GREEN}Docker smoke tests are enabled as part of this integration run.${NC}"
 echo ""
 
 # Run integration tests with proper config
-INTEGRATION_TEST=true DCM2BQ_CONFIG_FILE=test/testconfig.json mocha --colors --timeout 120000 test/*.integration.js "$@"
+INTEGRATION_TEST=true DOCKER_SMOKE_TEST=true DCM2BQ_CONFIG_FILE=test/testconfig.json mocha --colors --timeout 120000 test/*.integration.js "$@"
 
 exit_code=$?
 
