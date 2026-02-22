@@ -6,6 +6,7 @@
   "scripts": {
     "test": "./helpers/run-unit-tests.sh",
     "test:integration": "./helpers/run-integration-tests.sh",
+    "test:docker-smoke": "./helpers/run-docker-smoke-tests.sh",
     "release": "release-it --ci"
   },
   "bin": {
@@ -26,7 +27,8 @@
     "express-json-validator-middleware": "^3.0.1",
     "google-auth-library": "^10.3.0",
     "pdf-parse": "^2.4.5",
-    "tar": "^7.4.3"
+    "tar": "^7.4.3",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "axios": "^1.11.0",

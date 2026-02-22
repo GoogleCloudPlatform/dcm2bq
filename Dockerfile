@@ -52,6 +52,7 @@ WORKDIR /usr/src/app
 COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/src ./src
 COPY --from=builder /usr/src/app/helpers ./helpers
+COPY --from=builder /usr/src/app/assets ./assets
 COPY --from=builder /usr/src/app/tag-lookup.min.json ./
 COPY --from=builder /usr/src/app/package*.json ./
 
