@@ -83,7 +83,7 @@
     .study-group summary { cursor: pointer; padding: 10px; background: var(--surface-alt); font-weight: 600; }
     .study-meta { font-weight: 400; color: var(--muted); margin-left: 10px; font-size: 12px; }
     pre { background: var(--code-bg); color: var(--text); padding: 12px; border-radius: 6px; overflow: auto; }
-    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; }
     .modal.open { display: flex; }
     .modal-content { width: min(1000px, 95vw); height: 90vh; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
     .modal-content.compact { width: min(560px, 95vw); }
@@ -91,6 +91,29 @@
     .modal-content.content-fit { height: auto; max-height: 90vh; }
     .modal-content.content-fit #modal-content { flex: 0 1 auto; overflow: auto; }
     .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-shrink: 0; }
+    .modal-actions { position: relative; align-items: center; }
+    .modal-error-panel {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      width: min(560px, 78vw);
+      max-height: min(52vh, 360px);
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-alt);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      z-index: 5;
+    }
+    .modal-error-panel-content {
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--text);
+      padding: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     #modal-content { flex: 1; overflow: hidden; }
     .modal-close-x { border: none; background: transparent; font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 4px; }
     .modal-close-x:hover { color: var(--text); }
@@ -109,7 +132,7 @@
     .icon-btn { background: transparent; border: none; font-size: 18px; padding: 4px 6px; cursor: pointer; color: var(--muted); border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; }
     .icon-btn:hover { background: #3a3a3e; color: var(--text); }
     .icon-btn:disabled { cursor: not-allowed; opacity: 0.5; color: #6b7280; }
-    .icon-btn-group { display: flex; gap: 6px; justify-content: flex-end; }
+    .icon-btn-group { display: flex; gap: 6px; justify-content: center; }
     details.study-group[open] > summary .chevron { transform: rotate(90deg); }
     .json-viewer { background: var(--code-bg); color: var(--text); padding: 12px; border-radius: 6px; overflow: auto; font-family: monospace; font-size: 12px; line-height: 1.5; width: 100%; height: 100%; box-sizing: border-box; }
     .json-section { margin-bottom: 5px; }
@@ -119,6 +142,15 @@
     .json-section-content { margin-left: 0; margin-top: 0; color: var(--text); white-space: normal; word-break: break-word; }
     .json-section-content.collapsed { display: none; }
     .section-toolbar { gap: 12px; align-items: center; margin-bottom: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt); }
+    #instances-toolbar.section-toolbar { display: flex; align-items: stretch; gap: 14px; padding: 12px 14px; }
+    #instances-toolbar .toolbar-cell { display: flex; align-items: center; gap: 10px; padding: 0 16px; min-height: 38px; }
+    #instances-toolbar .toolbar-cell + .toolbar-cell { border-left: 1px solid var(--border); }
+    #instances-toolbar .search-cell { flex: 2 1 0; min-width: 0; justify-content: center; }
+    #instances-toolbar .search-cell input { flex: 1 1 auto; min-width: 180px; }
+    #instances-toolbar .bulk-cell { flex: 1 1 0; min-width: 300px; justify-content: center; }
+    #instances-toolbar .bulk-cell select { min-width: 190px; }
+    #instances-toolbar .paging-cell { flex: 1 1 0; min-width: 260px; justify-content: center; }
+    #instances-toolbar .paging-cell .pager-controls { margin-left: 0; }
     .section-toolbar label { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; font-weight: 500; }
     .section-toolbar input[type='checkbox'] { width: 16px; height: 16px; }
     .toolbar-spacer { flex: 1 1 auto; }

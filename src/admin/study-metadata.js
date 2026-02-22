@@ -151,4 +151,5 @@ function buildNormalizedStudyMetadata(rows, studyId) {
 
 module.exports = {
   buildNormalizedStudyMetadata,
+  parseJsonValue,
 };

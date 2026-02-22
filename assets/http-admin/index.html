@@ -25,15 +25,25 @@
 
     <section id="instances" class="panel active">
       <div class="row section-toolbar" style="margin-bottom: 0;" id="instances-toolbar">
-        <input id="search-key" value="PatientID" placeholder="key (e.g. PatientID, metadata.PatientName, info.event, path)" style="min-width:300px" onkeypress="if(event.key==='Enter') runSearch()" />
-        <input id="search-value" placeholder="value" style="min-width:220px" onkeypress="if(event.key==='Enter') runSearch()" />
-        <button class="primary" id="search-btn">Search</button>
-        <button class="danger" id="delete-selected-btn">Delete Selected</button>
-        <span class="toolbar-spacer" aria-hidden="true"></span>
-        <div class="pager-controls">
-          <button id="studies-prev">← Prev</button>
-          <button id="studies-next">Next →</button>
-          <span class="muted pager-info" id="study-page-info"></span>
+        <div class="toolbar-cell search-cell">
+          <input id="search-key" value="PatientID" placeholder="key (e.g. PatientID, metadata.PatientName, info.event, path)" style="min-width:300px" onkeypress="if(event.key==='Enter') runSearch()" />
+          <input id="search-value" placeholder="value" style="min-width:220px" onkeypress="if(event.key==='Enter') runSearch()" />
+          <button class="primary" id="search-btn">Search</button>
+        </div>
+        <div class="toolbar-cell bulk-cell">
+          <select id="study-bulk-action" aria-label="Bulk study action" disabled>
+            <option value="" disabled selected>Select action</option>
+            <option value="reprocess">Reprocess selected</option>
+            <option value="delete">Delete selected</option>
+          </select>
+          <button id="study-bulk-apply" disabled>Apply</button>
+        </div>
+        <div class="toolbar-cell paging-cell">
+          <div class="pager-controls">
+            <button id="studies-prev">← Prev</button>
+            <button id="studies-next">Next →</button>
+            <span class="muted pager-info" id="study-page-info"></span>
+          </div>
         </div>
       </div>
       <div class="muted section-status" id="search-status" style="margin-bottom: 16px; font-size: 14px;"></div>
@@ -74,7 +84,7 @@
           <td></td>
           <td></td>
           <td></td>
-          <td style="width: 100px; text-align: right;"></td>
+          <td style="width: 100px; text-align: center;"></td>
         </tr>
       </template>
       <table style="display:none;">
@@ -154,9 +164,13 @@
     <div class="modal-content">
       <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
         <strong id="modal-title">Details</strong>
-        <div style="display: flex; gap: 8px;">
+        <div class="modal-actions" style="display: flex; gap: 8px;">
+          <button id="modal-error-btn" class="icon-btn" style="display: none; font-size: 16px;" title="Show error details" aria-label="Show error details" aria-expanded="false"><i class="fa-solid fa-circle-info"></i></button>
           <button id="modal-copy-btn" class="icon-btn" style="display: none; font-size: 16px;" title="Copy JSON to clipboard" aria-label="Copy JSON"><i class="fa-solid fa-copy"></i></button>
           <button id="modal-close" class="modal-close-x" aria-label="Close modal" title="Close">×</button>
+          <div id="modal-error-panel" class="modal-error-panel" style="display: none;">
+            <div id="modal-error-panel-content" class="modal-error-panel-content"></div>
+          </div>
         </div>
       </div>
       <div id="modal-content"></div>
