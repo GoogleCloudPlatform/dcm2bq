@@ -141,11 +141,21 @@ async function processDicom(buffer, uriPath) {
  * embeddingsData is an object with { embedding: array } (or null).
  */
 async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
+  // Parse metadata if it's a JSON string
+  let metadataObj = metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadataObj = JSON.parse(metadata);
+    } catch (e) {
+      metadataObj = null;
+    }
+  }
+  
   // Compute deterministic id from DICOM UIDs (globally unique identifiers)
   // Use SOPInstanceUID as primary unique identifier, with Study/Series for context
-  const sopInstanceUid = metadata?.SOPInstanceUID || '';
-  const seriesInstanceUid = metadata?.SeriesInstanceUID || '';
-  const studyInstanceUid = metadata?.StudyInstanceUID || '';
+  const sopInstanceUid = metadataObj?.SOPInstanceUID || '';
+  const seriesInstanceUid = metadataObj?.SeriesInstanceUID || '';
+  const studyInstanceUid = metadataObj?.StudyInstanceUID || '';
   
   // Combine UIDs for comprehensive uniqueness
   const idSource = `${studyInstanceUid}|${seriesInstanceUid}|${sopInstanceUid}`;
