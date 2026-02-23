@@ -6,7 +6,7 @@
   "scripts": {
     "test": "./helpers/run-unit-tests.sh",
     "test:integration": "./helpers/run-integration-tests.sh",
-    "test:docker-smoke": "./helpers/run-docker-smoke-tests.sh",
+    "test:docker-smoke": "./helpers/run-docker-service-smoke-tests.sh",
     "prerelease": "npm test",
     "release": "release-it --ci",
     "postrelease": "docker build . --tag jasonklotzer/dcm2bq:latest --tag jasonklotzer/dcm2bq:${npm_package_version} --no-cache && docker push jasonklotzer/dcm2bq --all-tags"

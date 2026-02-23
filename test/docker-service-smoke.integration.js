@@ -16,8 +16,8 @@
 
 const assert = require("assert");
 const { spawnSync } = require("child_process");
+const fs = require("fs");
 const path = require("path");
-const WebSocket = require("ws");
 
 function runDocker(args, options = {}) {
   const result = spawnSync("docker", args, {
@@ -60,18 +60,20 @@ async function waitForHttpOk(url, timeoutMs = 60000, intervalMs = 1500) {
   throw new Error(`Timed out waiting for ${url}: ${lastError ? lastError.message : "unknown error"}`);
 }
 
-describe("docker admin UI smoke integration", function () {
+describe("docker service smoke integration", function () {
   this.timeout(15 * 60 * 1000);
 
-  const workspaceRoot = path.resolve(__dirname, "..", "..", "..");
+  const workspaceRoot = path.resolve(__dirname, "..");
+  const testConfigPath = path.resolve(__dirname, "testconfig.json");
   const runSmoke = process.env.DOCKER_SMOKE_TEST === "true";
   const packageJson = require(path.join(workspaceRoot, "package.json"));
   const version = process.env.npm_package_version || packageJson.version;
-  const imageTag = `jasonklotzer/dcm2bq-admin-console:${version}`;
+  const imageTag = `jasonklotzer/dcm2bq:${version}`;
   const imagePreexisting = imageExists(imageTag);
-  const containerName = `dcm2bq-smoke-${Date.now()}`;
+  const containerName = `dcm2bq-service-smoke-${Date.now()}`;
   let baseUrl = null;
   let mappedPort = null;
+  let configEnv = null;
 
   before(function () {
     if (!runSmoke) {
@@ -85,6 +87,11 @@ describe("docker admin UI smoke integration", function () {
       return;
     }
 
+    if (!fs.existsSync(testConfigPath)) {
+      throw new Error(`testconfig.json not found at ${testConfigPath}`);
+    }
+    configEnv = fs.readFileSync(testConfigPath, "utf8").trim();
+
     if (!imagePreexisting) {
       runDocker(["build", "-t", imageTag, "."], { cwd: workspaceRoot, stdio: "pipe" });
     }
@@ -96,9 +103,7 @@ describe("docker admin UI smoke integration", function () {
       "--name",
       containerName,
       "-e",
-      "BQ_INSTANCES_VIEW_ID=smoke-project.dicom.instancesView",
-      "-e",
-      "BQ_DEAD_LETTER_TABLE_ID=smoke-project.dicom.dead_letter",
+      `DCM2BQ_CONFIG=${configEnv}`,
       "-p",
       "127.0.0.1::8080",
       imageTag,
@@ -131,55 +136,5 @@ describe("docker admin UI smoke integration", function () {
     const body = await rootResponse.json();
     assert.strictEqual(typeof body.name, "string");
     assert.strictEqual(typeof body.version, "string");
-  });
-
-  it("serves admin UI static assets from container image", async () => {
-    await waitForHttpOk(`${baseUrl}/ui`);
-
-    const uiResponse = await fetch(`${baseUrl}/ui`);
-    assert.strictEqual(uiResponse.status, 200);
-    const uiHtml = await uiResponse.text();
-    assert(uiHtml.includes("./admin.js"), "Expected /ui to reference admin.js");
-    assert(uiHtml.includes("./admin.css"), "Expected /ui to reference admin.css");
-
-    const jsResponse = await fetch(`${baseUrl}/ui/admin.js`);
-    assert.strictEqual(jsResponse.status, 200);
-    const jsBody = await jsResponse.text();
-    assert(jsBody.includes("connectWebSocket"), "Expected admin.js content to load");
-
-    const cssResponse = await fetch(`${baseUrl}/ui/admin.css`);
-    assert.strictEqual(cssResponse.status, 200);
-    const cssBody = await cssResponse.text();
-    assert(cssBody.includes(".ws-status"), "Expected admin.css content to load");
-  });
-
-  it("contains admin assets on disk inside the container", () => {
-    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/assets/http-admin/index.html"], { stdio: "pipe" });
-    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/assets/http-admin/admin.js"], { stdio: "pipe" });
-    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/assets/http-admin/admin.css"], { stdio: "pipe" });
-  });
-
-  it("accepts WebSocket connections on /ws", async () => {
-    assert(mappedPort, "Container mapped port was not initialized");
-    const wsUrl = `ws://127.0.0.1:${mappedPort}/ws`;
-
-    await new Promise((resolve, reject) => {
-      const socket = new WebSocket(wsUrl);
-      const timeout = setTimeout(() => {
-        socket.terminate();
-        reject(new Error("Timed out waiting for websocket open"));
-      }, 15000);
-
-      socket.once("open", () => {
-        clearTimeout(timeout);
-        socket.close();
-        resolve();
-      });
-
-      socket.once("error", (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-    });
   });
 });
