@@ -15,7 +15,6 @@
     "test:ui": "playwright test test/ui/",
     "test:ui:debug": "npm run test:ui -- --debug",
     "test:ui:headed": "npm run test:ui -- --headed",
-    "prerelease": "npm run test",
     "release": "release-it --ci"
   },
   "engines": {
@@ -43,9 +42,13 @@
       "publish": false
     },
     "hooks": {
+      "before:init": [
+        "npm run test"
+      ],
       "after:release": [
         "docker build . --tag jasonklotzer/dcm2bq-admin-console:latest --tag jasonklotzer/dcm2bq-admin-console:${version} --no-cache",
-        "docker push jasonklotzer/dcm2bq-admin-console --all-tags"
+        "docker push jasonklotzer/dcm2bq-admin-console:latest",
+        "docker push jasonklotzer/dcm2bq-admin-console:${version}"
       ]
     }
   }
