@@ -24,8 +24,6 @@
 */
 
 const assert = require("assert");
-const fs = require("fs");
-const path = require("path");
 const { BigQuery } = require("@google-cloud/bigquery");
 const { Storage } = require("@google-cloud/storage");
 const config = require("../src/config");

@@ -54,20 +54,26 @@ describe("dead-letter integration", function() {
       return;
     }
 
-    // Load test configuration
+    // Load test configuration (prefer real testconfig.json from deploy.sh)
     try {
-      config = require("./test-config");
+      const testConfigPath = path.join(__dirname, "testconfig.json");
+      if (fs.existsSync(testConfigPath)) {
+        config = JSON.parse(fs.readFileSync(testConfigPath, "utf8"));
+      } else {
+        config = require("./test-config");
+      }
     } catch (err) {
-      console.error("Failed to load test-config.js:", err);
+      console.error("Failed to load test configuration:", err);
       this.skip();
       return;
     }
 
-    projectId = config.projectId || process.env.GCP_PROJECT_ID;
+    const gcpConfig = config.gcpConfig || {};
+    projectId = config.projectId || gcpConfig.projectId || process.env.GCP_PROJECT_ID;
     topicName = config.topicName || "dcm2bq-gcs-events";
     deadLetterTopicName = config.deadLetterTopicName || "dcm2bq-dead-letter-events";
-    deadLetterTableId = config.deadLetterTableId || `${config.datasetId}.dead_letter`;
-    bucketName = config.bucketName;
+    deadLetterTableId = config.deadLetterTableId || `${config.datasetId || gcpConfig.bigQuery?.datasetId}.dead_letter`;
+    bucketName = config.bucketName || gcpConfig.gcs_bucket_name;
 
     if (!projectId || !bucketName) {
       console.error("Missing required configuration: projectId, bucketName");

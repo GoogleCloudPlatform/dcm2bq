@@ -957,7 +957,7 @@
           cells[3].innerHTML = `${emb}`;
           cells[4].innerHTML = `<div class="icon-btn-group">
               <button class="icon-btn" data-action="content" data-id="${item.id}" title="${escapeHtml(contentActionUi.title)}" aria-label="${escapeHtml(contentActionUi.title)}" ${hasContentInput ? '' : 'disabled'}><i class="${contentActionUi.iconClass}" aria-hidden="true"></i></button>
-              <button class="icon-btn" data-action="detail" data-id="${item.id}" title="View JSON"><i class="fa-solid fa-code" aria-hidden="true"></i></button>
+              <button class="icon-btn" data-action="detail" data-id="${item.id}" title="View raw data" aria-label="View raw data"><i class="fa-solid fa-database" aria-hidden="true"></i></button>
             </div>`;
 
           seriesBody.appendChild(rowNode);

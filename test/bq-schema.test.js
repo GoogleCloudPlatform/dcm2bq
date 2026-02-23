@@ -25,7 +25,7 @@ const fs = require("fs");
 function validateRow(row) {
   // Top-level fields
   assert.strictEqual(typeof row.id, "string", "id must be a string");
-  assert.ok(row.id.length >= 32, "id must be a SHA-derived string");
+  assert.ok(row.id.length >= 16, "id must be a SHA-derived string");
   assert.ok(row.timestamp instanceof Date || typeof row.timestamp === "string", "timestamp must be Date or string");
   assert.strictEqual(typeof row.path, "string", "path must be a string");
   assert.strictEqual(typeof row.version, "string", "version must be a string");

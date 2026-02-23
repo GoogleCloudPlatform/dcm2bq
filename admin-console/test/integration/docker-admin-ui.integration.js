@@ -58,7 +58,7 @@ async function waitForHttpOk(url, timeoutMs = 60000, intervalMs = 1500) {
 describe("docker admin UI smoke integration", function () {
   this.timeout(15 * 60 * 1000);
 
-  const workspaceRoot = path.resolve(__dirname, "..");
+  const workspaceRoot = path.resolve(__dirname, "..", "..", "..");
   const runSmoke = process.env.DOCKER_SMOKE_TEST === "true";
   const imageTag = `dcm2bq-smoke-${Date.now()}`;
   const containerName = `dcm2bq-smoke-${Date.now()}`;
