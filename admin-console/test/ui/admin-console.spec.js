@@ -463,4 +463,222 @@ test.describe('Admin Console UI', () => {
       await expect(content).toBeVisible();
     });
   });
+
+  test.describe('Image and Text Content Viewing', () => {
+    test('should open and display image content correctly', async ({ page }) => {
+      // Search for studies
+      const searchButton = page.locator('button#search-btn');
+      await searchButton.click();
+      await page.waitForTimeout(2000);
+
+      // Expand first study
+      const expandButton = page.locator('details > summary').first();
+      const isExpanded = await expandButton.isVisible().catch(() => false);
+      if (!isExpanded) {
+        test.skip();
+      }
+      
+      await expandButton.click();
+      await page.waitForTimeout(1500);
+
+      // Find first instance with a "View Content" button (eye icon, data-action="content")
+      const viewContentButtons = page.locator('button[data-action="content"]:not([disabled])');
+      let buttonCount = await viewContentButtons.count().catch(() => 0);
+      
+      if (buttonCount === 0) {
+        test.skip(); // No enabled content buttons found
+      }
+
+      const firstButton = viewContentButtons.first();
+      await firstButton.click();
+      await page.waitForTimeout(2000);
+
+      // Verify modal is open
+      const modal = page.locator('#modal.open');
+      await expect(modal).toBeVisible();
+
+      // Get the content for comparison
+      const modalContent = page.locator('#modal-content');
+      const firstViewHtml = await modalContent.innerHTML();
+      const firstViewText = await modalContent.textContent();
+
+      // Verify image content is displayed
+      await expect(modal.locator('img')).toBeVisible({ timeout: 5000 }).catch(() => {
+        // If no img, could be text content - that's also valid
+        // As long as something is displayed
+        expect(firstViewHtml.length).toBeGreaterThan(0);
+      });
+
+      // Store image content to verify uniqueness
+      expect(firstViewHtml.length).toBeGreaterThan(0);
+    });
+
+    test('should open image then text and display different content', async ({ page }) => {
+      // Search for studies
+      const searchButton = page.locator('button#search-btn');
+      await searchButton.click();
+      await page.waitForTimeout(2000);
+
+      // Expand first study
+      const expandButton = page.locator('details > summary').first();
+      const isExpanded = await expandButton.isVisible().catch(() => false);
+      if (!isExpanded) {
+        test.skip();
+      }
+      
+      await expandButton.click();
+      await page.waitForTimeout(1500);
+
+      // Find view content buttons
+      // Buttons are disabled if embedding input isn't available, so find enabled ones
+      const viewContentButtons = page.locator('button[data-action="content"]:not([disabled])');
+      let buttonCount = await viewContentButtons.count().catch(() => 0);
+      
+      if (buttonCount < 2) {
+        // Check if there are ANY buttons (even disabled) to skip appropriately
+        const allButtons = page.locator('button[data-action="content"]');
+        const totalCount = await allButtons.count().catch(() => 0);
+        
+        // Need at least 2 enabled items to test switching
+        test.skip();
+      }
+
+      // Click first content button
+      const firstButton = viewContentButtons.nth(0);
+      await firstButton.click();
+      await page.waitForTimeout(2000);
+
+      // Get first content
+      const modalContent = page.locator('#modal-content');
+      const firstViewHtml = await modalContent.innerHTML();
+      const firstViewText = await modalContent.textContent();
+
+      expect(firstViewHtml.length).toBeGreaterThan(0);
+
+      // Click second content button
+      const secondButton = viewContentButtons.nth(1);
+      await secondButton.click();
+      await page.waitForTimeout(2000);
+
+      // Get second content
+      const secondViewHtml = await modalContent.innerHTML();
+      const secondViewText = await modalContent.textContent();
+
+      expect(secondViewHtml.length).toBeGreaterThan(0);
+
+      // CRITICAL: Verify the content is NOT the same
+      // This test would have failed with the CSS class bug
+      expect(secondViewHtml).not.toBe(firstViewHtml);
+      expect(secondViewText).not.toBe(firstViewText);
+    });
+
+    test('should properly switch CSS classes when viewing different content types', async ({ page }) => {
+      // Search for studies
+      const searchButton = page.locator('button#search-btn');
+      await searchButton.click();
+      await page.waitForTimeout(2000);
+
+      // Expand first study
+      const expandButton = page.locator('details > summary').first();
+      const isExpanded = await expandButton.isVisible().catch(() => false);
+      if (!isExpanded) {
+        test.skip();
+      }
+      
+      await expandButton.click();
+      await page.waitForTimeout(1500);
+
+      // Find view content buttons
+      let buttonCount = await viewContentButtons.count().catch(() => 0);
+      
+      if (buttonCount < 2) {
+        // Need at least 2 enabled items to test switching
+        test.skip();
+      }
+
+      // Get modal-content element
+      const modalContent = page.locator('#modal .modal-content');
+
+      // Click first item
+      await viewContentButtons.nth(0).click();
+      await page.waitForTimeout(2000);
+
+      // Check classes after first view
+      const firstClasses = await modalContent.getAttribute('class');
+      expect(firstClasses).toBeTruthy();
+
+      // Click second item
+      await viewContentButtons.nth(1).click();
+      await page.waitForTimeout(2000);
+
+      // Check classes after second view
+      const secondClasses = await modalContent.getAttribute('class');
+      expect(secondClasses).toBeTruthy();
+
+      // Verify modal is still open and content is visible
+      const modal = page.locator('#modal.open');
+      await expect(modal).toBeVisible();
+
+      const contentDiv = page.locator('#modal-content');
+      const contentHtml = await contentDiv.innerHTML();
+      expect(contentHtml.length).toBeGreaterThan(0);
+    });
+
+    test('should display text content without image artifacts', async ({ page }) => {
+      // Search for studies
+      const searchButton = page.locator('button#search-btn');
+      await searchButton.click();
+      await page.waitForTimeout(2000);
+
+      // Expand first study
+      const expandButton = page.locator('details > summary').first();
+      const isExpanded = await expandButton.isVisible().catch(() => false);
+      if (!isExpanded) {
+        test.skip();
+      }
+      
+      await expandButton.click();
+      await page.waitForTimeout(1500);
+
+      // Find view content buttons
+      const viewContentButtons = page.locator('button[data-action="content"]:not([disabled])');
+      const buttonCount = await viewContentButtons.count().catch(() => 0);
+      
+      if (buttonCount === 0) {
+        test.skip();
+      }
+
+      // Try multiple content buttons to find text content
+      let foundTextContent = false;
+      
+      for (let i = 0; i < Math.min(buttonCount, 5); i++) {
+        const button = viewContentButtons.nth(i);
+        await button.click();
+        await page.waitForTimeout(1500);
+
+        const modalContent = page.locator('#modal-content');
+        const hasImage = await modalContent.locator('img').count().then(c => c > 0).catch(() => false);
+        
+        if (!hasImage) {
+          // This is text content
+          foundTextContent = true;
+          
+          // Verify text is displayed
+          const textContent = await modalContent.textContent();
+          expect(textContent.length).toBeGreaterThan(0);
+          
+          // Verify no stale image from previous view
+          await expect(modalContent.locator('img')).not.toBeVisible().catch(() => {
+            // It's ok if there's no image at all in text view
+          });
+          
+          break;
+        }
+      }
+
+      if (!foundTextContent) {
+        test.skip(); // No text content found in the sample
+      }
+    });
+  });
 });

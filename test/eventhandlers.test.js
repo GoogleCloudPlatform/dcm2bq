@@ -275,4 +275,146 @@ describe("eventhandlers", () => {
         "Path should be the DICOM file uriPath");
     });
   });
+
+  describe("Hash Generation for Instance IDs", () => {
+    let crypto;
+
+    before(() => {
+      crypto = require("crypto");
+    });
+
+    function generateHash(studyUid, seriesUid, sopInstanceUid) {
+      const idSource = `${studyUid}|${seriesUid}|${sopInstanceUid}`;
+      return crypto.createHash("sha256").update(idSource).digest("hex").substring(0, 16);
+    }
+
+    it("should generate deterministic hash from DICOM UIDs", () => {
+      const studyUid = "1.2.840.113619.2.408.2024.1";
+      const seriesUid = "1.2.840.113619.2.408.2024.1.1";
+      const sopInstanceUid = "1.2.840.113619.2.408.2024.1.1.1";
+
+      const hash1 = generateHash(studyUid, seriesUid, sopInstanceUid);
+      const hash2 = generateHash(studyUid, seriesUid, sopInstanceUid);
+
+      assert.strictEqual(hash1, hash2, 
+        "Same UIDs should always produce the same hash (deterministic)");
+      assert.strictEqual(hash1.length, 16, 
+        "Hash should be 16 hex characters (64 bits)");
+    });
+
+    it("should produce different hashes for different SOP Instance UIDs", () => {
+      const studyUid = "1.2.840.113619.2.408.2024.1";
+      const seriesUid = "1.2.840.113619.2.408.2024.1.1";
+      const sopInstanceUid1 = "1.2.840.113619.2.408.2024.1.1.1";
+      const sopInstanceUid2 = "1.2.840.113619.2.408.2024.1.1.2";
+
+      const hash1 = generateHash(studyUid, seriesUid, sopInstanceUid1);
+      const hash2 = generateHash(studyUid, seriesUid, sopInstanceUid2);
+
+      assert.notStrictEqual(hash1, hash2, 
+        "Different SOPInstanceUIDs should produce different hashes");
+    });
+
+    it("should produce different hashes for different Series UIDs", () => {
+      const studyUid = "1.2.840.113619.2.408.2024.1";
+      const seriesUid1 = "1.2.840.113619.2.408.2024.1.1";
+      const seriesUid2 = "1.2.840.113619.2.408.2024.1.2";
+      const sopInstanceUid = "1.2.840.113619.2.408.2024.1.1.1";
+
+      const hash1 = generateHash(studyUid, seriesUid1, sopInstanceUid);
+      const hash2 = generateHash(studyUid, seriesUid2, sopInstanceUid);
+
+      assert.notStrictEqual(hash1, hash2, 
+        "Different SeriesInstanceUIDs should produce different hashes");
+    });
+
+    it("should produce different hashes for different Study UIDs", () => {
+      const studyUid1 = "1.2.840.113619.2.408.2024.1";
+      const studyUid2 = "1.2.840.113619.2.408.2024.2";
+      const seriesUid = "1.2.840.113619.2.408.2024.1.1";
+      const sopInstanceUid = "1.2.840.113619.2.408.2024.1.1.1";
+
+      const hash1 = generateHash(studyUid1, seriesUid, sopInstanceUid);
+      const hash2 = generateHash(studyUid2, seriesUid, sopInstanceUid);
+
+      assert.notStrictEqual(hash1, hash2, 
+        "Different StudyInstanceUIDs should produce different hashes");
+    });
+
+    it("should handle empty UIDs gracefully", () => {
+      const hash1 = generateHash("", "", "");
+      const hash2 = generateHash("", "", "");
+
+      assert.strictEqual(hash1, hash2, 
+        "Empty UIDs should still produce consistent (though identical) hashes");
+      assert.strictEqual(hash1.length, 16, 
+        "Hash should still be 16 characters");
+    });
+
+    it("should handle missing UIDs (undefined/null)", () => {
+      const hash1 = generateHash(undefined || "", undefined || "", undefined || "");
+      const hash2 = generateHash(null || "", null || "", null || "");
+
+      assert.strictEqual(hash1, hash2, 
+        "Missing UIDs should produce the same hash as empty strings");
+      assert.strictEqual(hash1.length, 16, 
+        "Hash should still be valid");
+    });
+
+    it("should process metadata string correctly in persistRow", async function() {
+      this.timeout(10000);
+
+      const dicomPath = path.join(__dirname, "files/dcm/ct.dcm");
+      const dicomBuffer = fs.readFileSync(dicomPath);
+
+      // Reset the stub
+      bqInsertStub.resetHistory();
+      mockFile.download.resetHistory();
+      mockFile.download.resolves([dicomBuffer]);
+
+      // Create mock pub/sub message
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: "test-bucket",
+            objectId: "ct.dcm"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "ct.dcm",
+            generation: "123456"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      // Verify that BigQuery insert was called
+      assert(bqInsertStub.called, "insert should be called");
+
+      const row = bqInsertStub.getCall(0).args[0];
+      assert.ok(row.id, "Should have generated an id");
+      assert.strictEqual(row.id.length, 16, "Id should be 16 hex characters");
+      
+      // Verify that the metadata was parsed correctly to generate the hash
+      const metadata = JSON.parse(row.metadata);
+      assert.ok(metadata.SOPInstanceUID, "Metadata should contain SOPInstanceUID");
+      assert.ok(metadata.SeriesInstanceUID, "Metadata should contain SeriesInstanceUID");
+      assert.ok(metadata.StudyInstanceUID, "Metadata should contain StudyInstanceUID");
+
+      // Verify the hash is deterministic
+      const expectedHash = generateHash(
+        metadata.StudyInstanceUID,
+        metadata.SeriesInstanceUID,
+        metadata.SOPInstanceUID
+      );
+      assert.strictEqual(row.id, expectedHash, 
+        "Generated id should match hash of actual DICOM UIDs");
+    });
+  });
 });
