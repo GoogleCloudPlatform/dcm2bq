@@ -16,6 +16,7 @@ const {
   decodeWsFrame,
 } = require("./ws-frame");
 const { buildNormalizedStudyMetadata, parseJsonValue } = require("./study-metadata");
+const { extractDlqFileInfo } = require("./dlq-utils");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -452,8 +453,13 @@ app.get("/api/dlq/items", async (req, res) => {
 
     const dlqTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.deadLetterTableId}\``;
     const query = `
-      SELECT *
+      SELECT
+        message_id,
+        publish_time,
+        data,
+        attributes
       FROM ${dlqTable}
+      ORDER BY publish_time DESC
       LIMIT @limit OFFSET @offset
     `;
 
@@ -463,7 +469,17 @@ app.get("/api/dlq/items", async (req, res) => {
       params: { limit, offset },
     });
 
-    return res.json({ items: rows || [] });
+    const items = (rows || []).map((row) => {
+      const fileInfo = extractDlqFileInfo(row);
+      return {
+        messageId: String(row?.message_id || ""),
+        publishTime: row?.publish_time || null,
+        gcsPath: fileInfo?.bucket && fileInfo?.name ? `gs://${fileInfo.bucket}/${fileInfo.name}` : null,
+        generation: fileInfo?.generation || null,
+      };
+    });
+
+    return res.json({ items });
   } catch (error) {
     console.error("DLQ items error:", error);
     return res.status(500).json({ error: error?.message || "Internal error" });
@@ -660,7 +676,9 @@ app.post("/api/studies/reprocess", async (req, res) => {
 // DLQ requeue endpoint
 app.post("/api/dlq/requeue", async (req, res) => {
   try {
-    const messageIds = Array.isArray(req.body?.messageIds) ? req.body.messageIds : [];
+    const messageIds = Array.isArray(req.body?.messageIds)
+      ? req.body.messageIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
     if (messageIds.length === 0) {
       return res.status(400).json({ error: "Missing messageIds" });
     }
@@ -670,7 +688,7 @@ app.post("/api/dlq/requeue", async (req, res) => {
     // Delete requeued messages from DLQ
     const deleteQuery = `
       DELETE FROM ${dlqTable}
-      WHERE id IN UNNEST(@messageIds)
+      WHERE message_id IN UNNEST(@messageIds)
     `;
 
     await bigquery.query({
@@ -692,7 +710,9 @@ app.post("/api/dlq/requeue", async (req, res) => {
 // DLQ delete endpoint
 app.post("/api/dlq/delete", async (req, res) => {
   try {
-    const messageIds = Array.isArray(req.body?.messageIds) ? req.body.messageIds : [];
+    const messageIds = Array.isArray(req.body?.messageIds)
+      ? req.body.messageIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
     if (messageIds.length === 0) {
       return res.status(400).json({ error: "Missing messageIds" });
     }
@@ -702,7 +722,7 @@ app.post("/api/dlq/delete", async (req, res) => {
     // Delete messages from DLQ
     const deleteQuery = `
       DELETE FROM ${dlqTable}
-      WHERE id IN UNNEST(@messageIds)
+      WHERE message_id IN UNNEST(@messageIds)
     `;
 
     await bigquery.query({
