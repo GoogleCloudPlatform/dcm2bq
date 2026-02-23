@@ -82,3 +82,52 @@ variable "create_embeddings" {
   type        = bool
   default     = true
 }
+
+variable "deploy_admin_console" {
+  description = "Deploy standalone admin-console service"
+  type        = bool
+  default     = true
+}
+
+variable "admin_console_image" {
+  description = "The Docker image for the admin-console service."
+  type        = string
+  default     = "jasonklotzer/dcm2bq-admin-console:1.0.0"
+}
+
+variable "admin_console_service_name" {
+  description = "Cloud Run service name for admin-console"
+  type        = string
+  default     = "dcm2bq-admin-console"
+}
+
+variable "admin_console_bq_instances_view_id" {
+  description = "BigQuery instances view for admin-console (format: projectId.dataset.table)"
+  type        = string
+  default     = ""
+}
+
+variable "admin_console_bq_dead_letter_table_id" {
+  description = "BigQuery dead letter table for admin-console (format: projectId.dataset.table)"
+  type        = string
+  default     = ""
+}
+
+variable "admin_console_domain" {
+  description = "Domain for admin-console HTTPS load balancer managed certificate"
+  type        = string
+  default     = ""
+}
+
+variable "iap_oauth_client_id" {
+  description = "OAuth client ID for IAP on admin-console load balancer"
+  type        = string
+  default     = ""
+}
+
+variable "iap_oauth_client_secret" {
+  description = "OAuth client secret for IAP on admin-console load balancer"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

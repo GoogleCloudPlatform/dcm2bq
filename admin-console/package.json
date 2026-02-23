@@ -1,0 +1,51 @@
+{
+  "name": "dcm2bq-admin-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone admin console for dcm2bq with frontend and backend",
+  "main": "backend/src/index.js",
+  "scripts": {
+    "start": "node backend/src/index.js",
+    "dev": "NODE_ENV=test nodemon --exec node backend/src/index.js",
+    "test": "npm run test:unit",
+    "test:unit": "mocha test/unit/**/*.test.js --timeout 5000",
+    "test:integration": "mocha test/integration/**/*.integration.js --timeout 15000",
+    "pretest:ui": "npx playwright install --check",
+    "test:ui": "playwright test test/ui/",
+    "test:ui:debug": "npm run test:ui -- --debug",
+    "test:ui:headed": "npm run test:ui -- --headed",
+    "prerelease": "npm run test",
+    "release": "release-it --ci"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@google-cloud/bigquery": "^8.0.0",
+    "@google-cloud/storage": "^7.12.0",
+    "archiver": "^6.0.0",
+    "express": "^5.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "mocha": "^10.2.0",
+    "nodemon": "^3.0.2",
+    "release-it": "^19.0.4"
+  },
+  "release-it": {
+    "github": {
+      "release": true
+    },
+    "npm": {
+      "publish": false
+    },
+    "hooks": {
+      "after:release": [
+        "docker build . --tag jasonklotzer/dcm2bq-admin-console:latest --tag jasonklotzer/dcm2bq-admin-console:${version} --no-cache",
+        "docker push jasonklotzer/dcm2bq-admin-console --all-tags"
+      ]
+    }
+  }
+}

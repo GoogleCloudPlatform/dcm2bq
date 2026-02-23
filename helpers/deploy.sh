@@ -83,12 +83,19 @@ install_terraform
 # Extract version from package.json using jq (already required as a dependency)
 DCM2BQ_VERSION=$(jq -r '.version' "$(dirname "$0")/../package.json")
 DCM2BQ_IMAGE="jasonklotzer/dcm2bq:${DCM2BQ_VERSION}"
+ADMIN_CONSOLE_VERSION=$(jq -r '.version' "$(dirname "$0")/../admin-console/package.json")
+ADMIN_CONSOLE_IMAGE="jasonklotzer/dcm2bq-admin-console:${ADMIN_CONSOLE_VERSION}"
 echo "Using dcm2bq image: ${DCM2BQ_IMAGE}"
+echo "Using admin-console image: ${ADMIN_CONSOLE_IMAGE}"
 
 # Parse options
 DEBUG_MODE="false"
 CREATE_EMBEDDINGS="true"
 CREATE_EMBEDDING_INPUT="true"
+DEPLOY_ADMIN_CONSOLE="true"
+ADMIN_CONSOLE_DOMAIN="${ADMIN_CONSOLE_DOMAIN:-}"
+IAP_OAUTH_CLIENT_ID="${IAP_OAUTH_CLIENT_ID:-}"
+IAP_OAUTH_CLIENT_SECRET="${IAP_OAUTH_CLIENT_SECRET:-}"
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
     -h | --help )
@@ -97,6 +104,10 @@ while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
       echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
       echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
       echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
+      echo "  --no-admin-console           Skip admin-console deployment (default is deploy)."
+      echo "  --admin-console-domain       Domain for admin-console IAP HTTPS load balancer managed cert."
+      echo "  --iap-client-id              OAuth client ID used by IAP for admin-console."
+      echo "  --iap-client-secret          OAuth client secret used by IAP for admin-console."
       echo "  -h, --help                   Show this help message."
       echo ""
       echo "Commands:"
@@ -116,6 +127,25 @@ while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
       CREATE_EMBEDDING_INPUT="false"
       CREATE_EMBEDDINGS="false"
       echo "Embedding input disabled (embeddings also disabled)."
+      ;;
+    --no-admin-console )
+      DEPLOY_ADMIN_CONSOLE="false"
+      echo "Admin-console deployment disabled."
+      ;;
+    --admin-console-domain )
+      shift
+      ADMIN_CONSOLE_DOMAIN="$1"
+      echo "Admin-console domain set to ${ADMIN_CONSOLE_DOMAIN}."
+      ;;
+    --iap-client-id )
+      shift
+      IAP_OAUTH_CLIENT_ID="$1"
+      echo "IAP OAuth client ID set."
+      ;;
+    --iap-client-secret )
+      shift
+      IAP_OAUTH_CLIENT_SECRET="$1"
+      echo "IAP OAuth client secret set."
       ;;
   esac
   shift
@@ -171,9 +201,14 @@ if [ "$MODE" == "destroy" ]; then
   terraform destroy -auto-approve \
     -var="project_id=${PROJECT_ID}" \
     -var="dcm2bq_image=${DCM2BQ_IMAGE}" \
+    -var="admin_console_image=${ADMIN_CONSOLE_IMAGE}" \
     -var="debug_mode=${DEBUG_MODE}" \
     -var="create_embedding_input=${CREATE_EMBEDDING_INPUT}" \
-    -var="create_embeddings=${CREATE_EMBEDDINGS}"
+    -var="create_embeddings=${CREATE_EMBEDDINGS}" \
+    -var="deploy_admin_console=${DEPLOY_ADMIN_CONSOLE}" \
+    -var="admin_console_domain=${ADMIN_CONSOLE_DOMAIN}" \
+    -var="iap_oauth_client_id=${IAP_OAUTH_CLIENT_ID}" \
+    -var="iap_oauth_client_secret=${IAP_OAUTH_CLIENT_SECRET}"
   echo "Cleanup complete."
   exit 0
 fi
@@ -183,9 +218,14 @@ if [ "$MODE" == "deploy" ]; then
   terraform apply -auto-approve \
     -var="project_id=${PROJECT_ID}" \
     -var="dcm2bq_image=${DCM2BQ_IMAGE}" \
+    -var="admin_console_image=${ADMIN_CONSOLE_IMAGE}" \
     -var="debug_mode=${DEBUG_MODE}" \
     -var="create_embedding_input=${CREATE_EMBEDDING_INPUT}" \
-    -var="create_embeddings=${CREATE_EMBEDDINGS}"
+    -var="create_embeddings=${CREATE_EMBEDDINGS}" \
+    -var="deploy_admin_console=${DEPLOY_ADMIN_CONSOLE}" \
+    -var="admin_console_domain=${ADMIN_CONSOLE_DOMAIN}" \
+    -var="iap_oauth_client_id=${IAP_OAUTH_CLIENT_ID}" \
+    -var="iap_oauth_client_secret=${IAP_OAUTH_CLIENT_SECRET}"
 fi
 
 if [ "$MODE" == "upload" ]; then

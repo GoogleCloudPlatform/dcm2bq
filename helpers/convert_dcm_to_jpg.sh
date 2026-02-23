@@ -53,6 +53,7 @@ echo "Converting ${INPUT_FILE} to ${OUTPUT_JPG_FILE}..."
 
 TEMP_DCM_FILE=$(mktemp --suffix=.dcm)
 
+# Fixes https://github.com/GoogleCloudPlatform/dcm2bq/issues/25
 # Convert to explicit raw (uncompressed) DICOM to preserve grayscale fidelity.
 gdcmconv --raw "${INPUT_FILE}" "${TEMP_DCM_FILE}"
 

@@ -1,0 +1,38 @@
+# dcm2bq Admin Console (Standalone)
+
+This project separates the admin console into its own deployable Node.js service.
+
+## What the Admin Console Does
+
+The admin console is a standalone UI for exploring DICOM studies and instance data stored in BigQuery, with deep links into the associated assets stored in GCS.
+
+### Core capabilities
+
+- **Study and instance browsing** backed by `instancesView`
+- **Metadata inspection** (normalized study metadata and full instance metadata JSON)
+- **Content preview** for extracted embedding inputs (images/text)
+- **Embeddings visibility** (presence and vector length)
+- **Monitoring** for instance/DLQ counts and recent activity
+- **Study actions** for reprocess and delete
+- **Dead letter queue** summary, requeue, and delete
+- **Upload and process** a single file for quick validation
+
+### Data sources
+
+- BigQuery `instancesView` (not the raw `instances` table)
+- BigQuery dead letter table
+- GCS for original and extracted assets
+
+### Configuration notes
+
+- Set `BQ_INSTANCES_VIEW_ID` to your dataset's `instancesView`.
+- Set `BQ_DEAD_LETTER_TABLE_ID` to your dead letter table.
+
+### Deployment (brief)
+
+Use the standalone admin console Terraform in [terraform/README.md](terraform/README.md) for Cloud Run deployment.
+
+### Permissions
+
+- BigQuery read access to `instancesView` and the dead letter table
+- GCS read access for original and extracted assets
