@@ -25,8 +25,14 @@ The admin console is a standalone UI for exploring DICOM studies and instance da
 
 ### Configuration notes
 
-- Set `BQ_INSTANCES_VIEW_ID` to your dataset's `instancesView`.
+- Set `BQ_INSTANCES_VIEW_ID` to your dataset's `instancesView` (all read/search endpoints use this view).
+- Set `BQ_INSTANCES_TABLE_ID` only if you use delete endpoints (`/api/studies/delete`, `/api/instances/delete`) and need a writable base table.
 - Set `BQ_DEAD_LETTER_TABLE_ID` to your dead letter table.
+
+### Local development
+
+- `npm run dev` runs with `NODE_ENV=test` (to reuse local test config), but defaults `BQ_INSTANCES_VIEW_ID` to `instancesView` so queries use the view instead of raw `instances`.
+- To target a different view, set `BQ_INSTANCES_VIEW_ID` before running `npm run dev`.
 
 ### Deployment (brief)
 

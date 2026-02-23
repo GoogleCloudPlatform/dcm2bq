@@ -27,7 +27,10 @@ module.exports = {
     // BigQuery dataset ID
     datasetId: process.env.BQ_DATASET_ID || "dicom",
     
-    // BigQuery instances table ID
+    // BigQuery instances view ID (read/search path)
+    instancesViewId: process.env.BQ_INSTANCES_VIEW_ID || "instancesView",
+
+    // BigQuery writable instances table ID (delete path)
     instancesTableId: process.env.BQ_INSTANCES_TABLE_ID || "instances",
     
     // BigQuery dead letter table ID

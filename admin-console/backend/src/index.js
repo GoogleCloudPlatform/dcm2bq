@@ -43,6 +43,7 @@ app.get("/healthz", (_, res) => {
     config: {
       projectId: CONFIG.projectId,
       datasetId: CONFIG.datasetId,
+      instancesViewId: CONFIG.instancesViewId,
       instancesTableId: CONFIG.instancesTableId,
       deadLetterTableId: CONFIG.deadLetterTableId,
     },
@@ -61,12 +62,14 @@ app.post("/api/studies/search", async (req, res) => {
       return res.status(400).json({ error: "Missing required field: key" });
     }
 
-    const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const searchFilter = buildSearchFilter(key, value);
+
+    const studyUidExpr = `NULLIF(TRIM(JSON_VALUE(metadata, '$.StudyInstanceUID')), '')`;
 
     const studiesQuery = `
       SELECT
-        COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN') as study_id,
+        ${studyUidExpr} as study_id,
         MAX(timestamp) as max_timestamp,
         COUNT(*) as instance_count,
         COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.SeriesInstanceUID'), 'UNKNOWN')) as series_count,
@@ -87,6 +90,7 @@ app.post("/api/studies/search", async (req, res) => {
         ) as study_modalities
       FROM ${viewTable}
       WHERE ${searchFilter.whereClause}
+        AND ${studyUidExpr} IS NOT NULL
       GROUP BY study_id
       ORDER BY max_timestamp DESC
       LIMIT @studyLimit OFFSET @studyOffset
@@ -95,9 +99,10 @@ app.post("/api/studies/search", async (req, res) => {
     const totalsQuery = `
       SELECT
         COUNT(*) as totalInstances,
-        COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.StudyInstanceUID'), 'UNKNOWN')) as totalStudies
+        COUNT(DISTINCT ${studyUidExpr}) as totalStudies
       FROM ${viewTable}
       WHERE ${searchFilter.whereClause}
+        AND ${studyUidExpr} IS NOT NULL
     `;
 
     const [[studyRows], [totalRows]] = await Promise.all([
@@ -150,7 +155,7 @@ app.get("/studies/:studyId/instances", async (req, res) => {
       return res.status(400).json({ error: "Missing studyId" });
     }
 
-    const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
       SELECT
         id,
@@ -202,7 +207,7 @@ app.get("/studies/:studyId/metadata", async (req, res) => {
       return res.status(400).json({ error: "Missing studyId" });
     }
 
-    const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
       SELECT
         id, path, version, timestamp, metadata
@@ -228,7 +233,7 @@ app.get("/studies/:studyId/metadata", async (req, res) => {
 // Instances count endpoint (for monitoring) - MUST come before /api/instances/:id
 app.get("/api/instances/counts", async (req, res) => {
   try {
-    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
       SELECT
         COUNT(DISTINCT JSON_VALUE(metadata, '$.StudyInstanceUID')) as totalStudies,
@@ -260,7 +265,7 @@ app.get("/api/instances/:id", async (req, res) => {
       return res.status(400).json({ error: "Missing id" });
     }
 
-    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
       SELECT
         id,
@@ -320,7 +325,7 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
     }
 
     // Query to get instance info (which contains path to extracted asset)
-    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
       SELECT id, info
       FROM ${instancesTable}
@@ -524,7 +529,7 @@ app.post("/api/studies/reprocess", async (req, res) => {
       return res.status(400).json({ error: "Missing studyIds" });
     }
 
-    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     
     // Get instances and paths for these studies
     const query = `
@@ -541,11 +546,17 @@ app.post("/api/studies/reprocess", async (req, res) => {
     });
 
     const filePaths = rows?.map(r => r.path).filter(Boolean) || [];
-    
-    // Deduplicate paths using Set to prevent multiple updates to same file
-    const uniquePaths = Array.from(new Set(filePaths));
-    
-    console.log(`Reprocess request: ${studyIds.length} studies, ${filePaths.length} total paths, ${uniquePaths.length} unique paths to update`);
+
+    const normalizedPaths = filePaths
+      .map((filePath) => String(filePath || "").trim())
+      .filter(Boolean)
+      .map((filePath) => (filePath.includes("#") ? filePath.split("#")[0] : filePath));
+
+    // Deduplicate by normalized base object path to prevent repeated updates
+    // for archive member references that share the same .zip/.tar/.tgz source object.
+    const uniquePaths = Array.from(new Set(normalizedPaths));
+
+    console.log(`Reprocess request: ${studyIds.length} studies, ${filePaths.length} total paths, ${uniquePaths.length} unique base paths to update`);
     
     let succeeded = 0;
     let failed = 0;
@@ -555,9 +566,8 @@ app.post("/api/studies/reprocess", async (req, res) => {
     // This causes GCS to emit OBJECT_METADATA_UPDATE events that Cloud Run is subscribed to
     for (const filePath of uniquePaths) {
       try {
-        // Parse GCS path (gs://bucket/object/path or gs://bucket/object/path#fileinsidearchive)
-        const baseFilePath = filePath.includes('#') ? filePath.split('#')[0] : filePath;
-        const gsMatch = baseFilePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
+        // Parse normalized GCS path (gs://bucket/object/path)
+        const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
         
         if (!gsMatch) {
           errors.push(`Invalid GCS path: ${filePath}`);
@@ -590,6 +600,7 @@ app.post("/api/studies/reprocess", async (req, res) => {
       reprocessedFileCount: succeeded,
       failedFileCount: failed,
       filePaths,
+      uniquePaths,
       succeeded,
       failed,
       errors,
@@ -692,7 +703,7 @@ app.get("/api/studies/:studyId/download", async (req, res) => {
     }
 
     // Query instances for the study  
-    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
       SELECT id, path
       FROM ${instancesTable}
@@ -1122,6 +1133,7 @@ server.listen(PORT, () => {
     config: {
       projectId: CONFIG.projectId,
       datasetId: CONFIG.datasetId,
+      instancesViewId: CONFIG.instancesViewId,
       instancesTableId: CONFIG.instancesTableId,
       deadLetterTableId: CONFIG.deadLetterTableId,
     },
