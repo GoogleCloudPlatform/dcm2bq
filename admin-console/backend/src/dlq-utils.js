@@ -5,17 +5,33 @@ function parseGsPath(gsUri) {
 }
 
 function parseDataField(base64Data) {
+  if (!base64Data) return null;
+
+  if (typeof base64Data === "object") {
+    return base64Data;
+  }
+
   try {
-    const decoded = Buffer.from(base64Data, "base64").toString("utf-8");
+    const decoded = Buffer.from(String(base64Data), "base64").toString("utf-8");
     return JSON.parse(decoded);
   } catch (_) {
-    return null;
+    try {
+      return JSON.parse(String(base64Data));
+    } catch (_) {
+      return null;
+    }
   }
 }
 
 function parseAttributes(attributesJson) {
+  if (!attributesJson) return null;
+
+  if (typeof attributesJson === "object") {
+    return attributesJson;
+  }
+
   try {
-    return JSON.parse(attributesJson);
+    return JSON.parse(String(attributesJson));
   } catch (_) {
     return null;
   }
