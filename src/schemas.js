@@ -55,10 +55,15 @@ addSchema(
                     }
                   },
                   vector: {
-                    type: "object",
-                    properties: {
-                      model: { type: "string" }
-                    }
+                    oneOf: [
+                      { type: "null" },
+                      {
+                        type: "object",
+                        properties: {
+                          model: { type: "string" }
+                        }
+                      }
+                    ]
                   }
                 }
               }

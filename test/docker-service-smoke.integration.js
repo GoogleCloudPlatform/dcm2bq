@@ -70,6 +70,7 @@ describe("docker service smoke integration", function () {
   const version = process.env.npm_package_version || packageJson.version;
   const imageTag = `jasonklotzer/dcm2bq:${version}`;
   const imagePreexisting = imageExists(imageTag);
+  const removeBuiltImage = process.env.DOCKER_SMOKE_REMOVE_IMAGE === "true";
   const containerName = `dcm2bq-service-smoke-${Date.now()}`;
   let baseUrl = null;
   let mappedPort = null;
@@ -120,7 +121,7 @@ describe("docker service smoke integration", function () {
       spawnSync("docker", ["rm", "-f", containerName], { stdio: "pipe" });
     } catch (_) {}
 
-    if (!imagePreexisting) {
+    if (!imagePreexisting && removeBuiltImage) {
       try {
         spawnSync("docker", ["rmi", "-f", imageTag], { stdio: "pipe" });
       } catch (_) {}
