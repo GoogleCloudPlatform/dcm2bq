@@ -124,7 +124,10 @@ locals {
   }
 
   deploy_admin_console = var.deploy_admin_console
-  admin_iap_enabled    = local.deploy_admin_console && var.admin_console_domain != "" && var.iap_oauth_client_id != "" && var.iap_oauth_client_secret != ""
+
+  admin_console_instances_view_id = var.admin_console_bq_instances_view_id != "" ? var.admin_console_bq_instances_view_id : "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_view.table_id}"
+  admin_console_instances_table_id = "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}"
+  admin_console_dead_letter_table_id = var.admin_console_bq_dead_letter_table_id != "" ? var.admin_console_bq_dead_letter_table_id : "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.dead_letter_table.table_id}"
 }
 
 # GCS bucket (optional create)
@@ -333,16 +336,18 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
 }
 
 resource "google_cloud_run_v2_service" "admin_console_service" {
+  provider = google-beta
   count = local.deploy_admin_console ? 1 : 0
 
   deletion_protection = false
   name                = "${var.admin_console_service_name}-${random_string.bucket_suffix.result}"
   location            = var.region
-  ingress             = local.admin_iap_enabled ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCING" : "INGRESS_TRAFFIC_ALL"
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  launch_stage        = "BETA"
+  iap_enabled         = true
 
   depends_on = [
     google_project_service.cloudrun_api,
-    google_project_service.compute_api,
     google_project_service.iap_api,
   ]
 
@@ -354,13 +359,23 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
       image = var.admin_console_image
 
       env {
+        name  = "GCP_PROJECT_ID"
+        value = var.project_id
+      }
+
+      env {
         name  = "BQ_INSTANCES_VIEW_ID"
-        value = var.admin_console_bq_instances_view_id
+        value = local.admin_console_instances_view_id
+      }
+
+      env {
+        name  = "BQ_INSTANCES_TABLE_ID"
+        value = local.admin_console_instances_table_id
       }
 
       env {
         name  = "BQ_DEAD_LETTER_TABLE_ID"
-        value = var.admin_console_bq_dead_letter_table_id
+        value = local.admin_console_dead_letter_table_id
       }
 
       resources {
@@ -372,96 +387,17 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
     }
   }
 
-  lifecycle {
-    precondition {
-      condition     = !local.deploy_admin_console || local.admin_iap_enabled
-      error_message = "When deploy_admin_console=true, admin_console_domain, iap_oauth_client_id, and iap_oauth_client_secret must all be set for IAP."
-    }
-  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "allow_iap_invoke_admin_console" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
+  provider = google-beta
+  count = local.deploy_admin_console ? 1 : 0
 
   project  = google_cloud_run_v2_service.admin_console_service[0].project
   location = google_cloud_run_v2_service.admin_console_service[0].location
   name     = google_cloud_run_v2_service.admin_console_service[0].name
   role     = "roles/run.invoker"
   member   = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-iap.iam.gserviceaccount.com"
-}
-
-resource "google_compute_global_address" "admin_console_lb_ip" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name = "dcm2bq-admin-lb-ip-${random_string.bucket_suffix.result}"
-}
-
-resource "google_compute_region_network_endpoint_group" "admin_console_neg" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name                  = "dcm2bq-admin-neg-${random_string.bucket_suffix.result}"
-  region                = var.region
-  network_endpoint_type = "SERVERLESS"
-
-  cloud_run {
-    service = google_cloud_run_v2_service.admin_console_service[0].name
-  }
-}
-
-resource "google_compute_backend_service" "admin_console_backend" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name                  = "dcm2bq-admin-backend-${random_string.bucket_suffix.result}"
-  protocol              = "HTTPS"
-  load_balancing_scheme = "EXTERNAL_MANAGED"
-  timeout_sec           = 30
-
-  backend {
-    group = google_compute_region_network_endpoint_group.admin_console_neg[0].id
-  }
-
-  iap {
-    enabled              = true
-    oauth2_client_id     = var.iap_oauth_client_id
-    oauth2_client_secret = var.iap_oauth_client_secret
-  }
-
-  depends_on = [google_cloud_run_v2_service_iam_member.allow_iap_invoke_admin_console]
-}
-
-resource "google_compute_managed_ssl_certificate" "admin_console_cert" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name = "dcm2bq-admin-cert-${random_string.bucket_suffix.result}"
-
-  managed {
-    domains = [var.admin_console_domain]
-  }
-}
-
-resource "google_compute_url_map" "admin_console_url_map" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name            = "dcm2bq-admin-urlmap-${random_string.bucket_suffix.result}"
-  default_service = google_compute_backend_service.admin_console_backend[0].id
-}
-
-resource "google_compute_target_https_proxy" "admin_console_https_proxy" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name             = "dcm2bq-admin-https-proxy-${random_string.bucket_suffix.result}"
-  url_map          = google_compute_url_map.admin_console_url_map[0].id
-  ssl_certificates = [google_compute_managed_ssl_certificate.admin_console_cert[0].id]
-}
-
-resource "google_compute_global_forwarding_rule" "admin_console_https_fwd" {
-  count = local.deploy_admin_console && local.admin_iap_enabled ? 1 : 0
-
-  name                  = "dcm2bq-admin-https-fr-${random_string.bucket_suffix.result}"
-  target                = google_compute_target_https_proxy.admin_console_https_proxy[0].id
-  port_range            = "443"
-  load_balancing_scheme = "EXTERNAL_MANAGED"
-  ip_address            = google_compute_global_address.admin_console_lb_ip[0].id
 }
 
 # Allow invoker role for Cloud Run
