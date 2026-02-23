@@ -20,6 +20,7 @@ const { extractDlqFileInfo } = require("./dlq-utils");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
+const JSON_BODY_LIMIT = process.env.ADMIN_JSON_BODY_LIMIT || "50mb";
 
 const app = express();
 app.set("trust proxy", true);
@@ -32,7 +33,7 @@ const storage = new Storage();
 const frontendDir = path.join(__dirname, "..", "..", "frontend");
 
 app.disable("x-powered-by");
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 function stripIapPrefix(value) {
   if (!value) return null;
@@ -44,6 +45,23 @@ function getBaseUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "https";
   const host = req.get("host");
   return host ? `${proto}://${host}` : "";
+}
+
+function parseWsBinaryPayload(payloadBuffer) {
+  const raw = Buffer.isBuffer(payloadBuffer) ? payloadBuffer : Buffer.from(payloadBuffer || []);
+  if (raw.length < 4) {
+    throw new Error("Binary payload too small");
+  }
+
+  const metaLength = raw.readUInt32BE(0);
+  if (raw.length < 4 + metaLength) {
+    throw new Error("Binary payload metadata incomplete");
+  }
+
+  const metaRaw = raw.subarray(4, 4 + metaLength).toString("utf8");
+  const meta = JSON.parse(metaRaw || "{}");
+  const dataBuffer = raw.subarray(4 + metaLength);
+  return { meta, dataBuffer };
 }
 
 // ============================================================================
@@ -1077,22 +1095,37 @@ wss.on("connection", (socket, request) => {
       }, { durationMs, status: "error" });
     };
 
-    // Parse frame payload
-    if (payloadType !== WS_PAYLOAD_TYPE.json) {
+    let action = "";
+    let payload = {};
+    let binaryDataBuffer = null;
+
+    if (payloadType === WS_PAYLOAD_TYPE.json) {
+      let parsed;
+      try {
+        parsed = JSON.parse(payloadBuffer.toString("utf8"));
+      } catch (error) {
+        await sendError("Invalid JSON payload", 400);
+        return;
+      }
+      action = typeof parsed?.action === "string" ? parsed.action : "";
+      payload = parsed?.payload || {};
+    } else if (payloadType === WS_PAYLOAD_TYPE.binary) {
+      let parsedBinary;
+      try {
+        parsedBinary = parseWsBinaryPayload(payloadBuffer);
+      } catch (error) {
+        await sendError("Invalid binary payload", 400);
+        return;
+      }
+      action = typeof parsedBinary?.meta?.action === "string" ? parsedBinary.meta.action : "";
+      payload = (parsedBinary?.meta?.payload && typeof parsedBinary.meta.payload === "object")
+        ? parsedBinary.meta.payload
+        : {};
+      binaryDataBuffer = parsedBinary.dataBuffer;
+    } else {
       await sendError("Unsupported payload type", 400);
       return;
     }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(payloadBuffer.toString("utf8"));
-    } catch (error) {
-      await sendError("Invalid JSON payload", 400);
-      return;
-    }
-
-    const action = typeof parsed?.action === "string" ? parsed.action : "";
-    const payload = parsed?.payload || {};
 
     if (!action) {
       await sendError("Missing websocket action", 400);
@@ -1109,6 +1142,26 @@ wss.on("connection", (socket, request) => {
     });
 
     try {
+      if (action === "process.run" && binaryDataBuffer) {
+        const fileName = String(payload?.fileName || "").trim();
+        if (!fileName) {
+          await sendError("Missing fileName", 400);
+          return;
+        }
+
+        const durationMs = Number(formatDurationMs(startNs).toFixed(1));
+        await sendJson("result", {
+          data: {
+            status: "completed",
+            fileName,
+            processedAt: new Date().toISOString(),
+            success: true,
+            bytesReceived: binaryDataBuffer.length,
+          },
+        }, { status: "ok", durationMs, action });
+        return;
+      }
+
       // WebSocket proxy pattern: proxy to HTTP endpoints
       // Map WebSocket actions to HTTP routes
       const routes = {

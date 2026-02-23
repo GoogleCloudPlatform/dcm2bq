@@ -41,4 +41,4 @@ Use the standalone admin console Terraform in [terraform/README.md](terraform/RE
 ### Permissions
 
 - BigQuery read access to `instancesView` and the dead letter table
-- GCS read access for original and extracted assets
+- GCS read/write access for original and extracted assets (write is required for reprocess metadata updates and upload workflows)

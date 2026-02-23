@@ -31,7 +31,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="instances">Search</button>
       <button class="tab" data-tab="dlp">Failed Queue</button>
-      <button class="tab" data-tab="upload">Ingest</button>
+      <button class="tab" data-tab="upload">Upload</button>
       <button class="tab" data-tab="monitoring">Monitoring</button>
     </div>
 
@@ -136,15 +136,8 @@
     <section id="upload" class="panel">
       <div class="row section-toolbar">
         <input type="file" id="upload-file" />
-        <input id="upload-config" placeholder="Optional config path (e.g. deployment-config.json)" style="min-width:260px" />
+        <button class="primary" id="upload-run">Upload</button>
       </div>
-      <div class="row section-toolbar">
-        <input id="upload-poll-interval" type="number" value="2000" />
-        <input id="upload-poll-timeout" type="number" value="60000" />
-        <input id="upload-poll-timeout-mb" type="number" value="10000" />
-        <button class="primary" id="upload-run">Ingest</button>
-      </div>
-      <div class="muted section-note">pollInterval, pollTimeout, pollTimeoutPerMb (milliseconds)</div>
       <pre id="upload-output">No run yet.</pre>
     </section>
 
