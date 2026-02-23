@@ -1724,7 +1724,7 @@
         type: 'line',
         options: {
           responsive: true,
-          maintainAspectRatio: true,
+          maintainAspectRatio: false,
           scales: {
             x: {
               ticks: { color: chartTextColor },
@@ -1800,7 +1800,7 @@
       try {
         const [instancesResult, dlqResult] = await Promise.all([
           wsCall('instances.counts', {}),
-          wsCall('dlq.count', {}),
+          wsCall('dlq.summary', {}),
         ]);
 
         const timestamp = new Date().toLocaleTimeString();
@@ -1812,7 +1812,7 @@
         };
 
         state.monitoring.history.push(dataPoint);
-        if (state.monitoring.history.length > 100) {
+        if (state.monitoring.history.length > 50) {
           state.monitoring.history.shift();
         }
 

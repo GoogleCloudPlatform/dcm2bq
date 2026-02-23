@@ -67,6 +67,7 @@ function extractBigQueryConfig(config) {
       instancesViewId,
       instancesTableId,
       deadLetterTableId: config.admin.deadLetterTableId || "dead_letter",
+      bqLocation: config.admin.bqLocation || "US",
     };
   }
 
@@ -94,6 +95,7 @@ function extractBigQueryConfig(config) {
       instancesViewId,
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
+      bqLocation: config.bqLocation || config.gcpConfig?.bigQuery?.location || "US",
     };
   }
 
@@ -117,6 +119,7 @@ function extractBigQueryConfig(config) {
       instancesViewId,
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
+      bqLocation: config.bqLocation || config.admin?.bqLocation || "US",
     };
   }
 
@@ -191,6 +194,10 @@ function getConfig(options = {}) {
       } else {
         adminCfg.deadLetterTableId = process.env.BQ_DEAD_LETTER_TABLE_ID;
       }
+    }
+    
+    if (process.env.BQ_LOCATION) {
+      adminCfg.bqLocation = process.env.BQ_LOCATION;
     }
 
     // Validate required fields

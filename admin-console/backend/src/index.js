@@ -29,6 +29,7 @@ app.set("trust proxy", true);
 const CONFIG = config.get().admin;
 const bigquery = CONFIG.projectId ? new BigQuery({ projectId: CONFIG.projectId }) : new BigQuery();
 const storage = new Storage();
+const BQ_LOCATION = CONFIG.bqLocation || "US";
 
 const frontendDir = path.join(__dirname, "..", "..", "frontend");
 
@@ -78,6 +79,7 @@ app.get("/healthz", (_, res) => {
       instancesViewId: CONFIG.instancesViewId,
       instancesTableId: CONFIG.instancesTableId,
       deadLetterTableId: CONFIG.deadLetterTableId,
+      bqLocation: BQ_LOCATION,
     },
   });
 });
@@ -172,12 +174,12 @@ app.post("/api/studies/search", async (req, res) => {
     const [[studyRows], [totalRows]] = await Promise.all([
       bigquery.query({
         query: studiesQuery,
-        location: "US",
+        location: BQ_LOCATION,
         params: { ...searchFilter.params, studyLimit, studyOffset },
       }),
       bigquery.query({
         query: totalsQuery,
-        location: "US",
+        location: BQ_LOCATION,
         params: { ...searchFilter.params },
       }),
     ]);
@@ -237,7 +239,7 @@ app.get("/studies/:studyId/instances", async (req, res) => {
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { studyId },
     });
 
@@ -282,7 +284,7 @@ app.get("/studies/:studyId/metadata", async (req, res) => {
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { studyId },
     });
 
@@ -307,7 +309,7 @@ app.get("/api/instances/counts", async (req, res) => {
 
     const [result] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
     });
 
     const row = result?.[0] || {};
@@ -346,7 +348,7 @@ app.get("/api/instances/:id", async (req, res) => {
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { id },
     });
 
@@ -401,7 +403,7 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { studyUid, seriesUid, sopInstanceUid },
     });
 
@@ -483,7 +485,7 @@ app.get("/api/dlq/items", async (req, res) => {
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { limit, offset },
     });
 
@@ -512,7 +514,7 @@ app.get("/api/dlq/count", async (req, res) => {
 
     const [result] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
     });
     const count = result?.[0]?.count || 0;
 
@@ -531,7 +533,7 @@ app.get("/api/dlq/summary", async (req, res) => {
 
     const [result] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
     });
     const totalCount = result?.[0]?.totalCount || 0;
 
@@ -560,7 +562,7 @@ app.post("/api/studies/delete", async (req, res) => {
 
     await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { studyIds },
     });
 
@@ -589,7 +591,7 @@ app.post("/api/instances/delete", async (req, res) => {
 
     await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { ids },
     });
 
@@ -620,7 +622,7 @@ app.post("/api/studies/reprocess", async (req, res) => {
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { studyIds },
     });
 
@@ -711,7 +713,7 @@ app.post("/api/dlq/requeue", async (req, res) => {
 
     await bigquery.query({
       query: deleteQuery,
-      location: "US",
+      location: BQ_LOCATION,
       params: { messageIds },
     });
 
@@ -745,7 +747,7 @@ app.post("/api/dlq/delete", async (req, res) => {
 
     await bigquery.query({
       query: deleteQuery,
-      location: "US",
+      location: BQ_LOCATION,
       params: { messageIds },
     });
 
@@ -797,7 +799,7 @@ app.get("/api/studies/:studyId/download", async (req, res) => {
 
     const [rows] = await bigquery.query({
       query,
-      location: "US",
+      location: BQ_LOCATION,
       params: { studyId },
     });
 
