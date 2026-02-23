@@ -27,4 +27,4 @@ fi
 
 echo "Running Docker admin UI smoke test..."
 cd "$PROJECT_ROOT"
-DOCKER_SMOKE_TEST=true npx mocha --colors --timeout 900000 test/docker-admin-ui.integration.js "$@"
+DOCKER_SMOKE_TEST=true npx mocha --colors --timeout 900000 test/integration/docker-admin-ui.integration.js "$@"

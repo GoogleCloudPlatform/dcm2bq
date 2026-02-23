@@ -10,6 +10,7 @@
     "test": "npm run test:unit",
     "test:unit": "mocha test/unit/**/*.test.js --timeout 5000",
     "test:integration": "mocha test/integration/**/*.integration.js --timeout 15000",
+    "test:docker-smoke": "./helpers/run-docker-smoke-tests.sh",
     "pretest:ui": "npx playwright install --check",
     "test:ui": "playwright test test/ui/",
     "test:ui:debug": "npm run test:ui -- --debug",
