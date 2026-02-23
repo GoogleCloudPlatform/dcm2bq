@@ -23,19 +23,56 @@ const ai = new GoogleGenAI({
   location: gcpConfig.location || "us-central1",
 });
 
+function isRetryableGeminiError(error) {
+  const status = error?.status || error?.code || error?.response?.status;
+  const message = String(error?.message || "");
+
+  return (
+    status === 429 ||
+    status === "RESOURCE_EXHAUSTED" ||
+    message.includes("429") ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.includes("Resource exhausted")
+  );
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function askGemini(contents) {
-  // Set the config below to use temperature: 0
-  const response = await ai.models.generateContent({
-    model: gcpConfig.embedding?.input?.summarizeText?.model || "gemini-2.5-flash-lite",
-    config: {
-      temperature: 0,
-      thinkingConfig: {
-        thinkingBudget: 0,
-      },
-    },
-    contents,
-  });
-  return response.text;
+  const MAX_RETRIES = parseInt(process.env.GEMINI_MAX_RETRIES || "5", 10);
+  const BASE_DELAY_MS = parseInt(process.env.GEMINI_BASE_DELAY_MS || "500", 10);
+
+  let attempt = 0;
+  let delay = BASE_DELAY_MS;
+
+  while (true) {
+    try {
+      const response = await ai.models.generateContent({
+        model: gcpConfig.embedding?.input?.summarizeText?.model || "gemini-2.5-flash-lite",
+        config: {
+          temperature: 0,
+          thinkingConfig: {
+            thinkingBudget: 0,
+          },
+        },
+        contents,
+      });
+      return response.text;
+    } catch (error) {
+      if (isRetryableGeminiError(error) && attempt < MAX_RETRIES) {
+        attempt += 1;
+        const jitter = Math.floor(Math.random() * delay);
+        const sleepMs = delay + jitter;
+        console.warn(`Gemini request received 429/RESOURCE_EXHAUSTED; retry ${attempt}/${MAX_RETRIES} in ${sleepMs}ms`);
+        await sleep(sleepMs);
+        delay = delay * 2;
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 module.exports = askGemini;

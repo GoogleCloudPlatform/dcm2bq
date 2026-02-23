@@ -78,6 +78,6 @@ output "admin_console_service_name" {
 }
 
 output "admin_console_iap_lb_ip" {
-  description = "Global IP address for the admin-console HTTPS load balancer protected by IAP."
-  value       = var.deploy_admin_console ? google_compute_global_address.admin_console_lb_ip[0].address : null
+  description = "Deprecated: legacy LB-IAP IP is not used with Cloud Run native IAP."
+  value       = null
 }

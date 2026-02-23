@@ -388,7 +388,12 @@ A helper script is provided to automate the process:
 - `upload`: Upload test DICOM files from `test/files/dcm/*.dcm` to the GCS bucket created by Terraform (standalone; does not deploy).
 - `destroy`: Destroy all previously created resources (cleanup).
 - `--debug`: Enable debug mode with verbose logging in the Cloud Run service.
+- `--no-embeddings`: Disable vector embedding generation.
+- `--no-embedding-input`: Disable extraction/storage of embedding input files (also disables embeddings).
+- `--no-admin-console`: Skip standalone admin-console deployment.
 - `--help` or `-h`: Show usage instructions.
+
+When `deploy_admin_console` is enabled, admin-console IAP is configured using Cloud Run native IAP (`iap_enabled = true`). The legacy HTTPS load balancer + OAuth client flow is no longer required.
 
 **Examples**
 
