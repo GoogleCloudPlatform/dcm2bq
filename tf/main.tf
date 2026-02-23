@@ -269,6 +269,13 @@ resource "google_project_iam_member" "admin_console_sa_gcs_viewer" {
   member  = "serviceAccount:${google_service_account.admin_console_sa[0].email}"
 }
 
+resource "google_project_iam_member" "admin_console_sa_gcs_writer" {
+  count  = local.deploy_admin_console ? 1 : 0
+  project = var.project_id
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.admin_console_sa[0].email}"
+}
+
 # IAM grants for the Cloud Run service account
 resource "google_project_iam_member" "cloudrun_sa_bq_writer" {
   project = var.project_id

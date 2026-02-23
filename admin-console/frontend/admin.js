@@ -409,6 +409,17 @@
       return { meta, dataBytes };
     }
 
+    function buildBinaryPayload(meta, dataBytes) {
+      const metaBytes = textEncoder.encode(JSON.stringify(meta || {}));
+      const bodyBytes = dataBytes instanceof Uint8Array ? dataBytes : new Uint8Array(dataBytes || 0);
+      const combined = new Uint8Array(4 + metaBytes.length + bodyBytes.length);
+      const view = new DataView(combined.buffer);
+      view.setUint32(0, metaBytes.length, false);
+      combined.set(metaBytes, 4);
+      combined.set(bodyBytes, 4 + metaBytes.length);
+      return combined;
+    }
+
     function setWsStatus(state, detail = '') {
       const node = document.getElementById('ws-status');
       if (!node) return;
@@ -632,6 +643,39 @@
           const frame = await encodeWsFrame({
             messageIdBytes: idBytes,
             payloadType: WS_PAYLOAD_TYPE.json,
+            compression,
+            payloadBytes,
+          });
+          wsState.socket.send(frame);
+        })().catch((error) => {
+          wsState.pending.delete(idHex);
+          reject(error);
+        });
+      });
+    }
+
+    async function wsCallBinary(action, payload = {}, dataBytes = new Uint8Array(0), options = {}) {
+      await connectWebSocket();
+      if (!wsState.socket || wsState.socket.readyState !== WebSocket.OPEN) {
+        throw new Error('WebSocket is not connected');
+      }
+
+      const idBytes = createRequestId();
+      const idHex = bytesToHex(idBytes);
+      return await new Promise((resolve, reject) => {
+        wsState.pending.set(idHex, {
+          resolve,
+          reject,
+          action,
+          onProgress: options.onProgress,
+        });
+
+        (async () => {
+          const payloadBytes = buildBinaryPayload({ action, payload }, dataBytes);
+          const compression = chooseWsCompression(payloadBytes.length);
+          const frame = await encodeWsFrame({
+            messageIdBytes: idBytes,
+            payloadType: WS_PAYLOAD_TYPE.binary,
             compression,
             payloadBytes,
           });
@@ -1502,24 +1546,14 @@
       btn.disabled = true;
 
       try {
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        let binary = '';
-        const chunk = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunk) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-        }
-        const fileDataBase64 = btoa(binary);
+        const bytes = new Uint8Array(await file.arrayBuffer());
 
         const progressLines = [];
-        const result = await wsCall('process.run', {
+        const result = await wsCallBinary('process.run', {
           fileName: file.name,
-          fileDataBase64,
-          configPath: document.getElementById('upload-config').value.trim() || undefined,
-          pollInterval: Number(document.getElementById('upload-poll-interval').value || 2000),
-          pollTimeout: Number(document.getElementById('upload-poll-timeout').value || 60000),
-          pollTimeoutPerMb: Number(document.getElementById('upload-poll-timeout-mb').value || 10000),
-        }, {
+          fileSizeBytes: bytes.length,
+          mimeType: file.type || 'application/dicom',
+        }, bytes, {
           onProgress: (event) => {
             const detail = event.detail ? ` ${JSON.stringify(event.detail)}` : '';
             progressLines.push(`[${new Date().toISOString()}] ${event.stage}${detail}`);
