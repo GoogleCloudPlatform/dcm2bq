@@ -186,6 +186,28 @@
       border-radius: 8px;
       background: var(--surface-alt);
       padding: 10px;
+      position: relative;
+      min-height: 250px;
+    }
+    #monitoring .monitoring-chart-panel canvas {
+      max-width: 100%;
+      height: auto !important;
+    }
+    #monitoring .monitoring-charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    #monitoring .monitoring-charts-row-single {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 1200px) {
+      #monitoring .monitoring-charts-row {
+        grid-template-columns: 1fr;
+      }
     }
     #monitoring-interval { width: 96px !important; }
     #monitoring-status { font-size: 14px; line-height: 1.4; margin-bottom: 12px !important; }

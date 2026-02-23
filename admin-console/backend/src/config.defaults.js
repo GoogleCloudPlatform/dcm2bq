@@ -35,5 +35,8 @@ module.exports = {
     
     // BigQuery dead letter table ID
     deadLetterTableId: process.env.BQ_DEAD_LETTER_TABLE_ID || "dead_letter",
+    
+    // BigQuery location (must match dataset location)
+    bqLocation: process.env.BQ_LOCATION || "US",
   },
 };

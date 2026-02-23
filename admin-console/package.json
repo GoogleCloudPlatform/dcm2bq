@@ -6,7 +6,7 @@
   "main": "backend/src/index.js",
   "scripts": {
     "start": "node backend/src/index.js",
-    "dev": "NODE_ENV=test BQ_INSTANCES_VIEW_ID=${BQ_INSTANCES_VIEW_ID:-instancesView} nodemon --exec node backend/src/index.js",
+    "dev": "NODE_ENV=test BQ_INSTANCES_VIEW_ID=${BQ_INSTANCES_VIEW_ID:-instancesView} BQ_LOCATION=${BQ_LOCATION:-US} nodemon --exec node backend/src/index.js",
     "test": "npm run test:unit",
     "test:unit": "mocha test/unit/**/*.test.js --timeout 5000",
     "test:integration": "mocha test/integration/**/*.integration.js --timeout 15000",

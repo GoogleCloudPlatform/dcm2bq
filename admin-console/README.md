@@ -28,11 +28,13 @@ The admin console is a standalone UI for exploring DICOM studies and instance da
 - Set `BQ_INSTANCES_VIEW_ID` to your dataset's `instancesView` (all read/search endpoints use this view).
 - Set `BQ_INSTANCES_TABLE_ID` only if you use delete endpoints (`/api/studies/delete`, `/api/instances/delete`) and need a writable base table.
 - Set `BQ_DEAD_LETTER_TABLE_ID` to your dead letter table.
+- Set `BQ_LOCATION` to match your BigQuery dataset location (e.g., `US`, `EU`, `us-central1`). Defaults to `US`.
 
 ### Local development
 
 - `npm run dev` runs with `NODE_ENV=test` (to reuse local test config), but defaults `BQ_INSTANCES_VIEW_ID` to `instancesView` so queries use the view instead of raw `instances`.
 - To target a different view, set `BQ_INSTANCES_VIEW_ID` before running `npm run dev`.
+- If your BigQuery dataset is not in `US` region, set `BQ_LOCATION` environment variable or update `test/testconfig.json` with the correct location.
 
 ### Deployment (brief)
 
