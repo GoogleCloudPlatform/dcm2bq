@@ -21,6 +21,7 @@ const config = require("./config");
 const PORT = Number(process.env.PORT || 8080);
 
 const app = express();
+app.set("trust proxy", true);
 
 // Load configuration first, then initialize BigQuery with correct projectId
 const CONFIG = config.get().admin;
@@ -31,6 +32,18 @@ const frontendDir = path.join(__dirname, "..", "..", "frontend");
 
 app.disable("x-powered-by");
 app.use(express.json());
+
+function stripIapPrefix(value) {
+  if (!value) return null;
+  const parts = String(value).split(":", 2);
+  return parts.length === 2 ? parts[1] : parts[0];
+}
+
+function getBaseUrl(req) {
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  const host = req.get("host");
+  return host ? `${proto}://${host}` : "";
+}
 
 // ============================================================================
 // HTTP ENDPOINTS (where all the actual logic lives)
@@ -48,6 +61,38 @@ app.get("/healthz", (_, res) => {
       deadLetterTableId: CONFIG.deadLetterTableId,
     },
   });
+});
+
+// IAP user info (only populated when IAP is enabled)
+app.get("/api/auth/user", (req, res) => {
+  const emailHeader = req.get("x-goog-authenticated-user-email");
+  const idHeader = req.get("x-goog-authenticated-user-id");
+  const email = stripIapPrefix(emailHeader);
+  const userId = stripIapPrefix(idHeader);
+  const isIap = Boolean(email || userId);
+
+  res.json({
+    isIap,
+    email,
+    userId,
+    principal: emailHeader || idHeader || null,
+    logoutUrl: isIap ? "/api/auth/logout" : null,
+  });
+});
+
+// IAP logout helper (forces Google account sign-out)
+app.get("/api/auth/logout", (req, res) => {
+  const emailHeader = req.get("x-goog-authenticated-user-email");
+  const idHeader = req.get("x-goog-authenticated-user-id");
+  const isIap = Boolean(stripIapPrefix(emailHeader) || stripIapPrefix(idHeader));
+  if (!isIap) {
+    return res.status(404).send("Not Found");
+  }
+
+  const baseUrl = getBaseUrl(req) || "https://accounts.google.com";
+  const continueUrl = `${baseUrl}/`;
+  const logoutUrl = `https://accounts.google.com/Logout?continue=${encodeURIComponent(continueUrl)}`;
+  return res.redirect(logoutUrl);
 });
 
 // Studies search endpoint

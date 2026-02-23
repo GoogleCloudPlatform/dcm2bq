@@ -32,6 +32,13 @@
       copyFeedbackTimeoutId: null,
       errorDetails: null,
     };
+    const authState = {
+      isIap: false,
+      email: null,
+      userId: null,
+      principal: null,
+      logoutUrl: null,
+    };
 
     const WS_PROTOCOL_VERSION = 1;
     const WS_HEADER_SIZE = 32;
@@ -41,6 +48,48 @@
     const WS_EMPTY_MESSAGE_ID = new Uint8Array(16);
     const textEncoder = new TextEncoder();
     const textDecoder = new TextDecoder();
+
+    function setAuthPanelVisible(isVisible) {
+      const panel = document.getElementById('auth-panel');
+      if (!panel) return;
+      panel.style.display = isVisible ? 'inline-flex' : 'none';
+    }
+
+    function updateAuthPanel() {
+      const emailEl = document.getElementById('auth-user-email');
+      const logoutEl = document.getElementById('auth-logout');
+      if (!emailEl || !logoutEl) return;
+
+      if (!authState.isIap) {
+        setAuthPanelVisible(false);
+        return;
+      }
+
+      const display = authState.email || authState.userId || authState.principal || '';
+      emailEl.textContent = display;
+      logoutEl.href = authState.logoutUrl || '/api/auth/logout';
+      setAuthPanelVisible(Boolean(display));
+    }
+
+    async function loadAuthUser() {
+      try {
+        const response = await fetch('/api/auth/user');
+        if (!response.ok) {
+          setAuthPanelVisible(false);
+          return;
+        }
+        const data = await response.json();
+        authState.isIap = Boolean(data?.isIap);
+        authState.email = data?.email || null;
+        authState.userId = data?.userId || null;
+        authState.principal = data?.principal || null;
+        authState.logoutUrl = data?.logoutUrl || null;
+        updateAuthPanel();
+      } catch (error) {
+        console.error('Failed to load auth user:', error);
+        setAuthPanelVisible(false);
+      }
+    }
 
     function createWsRequestError(message, fields = {}) {
       const error = new Error(message || 'WebSocket request failed');
@@ -1620,6 +1669,7 @@
       return escapeHtml(value);
     }
 
+    loadAuthUser();
     connectWebSocket().catch((error) => {
       setWsStatus('error', formatRequestError(error));
     });

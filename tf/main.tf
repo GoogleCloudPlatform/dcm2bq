@@ -247,6 +247,21 @@ resource "google_service_account" "admin_console_sa" {
   display_name = "dcm2bq admin-console Cloud Run Service Account"
 }
 
+# IAM grants for admin-console (BigQuery access)
+resource "google_project_iam_member" "admin_console_sa_bq_job_user" {
+  count  = local.deploy_admin_console ? 1 : 0
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.admin_console_sa[0].email}"
+}
+
+resource "google_project_iam_member" "admin_console_sa_bq_viewer" {
+  count  = local.deploy_admin_console ? 1 : 0
+  project = var.project_id
+  role    = "roles/bigquery.dataViewer"
+  member  = "serviceAccount:${google_service_account.admin_console_sa[0].email}"
+}
+
 # IAM grants for the Cloud Run service account
 resource "google_project_iam_member" "cloudrun_sa_bq_writer" {
   project = var.project_id
