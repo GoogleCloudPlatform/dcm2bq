@@ -54,9 +54,8 @@ variable "bq_dead_letter_table_id" {
 }
 
 variable "dcm2bq_image" {
-  description = "The Docker image for the dcm2bq service."
+  description = "The Docker image for the dcm2bq service. Must be provided via deploy.sh or -var flag with version from dcm2bq package.json."
   type        = string
-  default     = "jasonklotzer/dcm2bq:1.1.6"
 }
 
 variable "bq_location" {
@@ -90,9 +89,8 @@ variable "deploy_admin_console" {
 }
 
 variable "admin_console_image" {
-  description = "The Docker image for the admin-console service."
+  description = "The Docker image for the admin-console service. Must be provided via deploy.sh or -var flag with version from admin-console package.json."
   type        = string
-  default     = "jasonklotzer/dcm2bq-admin-console:1.0.0"
 }
 
 variable "admin_console_service_name" {
