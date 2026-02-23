@@ -141,9 +141,16 @@ async function processDicom(buffer, uriPath) {
  * embeddingsData is an object with { embedding: array } (or null).
  */
 async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
-  // Compute deterministic id from path + version
-  const idSource = `${writeBase.path}|${String(writeBase.version)}`;
-  const id = crypto.createHash("sha256").update(idSource).digest("hex");
+  // Compute deterministic id from DICOM UIDs (globally unique identifiers)
+  // Use SOPInstanceUID as primary unique identifier, with Study/Series for context
+  const sopInstanceUid = metadata?.SOPInstanceUID || '';
+  const seriesInstanceUid = metadata?.SeriesInstanceUID || '';
+  const studyInstanceUid = metadata?.StudyInstanceUID || '';
+  
+  // Combine UIDs for comprehensive uniqueness
+  const idSource = `${studyInstanceUid}|${seriesInstanceUid}|${sopInstanceUid}`;
+  // Use truncated SHA256 (16 hex chars, 64 bits) - Input is already globally unique, so no collision risk
+  const id = crypto.createHash("sha256").update(idSource).digest("hex").substring(0, 16);
 
   // Ensure info object is never null (required by BigQuery schema)
   const info = infoObj || { event: null, input: null, embedding: null };

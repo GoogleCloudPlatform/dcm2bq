@@ -30,6 +30,10 @@ dist/
 # VSCode and editor settings
 .vscode/
 
+# Admin console test artifacts
+admin-console/playwright-report/
+admin-console/test-results/
+
 # Terraform state and temp files
 *.tfstate
 *.tfstate.backup

@@ -137,13 +137,9 @@ The service also supports processing archives (`.zip`, `.tar.gz`, `.tgz`) contai
 
 When running in HTTP service mode (`dcm2bq service [port]`), a static admin website is available at `/ui`.
 
-It provides:
+### Admin Console (standalone deployment)
 
-- An **Instances** tab for basic KVP search against `instancesView`, list browsing, image/text preview (embedding input), embedding vector info, metadata JSON viewing, and multi-select delete.
-- A **DLP** tab for dead letter queue summary/counts, multi-select requeue, and multi-select delete.
-- An **Upload & Process** tab to upload a file and view processing results (similar to the `process` CLI command).
-
-The UI uses service endpoints under `/api/*` and requires the same BigQuery/GCS permissions as the CLI/service processing paths.
+The admin console can also be deployed as a standalone service with its own Node.js backend and static frontend. It connects directly to BigQuery and GCS to query instances, show metadata, and download extracted assets. For full deployment and usage instructions, see [admin-console/README.md](admin-console/README.md).
 
 ### As a CLI
 

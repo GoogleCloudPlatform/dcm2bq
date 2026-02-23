@@ -66,3 +66,18 @@ output "region" {
   description = "The GCP region."
   value       = var.region
 }
+
+output "admin_console_cloud_run_service_url" {
+  description = "Cloud Run URL for admin-console service (only when deployed)."
+  value       = var.deploy_admin_console ? google_cloud_run_v2_service.admin_console_service[0].uri : null
+}
+
+output "admin_console_service_name" {
+  description = "Cloud Run service name for admin-console (only when deployed)."
+  value       = var.deploy_admin_console ? google_cloud_run_v2_service.admin_console_service[0].name : null
+}
+
+output "admin_console_iap_lb_ip" {
+  description = "Global IP address for the admin-console HTTPS load balancer protected by IAP."
+  value       = var.deploy_admin_console ? google_compute_global_address.admin_console_lb_ip[0].address : null
+}
