@@ -69,6 +69,7 @@ describe("docker admin UI smoke integration", function () {
   const version = process.env.npm_package_version || packageJson.version;
   const imageTag = `jasonklotzer/dcm2bq-admin-console:${version}`;
   const imagePreexisting = imageExists(imageTag);
+  const removeBuiltImage = process.env.DOCKER_SMOKE_REMOVE_IMAGE === "true";
   const containerName = `dcm2bq-smoke-${Date.now()}`;
   let baseUrl = null;
   let mappedPort = null;
@@ -115,48 +116,47 @@ describe("docker admin UI smoke integration", function () {
       spawnSync("docker", ["rm", "-f", containerName], { stdio: "pipe" });
     } catch (_) {}
 
-    if (!imagePreexisting) {
+    if (!imagePreexisting && removeBuiltImage) {
       try {
         spawnSync("docker", ["rmi", "-f", imageTag], { stdio: "pipe" });
       } catch (_) {}
     }
   });
 
-  it("starts the container and exposes the root service endpoint", async () => {
+  it("starts the container and serves the root UI endpoint", async () => {
     assert(baseUrl, "Container base URL was not initialized");
     await waitForHttpOk(`${baseUrl}/`);
 
     const rootResponse = await fetch(`${baseUrl}/`);
     assert.strictEqual(rootResponse.status, 200);
-    const body = await rootResponse.json();
-    assert.strictEqual(typeof body.name, "string");
-    assert.strictEqual(typeof body.version, "string");
+    const body = await rootResponse.text();
+    assert(body.includes("dcm2bq Admin Console"), "Expected root endpoint to serve admin UI HTML");
   });
 
   it("serves admin UI static assets from container image", async () => {
-    await waitForHttpOk(`${baseUrl}/ui`);
+    await waitForHttpOk(`${baseUrl}/`);
 
-    const uiResponse = await fetch(`${baseUrl}/ui`);
+    const uiResponse = await fetch(`${baseUrl}/`);
     assert.strictEqual(uiResponse.status, 200);
     const uiHtml = await uiResponse.text();
-    assert(uiHtml.includes("./admin.js"), "Expected /ui to reference admin.js");
-    assert(uiHtml.includes("./admin.css"), "Expected /ui to reference admin.css");
+    assert(uiHtml.includes("./admin.js"), "Expected / to reference admin.js");
+    assert(uiHtml.includes("./admin.css"), "Expected / to reference admin.css");
 
-    const jsResponse = await fetch(`${baseUrl}/ui/admin.js`);
+    const jsResponse = await fetch(`${baseUrl}/admin.js`);
     assert.strictEqual(jsResponse.status, 200);
     const jsBody = await jsResponse.text();
     assert(jsBody.includes("connectWebSocket"), "Expected admin.js content to load");
 
-    const cssResponse = await fetch(`${baseUrl}/ui/admin.css`);
+    const cssResponse = await fetch(`${baseUrl}/admin.css`);
     assert.strictEqual(cssResponse.status, 200);
     const cssBody = await cssResponse.text();
     assert(cssBody.includes(".ws-status"), "Expected admin.css content to load");
   });
 
   it("contains admin assets on disk inside the container", () => {
-    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/assets/http-admin/index.html"], { stdio: "pipe" });
-    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/assets/http-admin/admin.js"], { stdio: "pipe" });
-    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/assets/http-admin/admin.css"], { stdio: "pipe" });
+    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/frontend/index.html"], { stdio: "pipe" });
+    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/frontend/admin.js"], { stdio: "pipe" });
+    runDocker(["exec", containerName, "test", "-f", "/usr/src/app/frontend/admin.css"], { stdio: "pipe" });
   });
 
   it("accepts WebSocket connections on /ws", async () => {

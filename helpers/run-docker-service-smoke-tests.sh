@@ -26,5 +26,6 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "Running Docker service smoke test..."
+echo "Tip: smoke-built images are kept by default for faster reruns (set DOCKER_SMOKE_REMOVE_IMAGE=true to clean up)."
 cd "$PROJECT_ROOT"
 DOCKER_SMOKE_TEST=true npx mocha --colors --timeout 900000 test/docker-service-smoke.integration.js "$@"
