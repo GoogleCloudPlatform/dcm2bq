@@ -12,8 +12,20 @@
 </head>
 <body>
   <header>
-    <strong>dcm2bq Admin Console</strong>
-    <span class="ws-status connecting" id="ws-status" title="WebSocket: connecting" aria-label="WebSocket connecting"><i class="fa-solid fa-circle-notch" aria-hidden="true"></i></span>
+    <div class="header-left">
+      <strong>dcm2bq Admin Console</strong>
+    </div>
+    <div class="header-right">
+      <span class="ws-status connecting" id="ws-status" title="WebSocket: connecting" aria-label="WebSocket connecting"><i class="fa-solid fa-circle-notch" aria-hidden="true"></i></span>
+      <div class="auth-panel" id="auth-panel" style="display: none;">
+        <div class="auth-user" id="auth-user" title="Signed in with IAP">
+          <i class="fa-solid fa-user" aria-hidden="true"></i>
+          <span class="auth-user-label">Signed in as</span>
+          <span class="auth-user-email" id="auth-user-email"></span>
+        </div>
+        <a class="auth-logout" id="auth-logout" href="/api/auth/logout">Log out</a>
+      </div>
+    </div>
   </header>
   <main>
     <div class="tabs">
