@@ -20,9 +20,9 @@ const path = require("path");
 /**
  * Configuration management for admin-console backend
  * 
- * Only manages BigQuery table references (instances view and dead letter table).
+ * Only manages BigQuery table references (instances view, writable instances table, and dead letter table).
  * Configuration precedence:
- * 1. Environment variables (BQ_INSTANCES_VIEW_ID, BQ_DEAD_LETTER_TABLE_ID) - highest priority
+ * 1. Environment variables (BQ_INSTANCES_VIEW_ID, BQ_INSTANCES_TABLE_ID, BQ_DEAD_LETTER_TABLE_ID) - highest priority
  * 2. Test config (if NODE_ENV=test) from ../../../test/testconfig.json
  * 3. Default configuration from ./config.defaults.js
  */
@@ -53,21 +53,33 @@ function tryReadTestConfig() {
 /**
  * Extracts BigQuery configuration from config object
  * Handles both nested (gcpConfig.bigQuery) and flat (datasetId/instancesViewId) formats
- * Returns components separately: projectId, datasetId, instancesTableId, deadLetterTableId
+ * Returns components separately: projectId, datasetId, instancesViewId, instancesTableId, deadLetterTableId
  * @param {Object} config Configuration object
  * @returns {Object} Object with BigQuery components
  */
 function extractBigQueryConfig(config) {
   // If already has admin key with components, use it
   if (config.admin?.projectId && config.admin?.datasetId) {
-    return config.admin;
+    const instancesViewId = config.admin.instancesViewId || "instancesView";
+    const instancesTableId = config.admin.instancesTableId || "instances";
+    return {
+      ...config.admin,
+      instancesViewId,
+      instancesTableId,
+      deadLetterTableId: config.admin.deadLetterTableId || "dead_letter",
+    };
   }
 
   // Try to extract from nested gcpConfig structure
   if (config.gcpConfig?.bigQuery) {
     const projectId = config.gcpConfig.projectId;
     const datasetId = config.gcpConfig.bigQuery.datasetId;
-    const instancesTableId = config.gcpConfig.bigQuery.instancesTableId || "instances";
+    const instancesViewId =
+      config.gcpConfig.bigQuery.instancesViewId ||
+      "instancesView";
+    const instancesTableId =
+      config.gcpConfig.bigQuery.instancesTableId ||
+      "instances";
     
     // Parse deadLetterTableId - it might be just tableName or dataset.tableName
     let deadLetterTableId = config.deadLetterTableId || "dead_letter";
@@ -79,6 +91,7 @@ function extractBigQueryConfig(config) {
     return {
       projectId,
       datasetId,
+      instancesViewId,
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
     };
@@ -88,7 +101,8 @@ function extractBigQueryConfig(config) {
   if (config.datasetId) {
     const projectId = config.projectId;
     const datasetId = config.datasetId;
-    const instancesTableId = config.instancesViewId || "instances";
+    const instancesViewId = config.instancesViewId || "instancesView";
+    const instancesTableId = config.instancesTableId || "instances";
     
     // Parse deadLetterTableId - it might be just tableName or dataset.tableName
     let deadLetterTableId = config.deadLetterTableId || "dead_letter";
@@ -100,6 +114,7 @@ function extractBigQueryConfig(config) {
     return {
       projectId,
       datasetId,
+      instancesViewId,
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
     };
@@ -112,7 +127,7 @@ function extractBigQueryConfig(config) {
 /**
  * Gets the admin console BigQuery configuration
  * 
- * Returns BigQuery components (projectId, datasetId, instancesTableId, deadLetterTableId)
+ * Returns BigQuery components (projectId, datasetId, instancesViewId, instancesTableId, deadLetterTableId)
  * 
  * @param {Object} options Configuration options
  * @param {boolean} options.ignoreCache If true, reload config from source
@@ -141,12 +156,26 @@ function getConfig(options = {}) {
       if (parts.length === 3) {
         adminCfg.projectId = parts[0];
         adminCfg.datasetId = parts[1];
+        adminCfg.instancesViewId = parts[2];
+      } else if (parts.length === 2) {
+        adminCfg.datasetId = parts[0];
+        adminCfg.instancesViewId = parts[1];
+      } else {
+        adminCfg.instancesViewId = process.env.BQ_INSTANCES_VIEW_ID;
+      }
+    }
+
+    if (process.env.BQ_INSTANCES_TABLE_ID) {
+      const parts = process.env.BQ_INSTANCES_TABLE_ID.split(".");
+      if (parts.length === 3) {
+        adminCfg.projectId = parts[0];
+        adminCfg.datasetId = parts[1];
         adminCfg.instancesTableId = parts[2];
       } else if (parts.length === 2) {
         adminCfg.datasetId = parts[0];
         adminCfg.instancesTableId = parts[1];
       } else {
-        adminCfg.instancesTableId = process.env.BQ_INSTANCES_VIEW_ID;
+        adminCfg.instancesTableId = process.env.BQ_INSTANCES_TABLE_ID;
       }
     }
     
@@ -179,10 +208,17 @@ function getConfig(options = {}) {
       );
     }
 
+    if (!adminCfg.instancesViewId) {
+      throw new Error(
+        "Configuration missing required field: BQ instances view " +
+        "(set via testconfig.json or BQ_INSTANCES_VIEW_ID environment variable)"
+      );
+    }
+
     if (!adminCfg.instancesTableId) {
       throw new Error(
-        "Configuration missing required field: BQ instances table " +
-        "(set via testconfig.json or BQ_INSTANCES_VIEW_ID environment variable)"
+        "Configuration missing required field: BQ writable instances table " +
+        "(set via testconfig.json or BQ_INSTANCES_TABLE_ID environment variable)"
       );
     }
 
