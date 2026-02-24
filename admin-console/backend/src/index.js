@@ -1099,21 +1099,29 @@ function buildSearchFilter(key, value) {
   }
 
   const rawValue = String(value);
+  const lowerValue = rawValue.toLowerCase();
   // Escape special characters for regex literal match
   const escapedValue = rawValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedLowerValue = lowerValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  // Build the where clause with case-insensitive contains matching
-  // All searches are case-insensitive and use contains (substring) matching
+  // Build the where clause
   let whereClause;
   if (key === "Modality") {
-    whereClause = `REGEXP_CONTAINS(UPPER(TRIM(COALESCE(JSON_VALUE(metadata, '$.${key}'), ''))), UPPER(@valueRegex))`;
+    whereClause = `UPPER(TRIM(JSON_VALUE(metadata, '$.${key}'))) = UPPER(@value)`;
+  } else if (key === "StudyDate") {
+    whereClause = `REGEXP_CONTAINS(CAST(JSON_VALUE(metadata, '$.${key}') AS STRING), CONCAT('.*', @valueRegex, '.*'))`;
   } else {
-    whereClause = `REGEXP_CONTAINS(UPPER(COALESCE(JSON_VALUE(metadata, '$.${key}'), '')), UPPER(@valueRegex))`;
+    whereClause = `REGEXP_CONTAINS(LOWER(JSON_VALUE(metadata, '$.${key}')), CONCAT('.*', @valueRegexLower, '.*'))`;
   }
 
   return {
     whereClause,
-    params: { value: rawValue, valueRegex: escapedValue },
+    params: {
+      value: rawValue,
+      valueRegex: escapedValue,
+      valueLower: lowerValue,
+      valueRegexLower: escapedLowerValue,
+    },
   };
 }
 
