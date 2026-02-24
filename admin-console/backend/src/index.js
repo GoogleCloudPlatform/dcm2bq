@@ -1102,14 +1102,13 @@ function buildSearchFilter(key, value) {
   // Escape special characters for regex literal match
   const escapedValue = rawValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  // Build the where clause
+  // Build the where clause with case-insensitive contains matching
+  // All searches are case-insensitive and use contains (substring) matching
   let whereClause;
   if (key === "Modality") {
-    whereClause = `UPPER(TRIM(JSON_VALUE(metadata, '$.${key}'))) = UPPER(@value)`;
-  } else if (key === "StudyDate") {
-    whereClause = `REGEXP_CONTAINS(CAST(JSON_VALUE(metadata, '$.${key}') AS STRING), CONCAT('.*', @valueRegex, '.*'))`;
+    whereClause = `REGEXP_CONTAINS(UPPER(TRIM(COALESCE(JSON_VALUE(metadata, '$.${key}'), ''))), UPPER(@valueRegex))`;
   } else {
-    whereClause = `REGEXP_CONTAINS(JSON_VALUE(metadata, '$.${key}'), CONCAT('.*', @valueRegex, '.*'))`;
+    whereClause = `REGEXP_CONTAINS(UPPER(COALESCE(JSON_VALUE(metadata, '$.${key}'), '')), UPPER(@valueRegex))`;
   }
 
   return {
