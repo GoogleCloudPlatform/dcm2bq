@@ -76,6 +76,34 @@ test.describe('Admin Console UI', () => {
         await page.waitForTimeout(1000);
       }
     });
+
+    test('should toggle active studies sort column and direction', async ({ page }) => {
+      const searchButton = page.locator('button#search-btn');
+      await searchButton.click();
+      await page.waitForTimeout(2000);
+
+      const defaultSortButton = page.locator('.study-sort-btn[data-sort-by="studyDate"]');
+      const defaultSortExists = await defaultSortButton.count().then((count) => count > 0).catch(() => false);
+      if (!defaultSortExists) {
+        test.skip(true, 'No studies loaded, sortable header not rendered.');
+      }
+
+      await expect(defaultSortButton).toHaveClass(/active/);
+      const defaultIcon = defaultSortButton.locator('.study-sort-indicator i');
+      await expect(defaultIcon).toHaveClass(/fa-arrow-down-wide-short/);
+
+      const patientNameSortButton = page.locator('.study-sort-btn[data-sort-by="patientName"]');
+      await patientNameSortButton.click();
+
+      await expect(defaultSortButton).not.toHaveClass(/active/);
+      await expect(patientNameSortButton).toHaveClass(/active/);
+      const patientNameIcon = patientNameSortButton.locator('.study-sort-indicator i');
+      await expect(patientNameIcon).toHaveClass(/fa-arrow-down-wide-short/);
+
+      await patientNameSortButton.click();
+      await expect(patientNameSortButton).toHaveClass(/active/);
+      await expect(patientNameIcon).toHaveClass(/fa-arrow-up-wide-short/);
+    });
   });
 
   test.describe('Instance Viewing', () => {

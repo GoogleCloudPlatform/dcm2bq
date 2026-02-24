@@ -156,6 +156,7 @@ app.post("/api/studies/search", async (req, res) => {
     const value = String(req.body?.value || "").trim();
     const studyLimit = Math.min(Math.max(parseInt(req.body?.studyLimit || 50, 10), 1), 200);
     const studyOffset = Math.max(parseInt(req.body?.studyOffset || 0, 10), 0);
+    const { sortBy, sortDirection, orderByClause } = resolveStudiesSort(req.body?.sortBy, req.body?.sortDirection);
 
     if (!key) {
       return res.status(400).json({ error: "Missing required field: key" });
@@ -191,7 +192,7 @@ app.post("/api/studies/search", async (req, res) => {
       WHERE ${searchFilter.whereClause}
         AND ${studyUidExpr} IS NOT NULL
       GROUP BY study_id
-      ORDER BY max_timestamp DESC
+      ORDER BY ${orderByClause}
       LIMIT @studyLimit OFFSET @studyOffset
     `;
 
@@ -239,6 +240,8 @@ app.post("/api/studies/search", async (req, res) => {
       totalStudies: Number(totals.totalStudies || 0),
       studyLimit,
       studyOffset,
+      sortBy,
+      sortDirection,
     });
   } catch (error) {
     console.error("Studies search error:", error);
@@ -1112,6 +1115,33 @@ function buildSearchFilter(key, value) {
   return {
     whereClause,
     params: { value: rawValue, valueRegex: escapedValue },
+  };
+}
+
+function resolveStudiesSort(sortByInput, sortDirectionInput) {
+  const SORT_COLUMN_MAP = {
+    patientName: "patient_name",
+    patientId: "patient_id",
+    accessionNumber: "accession_number",
+    studyDate: "study_date",
+    studyTime: "study_time",
+    studyDescription: "study_description",
+  };
+
+  const fallbackSortBy = "studyDate";
+  const normalizedSortBy = Object.prototype.hasOwnProperty.call(SORT_COLUMN_MAP, sortByInput)
+    ? sortByInput
+    : fallbackSortBy;
+  const normalizedSortDirection = String(sortDirectionInput || "desc").toLowerCase() === "asc"
+    ? "asc"
+    : "desc";
+  const sqlSortDirection = normalizedSortDirection.toUpperCase();
+  const sqlSortColumn = SORT_COLUMN_MAP[normalizedSortBy];
+
+  return {
+    sortBy: normalizedSortBy,
+    sortDirection: normalizedSortDirection,
+    orderByClause: `${sqlSortColumn} ${sqlSortDirection} NULLS LAST, max_timestamp DESC, study_id DESC`,
   };
 }
 

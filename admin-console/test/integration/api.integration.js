@@ -147,6 +147,40 @@ describe('Integration Tests', () => {
       assert.equal(res.status, 200);
       assert.ok(res.data.items);
     }).timeout(TEST_TIMEOUT);
+
+    it('should accept explicit studies sort column and direction', async function() {
+      this.timeout(TEST_TIMEOUT);
+      const res = await request('POST', '/api/studies/search', {
+        key: 'PatientID',
+        value: '',
+        studyLimit: 5,
+        studyOffset: 0,
+        sortBy: 'patientName',
+        sortDirection: 'asc',
+      });
+
+      assert.equal(res.status, 200);
+      assert.ok(Array.isArray(res.data.items));
+      assert.equal(res.data.sortBy, 'patientName');
+      assert.equal(res.data.sortDirection, 'asc');
+    }).timeout(TEST_TIMEOUT);
+
+    it('should normalize invalid sort params to study date descending', async function() {
+      this.timeout(TEST_TIMEOUT);
+      const res = await request('POST', '/api/studies/search', {
+        key: 'PatientID',
+        value: '',
+        studyLimit: 5,
+        studyOffset: 0,
+        sortBy: 'notAColumn',
+        sortDirection: 'upward',
+      });
+
+      assert.equal(res.status, 200);
+      assert.ok(Array.isArray(res.data.items));
+      assert.equal(res.data.sortBy, 'studyDate');
+      assert.equal(res.data.sortDirection, 'desc');
+    }).timeout(TEST_TIMEOUT);
   });
 
   describe('Studies Instances', () => {
@@ -222,18 +256,33 @@ describe('Integration Tests', () => {
         const instances = await request('GET', `/studies/${encodeURIComponent(studyId)}/instances?limit=1`);
 
         if (instances.data.items && instances.data.items.length > 0) {
-          const instanceId = instances.data.items[0].id;
-          const content = await request('GET', `/api/instances/${encodeURIComponent(instanceId)}/content`);
+          const metadata = instances.data.items[0].metadata || {};
+          const studyUid = metadata.StudyInstanceUID;
+          const seriesUid = metadata.SeriesInstanceUID;
+          const sopInstanceUid = metadata.SOPInstanceUID;
+
+          if (!studyUid || !seriesUid || !sopInstanceUid) {
+            this.skip();
+          }
+
+          const content = await request(
+            'GET',
+            `/studies/${encodeURIComponent(studyUid)}/series/${encodeURIComponent(seriesUid)}/instances/${encodeURIComponent(sopInstanceUid)}/render`,
+          );
           
           // Should return 200 or 404 or 500 (if file doesn't exist in GCS)
           assert.ok([200, 404, 500].includes(content.status));
           
           if (content.status === 200) {
             // Verify content structure
-            assert.ok(content.data.id);
-            assert.ok(content.data.objectPath || content.data.path);
             assert.ok(content.data.mimeType);
-            // Content may be image, text, or binary
+            assert.ok(['image', 'text', 'binary'].includes(content.data.contentType));
+
+            if (content.data.contentType === 'text') {
+              assert.ok(typeof content.data.text === 'string');
+            } else {
+              assert.ok(typeof content.data.dataBase64 === 'string');
+            }
           }
         }
       }
@@ -241,9 +290,11 @@ describe('Integration Tests', () => {
 
     it('should handle missing content gracefully', async function() {
       this.timeout(TEST_TIMEOUT);
-      // Request content for non-existent instance
-      const fakeInstanceId = 'nonexistent-instance-id-123456';
-      const res = await request('GET', `/api/instances/${encodeURIComponent(fakeInstanceId)}/content`);
+      // Request content for non-existent DICOM UID tuple
+      const res = await request(
+        'GET',
+        '/studies/nonexistent-study/series/nonexistent-series/instances/nonexistent-instance/render',
+      );
       // Should return 404 or 500 if not found/accessible
       assert.ok([404, 500].includes(res.status));
     }).timeout(TEST_TIMEOUT);
