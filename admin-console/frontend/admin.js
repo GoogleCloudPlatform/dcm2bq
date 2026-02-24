@@ -52,6 +52,11 @@
       const panel = document.getElementById('auth-panel');
       if (!panel) return;
       panel.style.display = isVisible ? 'inline-flex' : 'none';
+
+      const separator = document.getElementById('auth-ws-separator');
+      if (separator) {
+        separator.style.display = isVisible ? 'inline-flex' : 'none';
+      }
     }
 
     function updateAuthPanel() {
