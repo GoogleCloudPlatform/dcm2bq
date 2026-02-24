@@ -1,6 +1,6 @@
 {
   "name": "dcm2bq-admin-console",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": true,
   "description": "Standalone admin console for dcm2bq with frontend and backend",
   "main": "backend/src/index.js",
