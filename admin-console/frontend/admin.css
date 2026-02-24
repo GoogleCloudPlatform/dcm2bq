@@ -161,7 +161,7 @@
     #instances-toolbar .paging-cell { flex: 1 1 0; min-width: 260px; justify-content: center; }
     #instances-toolbar .paging-cell .pager-controls { margin-left: 0; }
     .section-toolbar label { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; font-weight: 500; }
-    .section-toolbar input[type='checkbox'] { width: 16px; height: 16px; }
+    input[type='checkbox'] { width: 18px; height: 18px; cursor: pointer; }
     .toolbar-spacer { flex: 1 1 auto; }
     .pager-controls { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
     .pager-info { font-size: 14px; color: var(--muted); min-width: 92px; text-align: center; }
@@ -172,6 +172,40 @@
     #instances > .section-status { position: sticky; top: 60px; z-index: 10; margin-bottom: 0; }
     #instances-body { overflow: auto; }
     .studies-header-row { position: sticky; top: 0; z-index: 9; margin-bottom: 0; }
+    .study-sort-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      max-width: 100%;
+    }
+    .study-sort-btn:hover { color: var(--accent); }
+    .study-sort-btn.active { color: var(--accent); }
+    .study-sort-btn:focus,
+    .study-sort-btn:focus-visible,
+    .study-sort-btn:active {
+      outline: none;
+      box-shadow: none;
+    }
+    .study-sort-btn span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .study-sort-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+    }
     #dlp { position: relative; }
     #dlp > .section-toolbar { position: sticky; top: 0; z-index: 10; margin-bottom: 0; }
     #dlp > #dlp-summary { position: sticky; top: 60px; z-index: 10; background: var(--bg); margin: 0; padding: 8px 12px; }

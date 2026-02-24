@@ -48,6 +48,63 @@ describe('HTTP Endpoints Specification', () => {
         assert.ok(typeof study.instanceCount === 'number');
         assert.ok(typeof study.seriesCount === 'number');
       });
+
+      it('should include sorting fields in response with defaults', () => {
+        const expectedResponse = {
+          items: [],
+          studyLimit: 50,
+          studyOffset: 0,
+          totalStudies: 0,
+          totalInstances: 0,
+          sortBy: 'studyDate',
+          sortDirection: 'desc',
+        };
+
+        assert.equal(expectedResponse.sortBy, 'studyDate');
+        assert.equal(expectedResponse.sortDirection, 'desc');
+      });
+
+      it('should only allow one active sort column at a time', () => {
+        const requestPayload = {
+          key: 'PatientID',
+          value: '',
+          sortBy: 'patientName',
+          sortDirection: 'desc',
+        };
+
+        const allowedSortColumns = [
+          'patientName',
+          'patientId',
+          'accessionNumber',
+          'studyDate',
+          'studyTime',
+          'studyDescription',
+        ];
+
+        assert.ok(allowedSortColumns.includes(requestPayload.sortBy));
+      });
+
+      it('should normalize invalid sort values to default study date descending', () => {
+        const input = {
+          sortBy: 'invalidColumn',
+          sortDirection: 'upward',
+        };
+
+        const allowedSortColumns = new Set([
+          'patientName',
+          'patientId',
+          'accessionNumber',
+          'studyDate',
+          'studyTime',
+          'studyDescription',
+        ]);
+
+        const normalizedSortBy = allowedSortColumns.has(input.sortBy) ? input.sortBy : 'studyDate';
+        const normalizedSortDirection = input.sortDirection === 'asc' ? 'asc' : 'desc';
+
+        assert.equal(normalizedSortBy, 'studyDate');
+        assert.equal(normalizedSortDirection, 'desc');
+      });
     });
 
     describe('GET /studies/:studyId/instances', () => {

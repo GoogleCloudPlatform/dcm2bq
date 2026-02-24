@@ -10,7 +10,14 @@
       studyLoadState: new Map(),
       dlq: [],
       dlpPaging: { limit: 50, offset: 0, total: 0 },
-      lastSearchParams: { key: '', value: '', studyLimit: 50, studyOffset: 0 },
+      lastSearchParams: {
+        key: '',
+        value: '',
+        studyLimit: 50,
+        studyOffset: 0,
+        sortBy: 'studyDate',
+        sortDirection: 'desc',
+      },
       lastTotals: { totalStudies: 0, totalInstances: 0 },
       monitoring: {
         enabled: false,
@@ -38,6 +45,15 @@
       userId: null,
       principal: null,
     };
+
+    const STUDY_SORT_COLUMNS = Object.freeze({
+      patientName: 'Patient Name',
+      patientId: 'Patient ID',
+      accessionNumber: 'Accession #',
+      studyDate: 'Study Date',
+      studyTime: 'Study Time',
+      studyDescription: 'Study Description',
+    });
 
     const WS_PROTOCOL_VERSION = 1;
     const WS_HEADER_SIZE = 32;
@@ -700,6 +716,42 @@
       document.getElementById('studies-next').disabled = showingEnd >= totalStudies;
     }
 
+    function getCurrentStudySort() {
+      const sortBy = Object.prototype.hasOwnProperty.call(STUDY_SORT_COLUMNS, state.lastSearchParams.sortBy)
+        ? state.lastSearchParams.sortBy
+        : 'studyDate';
+      const sortDirection = state.lastSearchParams.sortDirection === 'asc' ? 'asc' : 'desc';
+      return { sortBy, sortDirection };
+    }
+
+    function buildStudySortHeaderCell(label, sortBy, widthStyle) {
+      const { sortBy: activeSortBy, sortDirection } = getCurrentStudySort();
+      const isActive = activeSortBy === sortBy;
+      const nextDirection = isActive && sortDirection === 'desc' ? 'asc' : 'desc';
+      const activeDirectionLabel = sortDirection === 'asc' ? 'ascending' : 'descending';
+      const directionIcon = sortDirection === 'asc'
+        ? 'fa-solid fa-arrow-up-wide-short'
+        : 'fa-solid fa-arrow-down-wide-short';
+
+      return `
+        <div style="${widthStyle}">
+          <button
+            type="button"
+            class="study-sort-btn ${isActive ? 'active' : ''}"
+            data-sort-by="${sortBy}"
+            data-next-direction="${nextDirection}"
+            title="Sort by ${escapeHtml(label)} (${isActive ? `currently ${activeDirectionLabel}` : 'descending'})"
+            aria-label="Sort by ${escapeHtml(label)} (${isActive ? `currently ${activeDirectionLabel}` : 'descending'})"
+          >
+            <span>${escapeHtml(label)}</span>
+            ${isActive
+              ? `<span class="study-sort-indicator" aria-hidden="true"><i class="${directionIcon}"></i></span>`
+              : ''}
+          </button>
+        </div>
+      `;
+    }
+
     function getSopClassIcon(sopClassUid, modality = '') {
       if (!sopClassUid) return { icon: 'fa-solid fa-circle-question', label: 'Unknown' };
       const uid = String(sopClassUid).toLowerCase();
@@ -858,12 +910,12 @@
       header.innerHTML = `
         <div style="flex: 0 0 40px; text-align: center;"><input type="checkbox" id="select-all-header" title="Select all loaded studies and instances" aria-label="Select all loaded studies and instances" /></div>
         <div style="flex: 0 0 20px;"></div>
-        <div style="flex: 1; min-width: 0;">Patient Name</div>
-        <div style="flex: 0 0 120px;">Patient ID</div>
-        <div style="flex: 0 0 120px;">Accession #</div>
-        <div style="flex: 0 0 130px;">Study Date</div>
-        <div style="flex: 0 0 85px;">Study Time</div>
-        <div style="flex: 1; min-width: 0;">Study Description</div>
+        ${buildStudySortHeaderCell(STUDY_SORT_COLUMNS.patientName, 'patientName', 'flex: 0.8; min-width: 0;')}
+        ${buildStudySortHeaderCell(STUDY_SORT_COLUMNS.patientId, 'patientId', 'flex: 0 0 120px;')}
+        ${buildStudySortHeaderCell(STUDY_SORT_COLUMNS.accessionNumber, 'accessionNumber', 'flex: 0 0 120px;')}
+        ${buildStudySortHeaderCell(STUDY_SORT_COLUMNS.studyDate, 'studyDate', 'flex: 0 0 130px;')}
+        ${buildStudySortHeaderCell(STUDY_SORT_COLUMNS.studyTime, 'studyTime', 'flex: 0 0 110px;')}
+        ${buildStudySortHeaderCell(STUDY_SORT_COLUMNS.studyDescription, 'studyDescription', 'flex: 1.3; min-width: 0;')}
         <div style="flex: 0 0 110px;">Modalities</div>
         <div style="flex: 0 0 70px; display: flex; align-items: center; justify-content: center;" title="Number of series" aria-label="Number of series"><i class="fa-solid fa-cubes" aria-hidden="true"></i></div>
         <div style="flex: 0 0 80px; display: flex; align-items: center; justify-content: center;" title="Number of instances" aria-label="Number of instances"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></div>
@@ -902,12 +954,12 @@
         studySummary.innerHTML = `
           <div style="flex: 0 0 40px; text-align: center;"><input type="checkbox" class="study-check" data-study-id="${escapeHtml(studyUid)}" ${studyChecked} /></div>
           <div style="flex: 0 0 20px; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-chevron-right chevron" aria-hidden="true"></i></div>
-          <div style="flex: 1; min-width: 0;"><span class="cell-ellipsis" title="${escapeHtml(patient)}">${escapeHtml(patient)}</span></div>
+          <div style="flex: 0.8; min-width: 0;"><span class="cell-ellipsis" title="${escapeHtml(patient)}">${escapeHtml(patient)}</span></div>
           <div style="flex: 0 0 120px;"><span class="cell-ellipsis" title="${escapeHtml(patientId)}">${escapeHtml(patientId)}</span></div>
           <div style="flex: 0 0 120px;"><span class="cell-ellipsis" title="${escapeHtml(accessionNumber)}">${escapeHtml(accessionNumber)}</span></div>
           <div style="flex: 0 0 130px;"><span class="cell-ellipsis" title="${escapeHtml(studyDate)}">${escapeHtml(studyDate)}</span></div>
-          <div style="flex: 0 0 85px;"><span class="cell-ellipsis" title="${escapeHtml(studyTime)}">${escapeHtml(studyTime)}</span></div>
-          <div style="flex: 1; min-width: 0;"><span class="cell-ellipsis" title="${escapeHtml(studyDescDisplay)}">${escapeHtml(studyDescDisplay)}</span></div>
+          <div style="flex: 0 0 110px;"><span class="cell-ellipsis" title="${escapeHtml(studyTime)}">${escapeHtml(studyTime)}</span></div>
+          <div style="flex: 1.3; min-width: 0;"><span class="cell-ellipsis" title="${escapeHtml(studyDescDisplay)}">${escapeHtml(studyDescDisplay)}</span></div>
           <div style="flex: 0 0 110px;"><span class="cell-ellipsis" title="${escapeHtml(modalitiesDisplay)}">${escapeHtml(modalitiesDisplay)}</span></div>
           <div style="flex: 0 0 70px; text-align: center;"><strong>${seriesCount}</strong></div>
           <div style="flex: 0 0 80px; text-align: center;"><strong>${instanceCount}</strong></div>
@@ -1062,21 +1114,42 @@
     }
 
     async function runSearch(options = {}) {
-      const { resetOffset = true, overrideOffset = null } = options;
+      const {
+        resetOffset = true,
+        overrideOffset = null,
+        overrideSortBy = null,
+        overrideSortDirection = null,
+      } = options;
       const key = document.getElementById('search-key').value.trim();
       const value = document.getElementById('search-value').value.trim();
       const studyLimit = 50; // Fixed page size for studies
       const studyOffset = overrideOffset !== null
         ? overrideOffset
         : (resetOffset ? 0 : state.lastSearchParams.studyOffset || 0);
+      const currentSort = getCurrentStudySort();
+      const sortBy = overrideSortBy && Object.prototype.hasOwnProperty.call(STUDY_SORT_COLUMNS, overrideSortBy)
+        ? overrideSortBy
+        : currentSort.sortBy;
+      const sortDirection = overrideSortDirection === 'asc' || overrideSortDirection === 'desc'
+        ? overrideSortDirection
+        : currentSort.sortDirection;
 
-      state.lastSearchParams = { key, value, studyLimit, studyOffset };
+      state.lastSearchParams = { key, value, studyLimit, studyOffset, sortBy, sortDirection };
       const searchBtn = document.getElementById('search-btn');
       const searchStatus = document.getElementById('search-status');
       searchBtn.disabled = true;
       try {
-        const result = await wsCall('studies.search', { key, value, studyLimit, studyOffset });
+        const result = await wsCall('studies.search', {
+          key,
+          value,
+          studyLimit,
+          studyOffset,
+          sortBy,
+          sortDirection,
+        });
         state.studies = result.items || [];
+        state.lastSearchParams.sortBy = result.sortBy || sortBy;
+        state.lastSearchParams.sortDirection = result.sortDirection === 'asc' ? 'asc' : 'desc';
         state.lastTotals = {
           totalStudies: Number(result.totalStudies || 0),
           totalInstances: Number(result.totalInstances || 0),
@@ -1191,6 +1264,17 @@
         evt.stopPropagation();
         return;
       }
+
+      const sortButton = evt.target.closest('.study-sort-btn');
+      if (sortButton) {
+        evt.preventDefault();
+        const sortBy = String(sortButton.dataset.sortBy || '');
+        if (!Object.prototype.hasOwnProperty.call(STUDY_SORT_COLUMNS, sortBy)) return;
+        const nextDirection = sortButton.dataset.nextDirection === 'asc' ? 'asc' : 'desc';
+        runSearch({ resetOffset: true, overrideSortBy: sortBy, overrideSortDirection: nextDirection });
+        return;
+      }
+
       const button = evt.target.closest('button');
       if (!button) return;
       const action = button.dataset.action;
