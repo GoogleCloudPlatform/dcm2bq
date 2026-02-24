@@ -29,6 +29,7 @@ The admin console is a standalone UI for exploring DICOM studies and instance da
 - Set `BQ_INSTANCES_TABLE_ID` only if you use delete endpoints (`/api/studies/delete`, `/api/instances/delete`) and need a writable base table.
 - Set `BQ_DEAD_LETTER_TABLE_ID` to your dead letter table.
 - Set `BQ_LOCATION` to match your BigQuery dataset location (e.g., `US`, `EU`, `us-central1`). Defaults to `US`.
+- Set `GCS_BUCKET_NAME` (or `ADMIN_UPLOAD_GCS_BUCKET`) to the source DICOM bucket used by your dcm2bq pipeline. The Upload tab writes files to this bucket.
 
 ### Local development
 

@@ -1,4 +1,5 @@
 const http = require("http");
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BigQuery } = require("@google-cloud/bigquery");
@@ -48,6 +49,52 @@ function getBaseUrl(req) {
   return host ? `${proto}://${host}` : "";
 }
 
+function getUploadBucketName() {
+  const candidates = [
+    process.env.ADMIN_UPLOAD_GCS_BUCKET,
+    process.env.GCS_BUCKET_NAME,
+    process.env.GCS_BUCKET,
+    process.env.DCM2BQ_GCS_BUCKET_NAME,
+    process.env.DICOM_GCS_BUCKET,
+  ];
+
+  const tryReadJsonFile = (filePath) => {
+    try {
+      if (!fs.existsSync(filePath)) return null;
+      const raw = fs.readFileSync(filePath, "utf8");
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const testConfigPath = path.join(__dirname, "..", "..", "..", "test", "testconfig.json");
+  const deploymentConfigPath = path.join(__dirname, "..", "..", "..", "deployment-config.json");
+  const testConfig = tryReadJsonFile(testConfigPath);
+  const deploymentConfig = tryReadJsonFile(deploymentConfigPath);
+
+  candidates.push(
+    testConfig?.gcpConfig?.gcs_bucket_name,
+    testConfig?.bucketName,
+    deploymentConfig?.gcs_bucket_name,
+  );
+
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function buildUploadObjectName(fileName) {
+  const baseName = path.basename(String(fileName || "upload.bin"));
+  const safeName = baseName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const nonce = Math.random().toString(36).slice(2, 10);
+  return `uploads/${stamp}_${nonce}_${safeName}`;
+}
+
 function parseWsBinaryPayload(payloadBuffer) {
   const raw = Buffer.isBuffer(payloadBuffer) ? payloadBuffer : Buffer.from(payloadBuffer || []);
   if (raw.length < 4) {
@@ -71,6 +118,7 @@ function parseWsBinaryPayload(payloadBuffer) {
 
 // Health check endpoint
 app.get("/healthz", (_, res) => {
+  const uploadBucketName = getUploadBucketName();
   res.status(200).json({
     ok: true,
     config: {
@@ -80,6 +128,7 @@ app.get("/healthz", (_, res) => {
       instancesTableId: CONFIG.instancesTableId,
       deadLetterTableId: CONFIG.deadLetterTableId,
       bqLocation: BQ_LOCATION,
+      uploadBucketName,
     },
   });
 });
@@ -357,6 +406,70 @@ app.get("/api/instances/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Get instance error:", error);
+    return res.status(500).json({ error: error?.message || "Internal error" });
+  }
+});
+
+// Poll for instances by path pattern (for upload progress tracking)
+app.post("/api/instances/poll", async (req, res) => {
+  try {
+    const gcsPath = String(req.body?.gcsPath || "").trim();
+    const generation = String(req.body?.generation || "").trim();
+    
+    if (!gcsPath) {
+      return res.status(400).json({ error: "Missing gcsPath" });
+    }
+
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
+    
+    // For archives, search for paths like gs://bucket/file.zip#...
+    // For single files, search for exact path
+    const isArchivePattern = gcsPath.includes('#') || req.body?.isArchive;
+    
+    let query;
+    let params;
+    
+    if (isArchivePattern) {
+      // Search for all files extracted from this archive
+      const archivePath = gcsPath.split('#')[0];
+      query = `
+        SELECT COUNT(*) as count,
+               COUNT(DISTINCT JSON_VALUE(metadata, '$.StudyInstanceUID')) as studyCount
+        FROM ${instancesTable}
+        WHERE path LIKE @pathPattern
+          ${generation ? 'AND version = @generation' : ''}
+          AND metadata IS NOT NULL
+      `;
+      params = { pathPattern: `${archivePath}#%` };
+      if (generation) params.generation = generation;
+    } else {
+      // Search for exact path match
+      query = `
+        SELECT COUNT(*) as count,
+               COUNT(DISTINCT JSON_VALUE(metadata, '$.StudyInstanceUID')) as studyCount
+        FROM ${instancesTable}
+        WHERE path = @path
+          ${generation ? 'AND version = @generation' : ''}
+          AND metadata IS NOT NULL
+      `;
+      params = { path: gcsPath };
+      if (generation) params.generation = generation;
+    }
+
+    const [rows] = await bigquery.query({
+      query,
+      location: BQ_LOCATION,
+      params,
+    });
+
+    const result = rows?.[0] || {};
+    return res.json({
+      count: Number(result.count || 0),
+      studyCount: Number(result.studyCount || 0),
+      found: Number(result.count || 0) > 0,
+    });
+  } catch (error) {
+    console.error("Poll instances error:", error);
     return res.status(500).json({ error: error?.message || "Internal error" });
   }
 });
@@ -1135,6 +1248,35 @@ wss.on("connection", (socket, request) => {
           return;
         }
 
+        const bucketName = getUploadBucketName();
+        if (!bucketName) {
+          await sendError(
+            "Upload bucket is not configured. Set one of: ADMIN_UPLOAD_GCS_BUCKET, GCS_BUCKET_NAME, GCS_BUCKET, DCM2BQ_GCS_BUCKET_NAME, DICOM_GCS_BUCKET",
+            500,
+          );
+          return;
+        }
+
+        const objectName = buildUploadObjectName(fileName);
+        await sendJson("progress", {
+          stage: "uploading_to_gcs",
+          detail: {
+            bucket: bucketName,
+            object: objectName,
+            bytes: binaryDataBuffer.length,
+          },
+        }, { action });
+
+        const gcsFile = storage.bucket(bucketName).file(objectName);
+        await gcsFile.save(binaryDataBuffer, {
+          resumable: false,
+          metadata: {
+            contentType: String(payload?.mimeType || "application/octet-stream"),
+          },
+        });
+
+        const [uploadedMetadata] = await gcsFile.getMetadata();
+
         const durationMs = Number(formatDurationMs(startNs).toFixed(1));
         await sendJson("result", {
           data: {
@@ -1143,6 +1285,11 @@ wss.on("connection", (socket, request) => {
             processedAt: new Date().toISOString(),
             success: true,
             bytesReceived: binaryDataBuffer.length,
+            bytesUploaded: Number(uploadedMetadata?.size || binaryDataBuffer.length),
+            bucket: bucketName,
+            object: objectName,
+            gcsPath: `gs://${bucketName}/${objectName}`,
+            generation: uploadedMetadata?.generation || null,
           },
         }, { status: "ok", durationMs, action });
         return;
@@ -1164,6 +1311,7 @@ wss.on("connection", (socket, request) => {
         "studies.reprocess": { method: "POST", path: "/api/studies/reprocess" },
         "instances.get": { method: "GET", path: `/api/instances/${encodeURIComponent(String(payload?.id || ""))}` },
         "instances.counts": { method: "GET", path: "/api/instances/counts" },
+        "instances.poll": { method: "POST", path: "/api/instances/poll" },
         "instances.delete": { method: "POST", path: "/api/instances/delete" },
         "instances.content": {
           method: "GET",
@@ -1230,6 +1378,7 @@ wss.on("connection", (socket, request) => {
 });
 
 server.listen(PORT, () => {
+  const uploadBucketName = getUploadBucketName();
   console.log(JSON.stringify({
     level: "info",
     event: "admin_console_started",
@@ -1240,6 +1389,7 @@ server.listen(PORT, () => {
       instancesViewId: CONFIG.instancesViewId,
       instancesTableId: CONFIG.instancesTableId,
       deadLetterTableId: CONFIG.deadLetterTableId,
+      uploadBucketName,
     },
   }));
 });
