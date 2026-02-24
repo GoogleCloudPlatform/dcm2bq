@@ -19,6 +19,7 @@
     body { font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; }
     header { padding: 12px 16px; background: var(--surface-alt); color: var(--text); display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
     .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-logo { width: 28px; height: 28px; border-radius: 8px; display: inline-block; }
     .header-right { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
     .auth-panel { display: inline-flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
     .auth-user { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }

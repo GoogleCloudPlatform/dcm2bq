@@ -37,7 +37,6 @@
       email: null,
       userId: null,
       principal: null,
-      logoutUrl: null,
     };
 
     const WS_PROTOCOL_VERSION = 1;
@@ -57,8 +56,7 @@
 
     function updateAuthPanel() {
       const emailEl = document.getElementById('auth-user-email');
-      const logoutEl = document.getElementById('auth-logout');
-      if (!emailEl || !logoutEl) return;
+      if (!emailEl) return;
 
       if (!authState.isIap) {
         setAuthPanelVisible(false);
@@ -67,7 +65,6 @@
 
       const display = authState.email || authState.userId || authState.principal || '';
       emailEl.textContent = display;
-      logoutEl.href = authState.logoutUrl || '/api/auth/logout';
       setAuthPanelVisible(Boolean(display));
     }
 
@@ -83,7 +80,6 @@
         authState.email = data?.email || null;
         authState.userId = data?.userId || null;
         authState.principal = data?.principal || null;
-        authState.logoutUrl = data?.logoutUrl || null;
         updateAuthPanel();
       } catch (error) {
         console.error('Failed to load auth user:', error);

@@ -97,23 +97,7 @@ app.get("/api/auth/user", (req, res) => {
     email,
     userId,
     principal: emailHeader || idHeader || null,
-    logoutUrl: isIap ? "/api/auth/logout" : null,
   });
-});
-
-// IAP logout helper (forces Google account sign-out)
-app.get("/api/auth/logout", (req, res) => {
-  const emailHeader = req.get("x-goog-authenticated-user-email");
-  const idHeader = req.get("x-goog-authenticated-user-id");
-  const isIap = Boolean(stripIapPrefix(emailHeader) || stripIapPrefix(idHeader));
-  if (!isIap) {
-    return res.status(404).send("Not Found");
-  }
-
-  const baseUrl = getBaseUrl(req) || "https://accounts.google.com";
-  const continueUrl = `${baseUrl}/`;
-  const logoutUrl = `https://accounts.google.com/Logout?continue=${encodeURIComponent(continueUrl)}`;
-  return res.redirect(logoutUrl);
 });
 
 // Studies search endpoint
