@@ -423,6 +423,16 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
         value = var.bq_location
       }
 
+      env {
+        name  = "GCS_BUCKET_NAME"
+        value = local.bucket_name
+      }
+
+      env {
+        name  = "ADMIN_UPLOAD_GCS_BUCKET"
+        value = local.bucket_name
+      }
+
       resources {
         limits = {
           cpu    = "1"

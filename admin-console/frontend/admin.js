@@ -1534,6 +1534,72 @@
       }
     });
 
+    function isArchiveFile(fileName) {
+      const lower = String(fileName || '').toLowerCase();
+      return lower.endsWith('.zip') || lower.endsWith('.tgz') || lower.endsWith('.tar.gz');
+    }
+
+    function isSupportedFileType(fileName) {
+      const lower = String(fileName || '').toLowerCase();
+      return lower.endsWith('.dcm') || isArchiveFile(fileName);
+    }
+
+    async function pollBigQueryForProcessing(gcsPath, generation, isArchive, pollTimeoutMs = 120000) {
+      const pollInterval = 2000; // 2 seconds
+      const startTime = Date.now();
+      let pollCount = 0;
+      let lastReportedCount = 0;
+
+      while (Date.now() - startTime < pollTimeoutMs) {
+        pollCount++;
+        
+        try {
+          const pollResult = await wsCall('instances.poll', {
+            gcsPath,
+            generation,
+            isArchive,
+          });
+          
+          if (pollResult.found && pollResult.count > 0) {
+            // Show progress for archives when count increases
+            if (isArchive && pollResult.count > lastReportedCount) {
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              console.log(`[${elapsed}s] Processing: ${pollResult.count} file(s) found in BigQuery`);
+              lastReportedCount = pollResult.count;
+            }
+            
+            // For single files, return immediately
+            if (!isArchive) {
+              return { 
+                found: true, 
+                count: pollResult.count,
+                studyCount: pollResult.studyCount,
+                elapsed: ((Date.now() - startTime) / 1000).toFixed(1)
+              };
+            }
+            
+            // For archives, continue polling for a bit to collect more results
+            // Wait at least 5 seconds after finding first result
+            const timeSinceFirstResult = Date.now() - startTime;
+            if (timeSinceFirstResult > 5000) {
+              return { 
+                found: true, 
+                count: pollResult.count,
+                studyCount: pollResult.studyCount,
+                elapsed: ((Date.now() - startTime) / 1000).toFixed(1)
+              };
+            }
+          }
+        } catch (error) {
+          console.warn('BigQuery poll failed:', error);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+      
+      return { found: false, count: 0, studyCount: 0, elapsed: ((Date.now() - startTime) / 1000).toFixed(1) };
+    }
+
     document.getElementById('upload-run').addEventListener('click', async () => {
       const fileInput = document.getElementById('upload-file');
       const file = fileInput.files?.[0];
@@ -1541,30 +1607,96 @@
         alert('Choose a file first.');
         return;
       }
+      if (!isSupportedFileType(file.name)) {
+        alert('Unsupported file type. Please upload a DICOM file (.dcm) or archive (.zip, .tgz, .tar.gz).');
+        return;
+      }
       const output = document.getElementById('upload-output');
-      output.textContent = 'Uploading and processing...';
+      output.textContent = 'Starting upload...';
       const btn = document.getElementById('upload-run');
       btn.disabled = true;
 
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
+        const isArchive = isArchiveFile(file.name);
 
         const progressLines = [];
+        const startTime = Date.now();
+
         const result = await wsCallBinary('process.run', {
           fileName: file.name,
           fileSizeBytes: bytes.length,
           mimeType: file.type || 'application/dicom',
         }, bytes, {
           onProgress: (event) => {
-            const detail = event.detail ? ` ${JSON.stringify(event.detail)}` : '';
-            progressLines.push(`[${new Date().toISOString()}] ${event.stage}${detail}`);
-            output.textContent = `${progressLines.join('\n')}\n\nWaiting for completion...`;
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            const stage = String(event.stage || 'processing').replace(/_/g, ' ');
+            
+            let progressMsg = `[${elapsed}s] ${stage}`;
+            
+            if (event.detail) {
+              const detail = event.detail;
+              if (detail.bucket && detail.object) {
+                progressMsg += `\n  → gs://${detail.bucket}/${detail.object}`;
+              }
+              if (detail.bytes) {
+                const sizeMB = (detail.bytes / (1024 * 1024)).toFixed(2);
+                progressMsg += ` (${sizeMB} MB)`;
+              }
+            }
+            
+            progressLines.push(progressMsg);
+            output.textContent = `${progressLines.join('\n')}\n\n⏳ Waiting for completion...`;
           },
         });
 
-        output.textContent = `${progressLines.join('\n')}\n\n${JSON.stringify(result, null, 2)}`;
+        const uploadTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        
+        let successMsg = `${progressLines.join('\n')}\n\n✓ Upload completed in ${uploadTime}s\n\n`;
+        
+        if (result.gcsPath) {
+          successMsg += `📁 File uploaded to: ${result.gcsPath}\n`;
+        }
+        if (result.bucket && result.object) {
+          successMsg += `   Bucket: ${result.bucket}\n`;
+          successMsg += `   Object: ${result.object}\n`;
+        }
+        if (result.generation) {
+          successMsg += `   Generation: ${result.generation}\n`;
+        }
+        if (result.bytesUploaded) {
+          const sizeMB = (result.bytesUploaded / (1024 * 1024)).toFixed(2);
+          successMsg += `   Size: ${sizeMB} MB\n`;
+        }
+
+        // Poll BigQuery for processing results
+        const fileType = isArchive ? 'archive' : 'file';
+        successMsg += `\n⏳ Waiting for Cloud Run to process ${fileType}...\n`;
+        output.textContent = successMsg;
+
+        const pollResult = await pollBigQueryForProcessing(
+          result.gcsPath || `gs://${result.bucket}/${result.object}`,
+          result.generation,
+          isArchive,
+          120000 // 2 minute timeout
+        );
+
+        if (pollResult.found) {
+          const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+          successMsg += `\n✓ Processing completed in ${pollResult.elapsed}s (${totalTime}s total)\n`;
+          successMsg += `   ${pollResult.count} instance${pollResult.count !== 1 ? 's' : ''} processed\n`;
+          successMsg += `   ${pollResult.studyCount} study/studies found\n`;
+          successMsg += `\n💡 View results in the Search tab above.`;
+        } else {
+          successMsg += `\n⚠️  Processing is taking longer than expected (${pollResult.elapsed}s)\n`;
+          successMsg += `   The file is still being processed by Cloud Run.\n`;
+          successMsg += `   Check the Search tab or BigQuery in a few minutes.`;
+        }
+        
+        output.textContent = successMsg;
       } catch (error) {
-        output.textContent = `Failed: ${formatRequestError(error)}`;
+        const errorMsg = formatRequestError(error);
+        output.textContent = `❌ Upload failed: ${errorMsg}`;
       } finally {
         btn.disabled = false;
       }
