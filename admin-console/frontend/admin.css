@@ -21,6 +21,7 @@
     .header-left { display: flex; align-items: center; gap: 12px; }
     .header-logo { width: 28px; height: 28px; border-radius: 8px; display: inline-block; }
     .header-right { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
+    .header-separator { color: var(--muted); font-size: 12px; line-height: 1; }
     .auth-panel { display: inline-flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
     .auth-user { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
     .auth-user-email { color: var(--text); font-weight: 600; }
