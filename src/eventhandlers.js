@@ -83,9 +83,11 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
 
 /**
  * Processes a DICOM file buffer to extract metadata and optionally generate embedding input and vector embedding.
+ * Throws errors for both permanent and transient failures - both will trigger Pub/Sub retries up to max_delivery_attempts.
  * @param {Buffer} buffer The DICOM file content as a buffer.
  * @param {string} uriPath The URI of the DICOM file.
  * @returns {Promise<{metadata: string, size: number, embeddings?: object}>} An object containing the stringified JSON metadata, buffer size, and optional embeddings.
+ * @throws {Error} For any processing errors (parsing, embedding generation, GCS save failures)
  */
 async function processDicom(buffer, uriPath) {
   const configObject = config.get();
@@ -110,20 +112,15 @@ async function processDicom(buffer, uriPath) {
   // Check if we should generate actual embeddings (call Vertex AI)
   const shouldGenerateEmbedding = embeddingInputConfig?.vector?.model;
   
-  // Try to generate embeddings, but don't fail the entire processing if it fails
-  try {
-    if (shouldGenerateEmbedding) {
-      // Generate full embedding (includes input creation + vector generation)
-      embeddingsResult = await createVectorEmbedding(json, buffer);
-    } else if (shouldCreateInput) {
-      // Only create embedding input (extract and save, but don't generate vector)
-      embeddingsResult = await createEmbeddingInput(json, buffer);
-    }
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    const action = shouldGenerateEmbedding ? "generate embeddings" : "create embedding input";
-    console.error(`Failed to ${action} for ${uriPath}: ${errorMsg}`);
-    // Continue without embeddings - we still want to save the metadata
+  // Generate embeddings if configured - errors will bubble up to the HTTP handler
+  // which will classify them (422 for permanent, 500 for transient) and return
+  // appropriate status codes. Both will trigger Pub/Sub retries up to max_delivery_attempts.
+  if (shouldGenerateEmbedding) {
+    // Generate full embedding (includes input creation + vector generation)
+    embeddingsResult = await createVectorEmbedding(json, buffer);
+  } else if (shouldCreateInput) {
+    // Only create embedding input (extract and save, but don't generate vector)
+    embeddingsResult = await createEmbeddingInput(json, buffer);
   }
   
   return {
