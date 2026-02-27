@@ -46,7 +46,9 @@ app.get("/", (_, res) => {
   res.perfCtx.print();
 });
 
-// Method for receiving push events
+// Method for receiving push events from Pub/Sub
+// Note: Pub/Sub push subscriptions ACK only on 200/201/202/204/102.
+// ALL other status codes (including 4xx and 5xx) trigger retry up to max_delivery_attempts.
 app.post("/", async (req, res) => {
   try {
     const eventName = matchEventSchema(req.body);
@@ -64,15 +66,19 @@ app.post("/", async (req, res) => {
 function handleHttpError(req, res, e) {
   const err = new Error(e.message || "unknown", { cause: e });
   
-  // Determine appropriate HTTP status code
+  // Determine appropriate HTTP status code for error classification/tracking
+  // Note: Both 4xx and 5xx will be retried by Pub/Sub push subscription
+  // (up to max_delivery_attempts, then sent to dead letter queue)
   if (httpErrors[e.code]) {
     // Error has a valid HTTP status code
     err.code = e.code;
   } else if (e.retryable === false) {
-    // Explicitly marked as non-retryable - use 422 (Unprocessable Entity)
+    // Permanent/non-retryable error - use 422 (Unprocessable Entity)
+    // This indicates the error won't be fixed by retrying, but Pub/Sub will still retry
     err.code = 422;
   } else {
-    // Default to 500 for unknown/retryable errors
+    // Transient/retryable error - use 500 (Internal Server Error)
+    // This indicates the error might be fixed by retrying
     err.code = 500;
   }
   

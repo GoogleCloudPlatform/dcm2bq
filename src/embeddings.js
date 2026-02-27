@@ -16,7 +16,7 @@
 
 const { Storage } = require("@google-cloud/storage");
 const { gcpConfig, jsonOutput } = require("./config").get();
-const { DEBUG_MODE } = require("./utils");
+const { DEBUG_MODE, isRetryableError, createNonRetryableError } = require("./utils");
 const { processImage } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
@@ -90,37 +90,31 @@ async function doRequest(payload) {
  * @param {string} fileName - The file path within the bucket (e.g., 'study/series/instance.jpg')
  * @param {string} contentType - The MIME type of the file
  * @param {string} subDirectory - Optional subdirectory within the base path (e.g., 'processed')
+ * @returns {Promise<string>} The GCS URI of the saved file
+ * @throws {Error} If the save operation fails
  */
 async function saveToGCS(data, fileName, contentType, subDirectory = '') {
   const gcsBucketPath = gcpConfig.embedding?.input?.gcsBucketPath;
-  
-  if (!gcsBucketPath) {
-    if (DEBUG_MODE) {
-      console.debug("gcpConfig.embedding.input.gcsBucketPath is not configured. Skipping file save to GCS.");
-    }
-    return;
+
+  // Extract bucket name from GCS path (e.g., 'gs://bucket-name' from 'gs://bucket-name/path')
+  const bucketMatch = gcsBucketPath.match(/^gs:\/\/([^\/]+)/);
+  if (!bucketMatch) {
+    throw createNonRetryableError(`Invalid GCS bucket path format: '${gcsBucketPath}'. Expected 'gs://bucket-name/path'.`);
   }
 
+  const bucketName = bucketMatch[1];
+  // Remove the bucket prefix (gs://bucket-name) to get the base path
+  const bucketPrefix = `gs://${bucketName}`;
+  let basePath = gcsBucketPath.substring(bucketPrefix.length).replace(/^\//, "") || "";
+  
+  // Build full path with optional subdirectory
+  let fullPath = basePath;
+  if (subDirectory) {
+    fullPath = fullPath ? `${fullPath}/${subDirectory}` : subDirectory;
+  }
+  fullPath = fullPath ? `${fullPath}/${fileName}` : fileName;
+
   try {
-    // Extract bucket name from GCS path (e.g., 'gs://bucket-name' from 'gs://bucket-name/path')
-    const bucketMatch = gcsBucketPath.match(/^gs:\/\/([^\/]+)/);
-    if (!bucketMatch) {
-      console.error("Invalid GCS bucket path format. Expected 'gs://bucket-name/path'.");
-      return;
-    }
-
-    const bucketName = bucketMatch[1];
-    // Remove the bucket prefix (gs://bucket-name) to get the base path
-    const bucketPrefix = `gs://${bucketName}`;
-    let basePath = gcsBucketPath.substring(bucketPrefix.length).replace(/^\//, "") || "";
-    
-    // Build full path with optional subdirectory
-    let fullPath = basePath;
-    if (subDirectory) {
-      fullPath = fullPath ? `${fullPath}/${subDirectory}` : subDirectory;
-    }
-    fullPath = fullPath ? `${fullPath}/${fileName}` : fileName;
-
     const file = storage.bucket(bucketName).file(fullPath);
     await file.save(data, {
       contentType: contentType,
@@ -133,25 +127,40 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
     }
     return gcsUri;
   } catch (error) {
-    console.error(`Error saving file to GCS: ${error.message}`);
-    return null;
+    const errorMessage = error.message || '';
+    
+    // Classify GCS error for tracking/logging
+    // Note: Pub/Sub will retry both types, but this helps with error analysis
+    if (isRetryableError(error)) {
+      // Transient error (network issues, timeouts) - return 500
+      throw new Error(`Failed to save file to GCS bucket '${bucketName}' at path '${fullPath}': ${errorMessage}`);
+    } else {
+      // Permanent error (permissions, bucket doesn't exist) - return 422
+      throw createNonRetryableError(
+        `Failed to save file to GCS bucket '${bucketName}' at path '${fullPath}': ${errorMessage}. ` +
+        `Check bucket permissions and configuration.`
+      );
+    }
   }
 }
 
 /**
  * Creates embedding input from DICOM metadata and buffer.
- * Extracts text or images and optionally saves them to GCS.
+ * Extracts text or images and saves them to GCS.
  * @param {Object} metadata - DICOM metadata JSON
  * @param {Buffer} dicomBuffer - Raw DICOM file buffer
- * @returns {Promise<{instance: Object, objectPath: string|null, objectSize: number|null, objectMimeType: string|null}|null>}
+ * @returns {Promise<{instance: Object, objectPath: string, objectSize: number, objectMimeType: string}>}
+ * @throws {Error} If embedding input cannot be created or saved to GCS
  */
 async function createEmbeddingInput(metadata, dicomBuffer) {
   if (!jsonOutput.useCommonNames) {
-    throw new Error("Embeddings generation code relies on jsonOutput.useCommonNames to be true in the configuration.");
+    throw createNonRetryableError("Embeddings generation code relies on jsonOutput.useCommonNames to be true in the configuration.");
+  }
+  if (!gcpConfig.embedding?.input?.gcsBucketPath) {
+    throw createNonRetryableError("embedding.input.gcsBucketPath must be configured to create embedding input.");
   }
   if (!metadata?.SOPClassUID) {
-    console.warn("SOPClassUID not found in metadata. Cannot create embedding input.");
-    return null;
+    throw createNonRetryableError("SOPClassUID not found in metadata. Cannot create embedding input.");
   }
   const sopClassUid = metadata.SOPClassUID;
 
@@ -191,33 +200,29 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
       objectMimeType = 'text/plain';
     }
   } else {
-    console.error(`SOP Class UID ${sopClassUid} is not supported for embedding input generation.`);
-    return null;
+    throw createNonRetryableError(`SOP Class UID ${sopClassUid} is not supported for embedding input generation.`);
   }
 
   if (!instance) {
-    return null;
+    throw createNonRetryableError(`Failed to create embedding input: unable to process DICOM content for SOP Class UID ${sopClassUid}.`);
   }
 
   return { instance, objectPath, objectSize, objectMimeType };
 }
 
 async function createVectorEmbedding(metadata, dicomBuffer) {
-  // Validate GCP configuration
+  // Validate GCP configuration - these are permanent errors
   if (!gcpConfig.embedding?.input?.vector?.model) {
-    console.error("Vector embedding is not configured. Please set gcpConfig.embedding.input.vector.model in your configuration.");
-    return null;
+    throw createNonRetryableError("Vector embedding is not configured. Please set gcpConfig.embedding.input.vector.model in your configuration.");
   }
 
   if (gcpConfig.projectId === 'my-gcp-project') {
-    console.error("Error: GCP project ID is not configured. Please set the GCP_PROJECT environment variable or configure gcpConfig.projectId in your configuration file.");
-    console.error("Example: export GCP_PROJECT=your-actual-gcp-project");
-    return null;
+    throw createNonRetryableError("GCP project ID is not configured. Please set the GCP_PROJECT environment variable or configure gcpConfig.projectId in your configuration file. Example: export GCP_PROJECT=your-actual-gcp-project");
   }
 
   const inputResult = await createEmbeddingInput(metadata, dicomBuffer);
   if (!inputResult) {
-    return null;
+    throw createNonRetryableError("Failed to create embedding input - unable to extract image or text from DICOM file.");
   }
 
   const { instance, objectPath, objectSize, objectMimeType } = inputResult;
@@ -228,26 +233,42 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
       const vectorEmbedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
       return { embedding: vectorEmbedding, objectPath, objectSize, objectMimeType };
     } else {
-      console.error("Failed to get embedding from the model response.");
-      return null;
+      throw new Error("Failed to get embedding from the model response - no predictions returned.");
     }
   } catch (e) {
-    // Provide more helpful error messages for common issues
     const errorMessage = e.message || '';
-    if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
-      console.error(`Error: The Vertex AI API is not enabled for project '${gcpConfig.projectId}'.`);
-      console.error(`Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`);
-      console.error("After enabling, wait a few minutes for the change to propagate.");
-    } else if (errorMessage.includes('401') || errorMessage.includes('permission denied')) {
-      console.error(`Error: Authentication failed for project '${gcpConfig.projectId}'.`);
-      console.error("Please check your Google Cloud credentials and ensure you have the required permissions.");
-    } else if (errorMessage.includes('403')) {
-      console.error(`Error: Access denied for project '${gcpConfig.projectId}'.`);
-      console.error("Please check that you have the required IAM roles (e.g., roles/aiplatform.user).");
+    
+    // Classify error as retryable or permanent for tracking/logging
+    // Note: Both types will be retried by Pub/Sub, but this helps with error analysis
+    if (isRetryableError(e)) {
+      // Retryable errors (quota exceeded, rate limit, transient failures)
+      // Return 500 - Pub/Sub will retry with exponential backoff
+      console.error("Transient error generating vector embedding (will be retried):", errorMessage);
+      throw e;
     } else {
-      console.error("Error generating vector embedding:", e.message);
+      // Permanent errors (config issues, auth errors, etc)
+      // Return 422 - Pub/Sub will still retry, but error indicates permanent issue
+      if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
+        throw createNonRetryableError(
+          `The Vertex AI API is not enabled for project '${gcpConfig.projectId}'. ` +
+          `Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`
+        );
+      } else if (errorMessage.includes('401') || errorMessage.includes('permission denied') || errorMessage.includes('Unauthenticated')) {
+        throw createNonRetryableError(
+          `Authentication failed for project '${gcpConfig.projectId}'. ` +
+          `Please check your Google Cloud credentials and ensure you have the required permissions.`
+        );
+      } else if (errorMessage.includes('403') || errorMessage.includes('Permission denied')) {
+        throw createNonRetryableError(
+          `Access denied for project '${gcpConfig.projectId}'. ` +
+          `Please check that you have the required IAM roles (e.g., roles/aiplatform.user).`
+        );
+      } else {
+        // Unknown error - default to retryable since we can't be sure
+        console.error("Unknown error generating vector embedding (will be retried):", errorMessage);
+        throw e;
+      }
     }
-    return null;
   }
 }
 
