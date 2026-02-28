@@ -21,7 +21,7 @@ const { insert } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
 const { createVectorEmbedding, createEmbeddingInput } = require("./embeddings");
-const { deepAssign, createNonRetryableError, DEBUG_MODE } = require("./utils");
+const { deepAssign, createNonRetryableError, isRetryableError, DEBUG_MODE } = require("./utils");
 const crypto = require("crypto");
 const fs = require("fs").promises;
 const path = require("path");
@@ -83,11 +83,13 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
 
 /**
  * Processes a DICOM file buffer to extract metadata and optionally generate embedding input and vector embedding.
- * Throws errors for both permanent and transient failures - both will trigger Pub/Sub retries up to max_delivery_attempts.
+ * Embedding failures are handled as follows:
+ * - Retryable embedding errors are re-thrown to trigger retry.
+ * - Non-retryable embedding errors are logged and processing continues without embeddings.
  * @param {Buffer} buffer The DICOM file content as a buffer.
  * @param {string} uriPath The URI of the DICOM file.
  * @returns {Promise<{metadata: string, size: number, embeddings?: object}>} An object containing the stringified JSON metadata, buffer size, and optional embeddings.
- * @throws {Error} For any processing errors (parsing, embedding generation, GCS save failures)
+ * @throws {Error} For parsing failures and retryable embedding failures
  */
 async function processDicom(buffer, uriPath) {
   const configObject = config.get();
@@ -112,15 +114,24 @@ async function processDicom(buffer, uriPath) {
   // Check if we should generate actual embeddings (call Vertex AI)
   const shouldGenerateEmbedding = embeddingInputConfig?.vector?.model;
   
-  // Generate embeddings if configured - errors will bubble up to the HTTP handler
-  // which will classify them (422 for permanent, 500 for transient) and return
-  // appropriate status codes. Both will trigger Pub/Sub retries up to max_delivery_attempts.
-  if (shouldGenerateEmbedding) {
-    // Generate full embedding (includes input creation + vector generation)
-    embeddingsResult = await createVectorEmbedding(json, buffer);
-  } else if (shouldCreateInput) {
-    // Only create embedding input (extract and save, but don't generate vector)
-    embeddingsResult = await createEmbeddingInput(json, buffer);
+  // Generate embeddings/input if configured.
+  // Only retryable embedding errors should fail the event and trigger retries.
+  // Non-retryable embedding errors should not block metadata persistence.
+  try {
+    if (shouldGenerateEmbedding) {
+      // Generate full embedding (includes input creation + vector generation)
+      embeddingsResult = await createVectorEmbedding(json, buffer);
+    } else if (shouldCreateInput) {
+      // Only create embedding input (extract and save, but don't generate vector)
+      embeddingsResult = await createEmbeddingInput(json, buffer);
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (isRetryableError(error)) {
+      throw error;
+    }
+    console.error(`Non-retryable embedding error for ${uriPath}; continuing without embedding: ${errorMsg}`);
+    embeddingsResult = null;
   }
   
   return {
