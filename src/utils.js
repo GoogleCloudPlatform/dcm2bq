@@ -80,6 +80,7 @@ function isRetryableError(error) {
     /connection\s+reset/i,
     /ECONNRESET/i,
     /ETIMEDOUT/i,
+    /timeout/i,
     /ENOTFOUND/i,
     /socket\s+hang\s+up/i,
     /network\s+error/i,

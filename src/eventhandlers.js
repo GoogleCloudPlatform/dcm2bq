@@ -165,8 +165,11 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
   const seriesInstanceUid = metadataObj?.SeriesInstanceUID || '';
   const studyInstanceUid = metadataObj?.StudyInstanceUID || '';
   
-  // Combine UIDs for comprehensive uniqueness
-  const idSource = `${studyInstanceUid}|${seriesInstanceUid}|${sopInstanceUid}`;
+  // Prefer DICOM UID-based identity; fallback to path/version for rows without DICOM metadata
+  const hasDicomIds = Boolean(studyInstanceUid || seriesInstanceUid || sopInstanceUid);
+  const idSource = hasDicomIds
+    ? `${studyInstanceUid}|${seriesInstanceUid}|${sopInstanceUid}`
+    : `${writeBase.path || ''}|${writeBase.version || ''}`;
   // Use truncated SHA256 (16 hex chars, 64 bits) - Input is already globally unique, so no collision risk
   const id = crypto.createHash("sha256").update(idSource).digest("hex").substring(0, 16);
 
@@ -361,19 +364,27 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     case consts.GCS_OBJ_METADATA_UPDATE:
     // The object has been replaced with a new version
     case consts.GCS_OBJ_FINALIZE: {
-      // Use memory to read, avoiding volume mount in container
-      let buffer = await gcs.downloadToMemory(bucketId, objectId);
-      perfCtx.addRef("afterGcsDownloadToMemory");
-      
-      const archiveType = getArchiveType(objectId);
-      if (archiveType) {
-        await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass);
-        // Clear buffer after archive processing to free memory
-        buffer = null;
-      } else {
-        const uriPath = gcs.createUriPath(bucketId, objectId);
-        await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS, storageClass);
-        // Clear buffer after single file processing to free memory
+      const uriPath = gcs.createUriPath(bucketId, objectId);
+      const fileSize = Number(msgData.size || 0) || null;
+      let buffer = null;
+      try {
+        // Use memory to read, avoiding volume mount in container
+        buffer = await gcs.downloadToMemory(bucketId, objectId);
+        perfCtx.addRef("afterGcsDownloadToMemory");
+
+        const archiveType = getArchiveType(objectId);
+        if (archiveType) {
+          await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass);
+        } else {
+          await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS, storageClass);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (isRetryableError(error)) {
+          throw error;
+        }
+        console.error(`Non-retryable processing error for ${uriPath}; acknowledging without retry: ${errorMsg}`);
+      } finally {
         buffer = null;
       }
       perfCtx.addRef("afterProcessDicom");
@@ -389,16 +400,28 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
 async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   const dicomWebPath = Buffer.from(ctx.message.data, "base64").toString();
   const uriPath = hcapi.createUriPath(dicomWebPath);
-  const buffer = await hcapi.downloadToMemory(uriPath);
-  perfCtx.addRef("afterHcapiDownloadToMemory");
+  let buffer;
+  try {
+    buffer = await hcapi.downloadToMemory(uriPath);
+    perfCtx.addRef("afterHcapiDownloadToMemory");
 
-  const timestamp = new Date();
-  const version = ctx.message.attributes?.versionId || Date.now();
-  const storageClass = ctx.message.attributes?.storageClass || null;
+    const timestamp = new Date();
+    const version = ctx.message.attributes?.versionId || Date.now();
+    const storageClass = ctx.message.attributes?.storageClass || null;
 
-  await processAndPersistDicom(version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB, storageClass);
-  perfCtx.addRef("afterProcessDicom");
-  perfCtx.addRef("afterBqInsert");
+    await processAndPersistDicom(version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB, storageClass);
+    perfCtx.addRef("afterProcessDicom");
+    perfCtx.addRef("afterBqInsert");
+  } catch (error) {
+    const timestamp = new Date();
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (isRetryableError(error)) {
+      throw error;
+    }
+    console.error(`Non-retryable HCAPI processing error for ${uriPath}; acknowledging without retry: ${errorMsg}`);
+  } finally {
+    buffer = null;
+  }
   if (DEBUG_MODE) {
     console.log(JSON.stringify({ path: dicomWebPath }));
   }

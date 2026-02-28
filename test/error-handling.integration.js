@@ -23,8 +23,8 @@ const sinon = require("sinon");
 /**
  * Integration tests for error handling and HTTP status codes
  * 
- * Tests that non-retryable errors (invalid DICOM, corrupted files) return 4xx
- * and retryable errors (transient failures) return 5xx
+ * Tests that non-retryable processing errors are acknowledged (200)
+ * while retryable errors (transient failures) return 5xx for Pub/Sub retry.
  */
 describe("error-handling integration", () => {
   let app;
@@ -87,7 +87,7 @@ describe("error-handling integration", () => {
     delete process.env.DCM2BQ_CONFIG;
   });
 
-  describe("non-retryable errors (4xx)", () => {
+  describe("non-retryable processing errors (200)", () => {
     it("should return 400 for invalid Pub/Sub message schema", async () => {
       const invalidMessage = {
         // Completely missing message property - fails schema validation
@@ -104,7 +104,7 @@ describe("error-handling integration", () => {
       assert(response.body.reason.includes("No match to supported schemas"));
     });
 
-    it("should return 422 for invalid DICOM file", async () => {
+    it("should return 200 for invalid DICOM file", async () => {
       const invalidDicomData = fs.readFileSync(invalidFile);
       
       // Mock GCS to return invalid DICOM data
@@ -134,13 +134,12 @@ describe("error-handling integration", () => {
       gcs.downloadToMemory = async () => invalidDicomData;
 
       try {
-        const response = await request(app)
+        await request(app)
           .post("/")
           .send(message)
-          .expect(422);
+          .expect(200);
 
-        assert(response.body.reason);
-        assert(response.body.reason.includes("Failed to parse DICOM file"));
+        assert.strictEqual(bigqueryStub.called, false, "Should not persist synthetic non-retryable failure rows");
       } finally {
         gcs.downloadToMemory = originalDownload;
       }

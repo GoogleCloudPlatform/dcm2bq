@@ -490,17 +490,28 @@ describe("End-to-End Pipeline Integration Tests", function () {
 
       const perfCtx = { addRef: () => {} };
 
-      // Should throw non-retryable error but with 422 status (graceful error handling)
-      try {
-        await handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
-        assert.fail("Expected error for non-DICOM file");
-      } catch (error) {
-        // Expected: non-DICOM files should result in a non-retryable error
-        assert.strictEqual(error.code, 422, "Should return 422 Unprocessable Entity for non-DICOM files");
-        assert(error.message.includes("Failed to parse DICOM file"), "Should include parsing error message");
-      }
+      // Non-retryable file errors should be handled and persisted without throwing
+      await handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
 
-      console.log("  ✓ Non-DICOM file handled with appropriate error code");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const uriPath = `gs://${testBucket.name}/${fileName}`;
+      const query = `
+        SELECT path, metadata
+        FROM \`${gcpConfig.projectId}.${gcpConfig.bigQuery.datasetId}.${gcpConfig.bigQuery.instancesTableId}\`
+        WHERE path = @path
+        ORDER BY timestamp DESC
+        LIMIT 1
+      `;
+
+      const [rows] = await bigquery.query({
+        query,
+        params: { path: uriPath },
+      });
+
+      assert.strictEqual(rows.length, 0, "Should not persist synthetic rows for non-retryable processing failures");
+
+      console.log("  ✓ Non-DICOM file handled as non-retryable without synthetic persistence");
     });
 
     it("should handle OBJECT_DELETE events", async function () {
