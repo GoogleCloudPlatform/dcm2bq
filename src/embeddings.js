@@ -77,6 +77,12 @@ function isPdf(sopClassUid) {
   return sopClassUid === SOP_CLASS_UIDS.ENCAPSULATED_PDF;
 }
 
+function shouldRequireEmbeddingCompatibleText(config) {
+  const hasSummarizeTextConfig = !!config.embedding?.input?.summarizeText;
+  const hasVectorConfig = !!(config.embedding?.input?.vector || config.embedding?.vector);
+  return hasSummarizeTextConfig && hasVectorConfig;
+}
+
 const { doRequest: httpDoRequest } = require('./http-retry');
 
 // wrapper kept for backwards compatibility with existing callers
@@ -163,6 +169,7 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
     throw createNonRetryableError("SOPClassUID not found in metadata. Cannot create embedding input.");
   }
   const sopClassUid = metadata.SOPClassUID;
+  const requireEmbeddingCompatible = shouldRequireEmbeddingCompatibleText(gcpConfig);
 
   let instance;
   let objectPath = null;
@@ -182,7 +189,7 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
       objectMimeType = 'image/jpeg';
     }
   } else if (isPdf(sopClassUid)) {
-    instance = await processPdf(metadata, dicomBuffer);
+    instance = await processPdf(metadata, dicomBuffer, requireEmbeddingCompatible);
     if (instance?.text) {
       const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
@@ -191,7 +198,7 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
       objectMimeType = 'text/plain';
     }
   } else if (isStructuredReport(sopClassUid)) {
-    instance = await processSR(metadata);
+    instance = await processSR(metadata, requireEmbeddingCompatible);
     if (instance?.text) {
       const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
