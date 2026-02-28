@@ -24,9 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install DCMTK v3.6.9 prebuilt static binaries
 WORKDIR /tmp
-RUN curl -fsSLo dcmtk-3.6.9-linux-x86_64-static.tar.bz2 \
-      https://dicom.offis.de/download/dcmtk/dcmtk369/bin/dcmtk-3.6.9-linux-x86_64-static.tar.bz2 && \
-    tar -xjf dcmtk-3.6.9-linux-x86_64-static.tar.bz2 -C /usr/local --strip-components=1 && \
+COPY assets/dcmtk-3.6.9-linux-x86_64-static.tar.bz2 ./
+RUN tar -xjf dcmtk-3.6.9-linux-x86_64-static.tar.bz2 -C /usr/local --strip-components=1 && \
     rm -f dcmtk-3.6.9-linux-x86_64-static.tar.bz2
 
 # Install npm dependencies

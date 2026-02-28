@@ -47,3 +47,8 @@ package-lock.json
 
 # Local config file
 testconfig.json
+
+# Cached dcmtk install
+assets/dcmtk-3.6.9-linux-x86_64-static.tar.bz2
+A
+assets/dcmtk-3.6.9-linux-x86_64-static.tar.bz2
