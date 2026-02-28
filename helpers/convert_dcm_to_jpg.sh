@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -euo pipefail
 
 if ! command -v gdcmconv &> /dev/null; then
     echo "Error: gdcmconv command not found. Please install GDCM."
@@ -52,21 +52,63 @@ fi
 echo "Converting ${INPUT_FILE} to ${OUTPUT_JPG_FILE}..."
 
 TEMP_DCM_FILE=$(mktemp --suffix=.dcm)
+TEMP_NORMALIZED_DCM_FILE=$(mktemp --suffix=.dcm)
+trap 'rm -f "${TEMP_DCM_FILE}" "${TEMP_NORMALIZED_DCM_FILE}"' EXIT
+
+render_with_fallbacks() {
+    local source_file="$1"
+
+    if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --use-window 1 "${source_file}" "${OUTPUT_JPG_FILE}"; then
+        if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --histogram-window 1 "${source_file}" "${OUTPUT_JPG_FILE}"; then
+            if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --min-max-window "${source_file}" "${OUTPUT_JPG_FILE}"; then
+                dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" "${source_file}" "${OUTPUT_JPG_FILE}"
+            fi
+        fi
+    fi
+}
+
+render_succeeded=false
 
 # Fixes https://github.com/GoogleCloudPlatform/dcm2bq/issues/25
 # Convert to explicit raw (uncompressed) DICOM to preserve grayscale fidelity.
-gdcmconv --raw "${INPUT_FILE}" "${TEMP_DCM_FILE}"
+if gdcmconv --raw "${INPUT_FILE}" "${TEMP_DCM_FILE}"; then
+    if render_with_fallbacks "${TEMP_DCM_FILE}"; then
+        render_succeeded=true
+    fi
+else
+    echo "Warning: gdcmconv --raw failed; falling back to original DICOM for rendering." >&2
+fi
 
-# Apply modality LUT + first VOI window when present; fallback to computed windows.
-if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --use-window 1 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"; then
-    if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --histogram-window 1 "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"; then
-        if ! dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" --use-modality --min-max-window "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"; then
-            # Final fallback for color / non-VOI cases.
-            dcm2img --scale-x-size 512 --frame "$FRAME_NUMBER" "${TEMP_DCM_FILE}" "${OUTPUT_JPG_FILE}"
+if [ "${render_succeeded}" = false ]; then
+    if render_with_fallbacks "${INPUT_FILE}"; then
+        render_succeeded=true
+    fi
+fi
+
+# Handle malformed files with non-standard photometric interpretation values.
+if [ "${render_succeeded}" = false ] && command -v dcmdump &> /dev/null && command -v dcmodify &> /dev/null; then
+    PHOTOMETRIC_INTERPRETATION=$(dcmdump +P "0028,0004" "${INPUT_FILE}" 2>/dev/null | sed -n 's/.*\[\([^]]*\)\].*/\1/p' | head -n 1)
+
+    if [ "${PHOTOMETRIC_INTERPRETATION}" = "RGB_NORMAL" ]; then
+        echo "Warning: Non-standard PhotometricInterpretation=RGB_NORMAL detected; normalizing to RGB and retrying." >&2
+        cp "${INPUT_FILE}" "${TEMP_NORMALIZED_DCM_FILE}"
+        dcmodify -nb -m "(0028,0004)=RGB" "${TEMP_NORMALIZED_DCM_FILE}" >/dev/null
+
+        if gdcmconv --raw "${TEMP_NORMALIZED_DCM_FILE}" "${TEMP_DCM_FILE}"; then
+            if render_with_fallbacks "${TEMP_DCM_FILE}"; then
+                render_succeeded=true
+            fi
+        fi
+
+        if [ "${render_succeeded}" = false ] && render_with_fallbacks "${TEMP_NORMALIZED_DCM_FILE}"; then
+            render_succeeded=true
         fi
     fi
 fi
 
-rm -f "${TEMP_DCM_FILE}"
+if [ "${render_succeeded}" = false ]; then
+    echo "Error: Could not render DICOM image to JPG after all conversion attempts." >&2
+    exit 1
+fi
 
 echo "Successfully created ${OUTPUT_JPG_FILE}"
