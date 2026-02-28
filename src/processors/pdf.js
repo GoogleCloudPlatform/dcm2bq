@@ -30,7 +30,7 @@ async function parsePdf(pdfBuffer) {
   return await pdfParseModule(pdfBuffer);
 }
 
-async function processPdf(metadata, dicomBuffer, requireEmbeddingCompatible = true) {
+async function processPdf(metadata, dicomBuffer, requireEmbeddingCompatible = false) {
   if (!metadata.EncapsulatedDocument) {
     console.warn("Encapsulated PDF SOP Class UID found, but no (0042,0011) tag present.");
     return null;

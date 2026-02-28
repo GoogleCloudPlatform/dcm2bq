@@ -45,10 +45,9 @@ program
   .option("-o, --output <output>", "output file (for image: .jpg, for text: .txt)")
   .option("--summary", "summarize SR or PDF text with Gemini", false)
   .action(async (fileName, options) => {
-    let requireEmbeddingCompatible = false;
+    const requireEmbeddingCompatible = false;
     const { jsonOutput, gcpConfig } = config.get();
     // Set summarization config based on CLI
-    requireEmbeddingCompatible = !!options.summary;
     if (options.summary) {
       if (!gcpConfig.embedding) gcpConfig.embedding = {};
       if (!gcpConfig.embedding.input) gcpConfig.embedding.input = {};
