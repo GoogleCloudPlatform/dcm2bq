@@ -23,6 +23,7 @@ const sinon = require("sinon");
 const bq = require("../src/bigquery");
 const consts = require("../src/consts");
 const { Storage } = require("@google-cloud/storage");
+const { createNonRetryableError } = require("../src/utils");
 
 describe("eventhandlers", () => {
   let bqInsertStub;
@@ -90,6 +91,11 @@ describe("eventhandlers", () => {
   beforeEach(() => {
     // Reset call history before each test
     bqInsertStub.resetHistory();
+    createVectorEmbeddingStub.resetHistory();
+    createVectorEmbeddingStub.resetBehavior();
+    createVectorEmbeddingStub.resolves({
+      embedding: Array.from({ length: 1408 }, (_, i) => Math.sin(i) * 0.001),
+    });
   });
 
   afterEach(() => {
@@ -273,6 +279,84 @@ describe("eventhandlers", () => {
       const row = bqInsertStub.getCall(0).args[0];
       assert.strictEqual(row.path, "gs://test-bucket/ct.dcm", 
         "Path should be the DICOM file uriPath");
+    });
+
+    it("should persist metadata when embedding fails with non-retryable error", async function() {
+      this.timeout(5000);
+
+      const dcmPath = path.join(__dirname, "files/dcm/ct.dcm");
+      const dcmBuffer = fs.readFileSync(dcmPath);
+      mockFile.download.resetHistory();
+      mockFile.download.resolves([dcmBuffer]);
+
+      createVectorEmbeddingStub.rejects(
+        createNonRetryableError("Unsupported SOP for embedding", 422)
+      );
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: "test-bucket",
+            objectId: "ct.dcm"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "ct.dcm",
+            generation: "123456"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      assert.strictEqual(bqInsertStub.callCount, 1, "Should persist row even on non-retryable embedding error");
+      const row = bqInsertStub.getCall(0).args[0];
+      assert.ok(row.metadata, "Should persist metadata");
+      assert.ok(!row.embeddingVector, "Should not persist embedding vector when embedding generation fails");
+    });
+
+    it("should fail and not persist when embedding fails with retryable error", async function() {
+      this.timeout(5000);
+
+      const dcmPath = path.join(__dirname, "files/dcm/ct.dcm");
+      const dcmBuffer = fs.readFileSync(dcmPath);
+      mockFile.download.resetHistory();
+      mockFile.download.resolves([dcmBuffer]);
+
+      const retryableError = new Error("Too many requests");
+      retryableError.code = 429;
+      createVectorEmbeddingStub.rejects(retryableError);
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: "test-bucket",
+            objectId: "ct.dcm"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "ct.dcm",
+            generation: "123456"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await assert.rejects(
+        eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx }),
+        (error) => error && error.code === 429
+      );
+
+      assert.strictEqual(bqInsertStub.callCount, 0, "Should not persist row when embedding error is retryable");
     });
   });
 
