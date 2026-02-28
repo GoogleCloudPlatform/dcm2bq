@@ -80,7 +80,10 @@ async function renderDicomImage(metadata, dicomBuffer) {
       execFile(scriptPath, args, (error, stdout, stderr) => {
         if (error) {
           console.error(`convert_dcm_to_jpg.sh execution failed: ${stderr}`);
-          return reject(error);
+          const enhancedError = new Error(error.message);
+          enhancedError.cause = error;
+          enhancedError.stderr = stderr;
+          return reject(enhancedError);
         }
         resolve(stdout);
       });
@@ -90,7 +93,8 @@ async function renderDicomImage(metadata, dicomBuffer) {
     const jpgBuffer = await readFile(jpgPath);
     return jpgBuffer;
   } catch (error) {
-    console.error(`Could not render DICOM image for embedding using convert_dcm_to_jpg.sh: ${error.message}`);
+    const stderrDetails = error?.stderr ? `\n${error.stderr}` : "";
+    console.error(`Could not render DICOM image for embedding using convert_dcm_to_jpg.sh: ${error.message}${stderrDetails}`);
     return null;
   } finally {
     if (tempDir) {
