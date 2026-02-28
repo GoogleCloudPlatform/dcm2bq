@@ -1526,8 +1526,6 @@
       const nextBtn = document.getElementById('dlp-next');
       if (prevBtn) prevBtn.disabled = offset <= 0;
       if (nextBtn) nextBtn.disabled = showingEnd >= total;
-
-
     }
 
     async function refreshDlp(options = {}) {
@@ -1567,8 +1565,6 @@
         console.error('Error refreshing DLP:', error);
       } finally {
         refreshBtn.disabled = false;
-        if (prevBtn) prevBtn.disabled = false;
-        if (nextBtn) nextBtn.disabled = false;
       }
     }
 
