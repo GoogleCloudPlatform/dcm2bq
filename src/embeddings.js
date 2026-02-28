@@ -149,7 +149,7 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
  * Extracts text or images and saves them to GCS.
  * @param {Object} metadata - DICOM metadata JSON
  * @param {Buffer} dicomBuffer - Raw DICOM file buffer
- * @returns {Promise<{instance: Object, objectPath: string, objectSize: number, objectMimeType: string}>}
+ * @returns {Promise<{instance: Object, objectPath: string, objectSize: number, objectMimeType: string}|null>}
  * @throws {Error} If embedding input cannot be created or saved to GCS
  */
 async function createEmbeddingInput(metadata, dicomBuffer) {
@@ -200,7 +200,10 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
       objectMimeType = 'text/plain';
     }
   } else {
-    throw createNonRetryableError(`SOP Class UID ${sopClassUid} is not supported for embedding input generation.`);
+    if (DEBUG_MODE) {
+      console.log(`Skipping embedding generation for unsupported SOP Class UID ${sopClassUid}.`);
+    }
+    return null;
   }
 
   if (!instance) {
@@ -222,7 +225,7 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
 
   const inputResult = await createEmbeddingInput(metadata, dicomBuffer);
   if (!inputResult) {
-    throw createNonRetryableError("Failed to create embedding input - unable to extract image or text from DICOM file.");
+    return null;
   }
 
   const { instance, objectPath, objectSize, objectMimeType } = inputResult;

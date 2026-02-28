@@ -26,7 +26,7 @@ const testFiles = glob("./test/files/dcm/*.dcm");
 describe("embeddings", () => {
   let imageTestData, srTestData, pdfTestData;
   let storageStub, doRequestStub, askGeminiStub;
-  let processImage, processPdf, processSR, SOP_CLASS_UIDS, createVectorEmbedding;
+  let processImage, processPdf, processSR, SOP_CLASS_UIDS, createVectorEmbedding, createEmbeddingInput;
 
   const findAllTestDataBySopClass = (sopClassUids) => {
     if (!Array.isArray(sopClassUids)) {
@@ -136,7 +136,7 @@ describe("embeddings", () => {
     ({ processImage } = require("../src/processors/image"));
     ({ processPdf } = require("../src/processors/pdf"));
     ({ processSR } = require("../src/processors/sr"));
-    ({ SOP_CLASS_UIDS, createVectorEmbedding } = require("../src/embeddings"));
+    ({ SOP_CLASS_UIDS, createVectorEmbedding, createEmbeddingInput } = require("../src/embeddings"));
 
     imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
     srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
@@ -241,6 +241,35 @@ describe("embeddings", () => {
         );
       }
     }).timeout(30000);
+
+    it("should skip unsupported SOP Class UIDs without throwing", async () => {
+      const unsupportedMetadata = {
+        SOPClassUID: "9.9.9.9",
+        StudyInstanceUID: "1.2.3",
+        SeriesInstanceUID: "1.2.3.4",
+        SOPInstanceUID: "1.2.3.4.5",
+      };
+
+      const callCountBefore = doRequestStub.callCount;
+      const result = await createVectorEmbedding(unsupportedMetadata, Buffer.alloc(0));
+
+      assert.strictEqual(result, null, "Unsupported SOP classes should skip embeddings and return null");
+      assert.strictEqual(doRequestStub.callCount, callCountBefore, "Vertex AI should not be called for unsupported SOP classes");
+    });
+  });
+
+  describe("createEmbeddingInput", () => {
+    it("should return null for unsupported SOP Class UIDs", async () => {
+      const unsupportedMetadata = {
+        SOPClassUID: "9.9.9.9",
+        StudyInstanceUID: "1.2.3",
+        SeriesInstanceUID: "1.2.3.4",
+        SOPInstanceUID: "1.2.3.4.5",
+      };
+
+      const result = await createEmbeddingInput(unsupportedMetadata, Buffer.alloc(0));
+      assert.strictEqual(result, null, "Unsupported SOP classes should not generate embedding input");
+    });
   });
 
   describe("image transfer syntax support", () => {
