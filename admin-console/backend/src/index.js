@@ -18,6 +18,7 @@ const {
 } = require("./ws-frame");
 const { buildNormalizedStudyMetadata, parseJsonValue } = require("./study-metadata");
 const { extractDlqFileInfo } = require("./dlq-utils");
+const { requeueDlqMessages } = require("./dlq-requeue");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -803,24 +804,16 @@ app.post("/api/dlq/requeue", async (req, res) => {
       return res.status(400).json({ error: "Missing messageIds" });
     }
 
-    const dlqTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.deadLetterTableId}\``;
-    
-    // Delete requeued messages from DLQ
-    const deleteQuery = `
-      DELETE FROM ${dlqTable}
-      WHERE message_id IN UNNEST(@messageIds)
-    `;
-
-    await bigquery.query({
-      query: deleteQuery,
+    const result = await requeueDlqMessages({
+      bigquery,
+      storage,
+      config: CONFIG,
       location: BQ_LOCATION,
-      params: { messageIds },
+      messageIds,
+      requeueSource: "admin-console",
     });
 
-    return res.json({
-      requeuedCount: messageIds.length,
-      deletedMessageCount: messageIds.length,
-    });
+    return res.json(result);
   } catch (error) {
     console.error("DLQ requeue error:", error);
     return res.status(500).json({ error: error?.message || "Internal error" });
