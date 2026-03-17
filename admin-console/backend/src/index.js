@@ -18,7 +18,7 @@ const {
 } = require("./ws-frame");
 const { buildNormalizedStudyMetadata, parseJsonValue } = require("./study-metadata");
 const { extractDlqFileInfo } = require("./dlq-utils");
-const { requeueDlqMessages } = require("./dlq-requeue");
+const { requeueDlqMessages, requeueAllDlqMessages } = require("./dlq-requeue");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -820,6 +820,24 @@ app.post("/api/dlq/requeue", async (req, res) => {
   }
 });
 
+// DLQ requeue-all endpoint
+app.post("/api/dlq/requeue-all", async (_, res) => {
+  try {
+    const result = await requeueAllDlqMessages({
+      bigquery,
+      storage,
+      config: CONFIG,
+      location: BQ_LOCATION,
+      requeueSource: "admin-console",
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error("DLQ requeue-all error:", error);
+    return res.status(500).json({ error: error?.message || "Internal error" });
+  }
+});
+
 // DLQ delete endpoint
 app.post("/api/dlq/delete", async (req, res) => {
   try {
@@ -1354,6 +1372,7 @@ wss.on("connection", (socket, request) => {
         "dlq.count": { method: "GET", path: "/api/dlq/count" },
         "dlq.summary": { method: "GET", path: "/api/dlq/summary" },
         "dlq.requeue": { method: "POST", path: "/api/dlq/requeue" },
+        "dlq.requeueAll": { method: "POST", path: "/api/dlq/requeue-all" },
         "dlq.delete": { method: "POST", path: "/api/dlq/delete" },
         "process.run": { method: "POST", path: "/api/process/run" },
       };

@@ -1597,6 +1597,28 @@
       }
     });
 
+    document.getElementById('dlp-requeue-all').addEventListener('click', async () => {
+      const totalCount = Number(state.dlpPaging.total || 0);
+      if (totalCount <= 0) return;
+      if (!confirm(`Retry all ${totalCount} failed queue item(s)?`)) return;
+
+      const btn = document.getElementById('dlp-requeue-all');
+      btn.disabled = true;
+      try {
+        const result = await wsCall('dlq.requeueAll', {});
+        await refreshDlp({ resetOffset: true });
+        alert(
+          `Requeued ${result.requeuedCount || 0} file(s), ` +
+          `deleted ${result.deletedMessageCount || 0} message(s), ` +
+          `failed ${result.failedFileCount || 0} file(s).`,
+        );
+      } catch (error) {
+        alert(`Requeue all failed: ${formatRequestError(error)}`);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
     document.getElementById('dlp-delete').addEventListener('click', async () => {
       const messageIds = [...document.querySelectorAll('.dlq-check:checked')].map((c) => c.value);
       if (!messageIds.length) return;
