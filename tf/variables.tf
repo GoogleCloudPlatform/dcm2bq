@@ -70,6 +70,12 @@ variable "debug_mode" {
   default     = false
 }
 
+variable "dcm2bq_max_instance_count" {
+  description = "Maximum number of Cloud Run instances for the dcm2bq service"
+  type        = number
+  default     = 100
+}
+
 variable "create_embedding_input" {
   description = "Create embedding input files (extract images/text to GCS)"
   type        = bool

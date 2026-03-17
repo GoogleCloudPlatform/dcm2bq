@@ -371,6 +371,7 @@ describe('Integration Tests', () => {
         { path: '/api/instances/delete', method: 'POST' },
         { path: '/api/studies/reprocess', method: 'POST' },
         { path: '/api/dlq/requeue', method: 'POST' },
+        { path: '/api/dlq/requeue-all', method: 'POST' },
         { path: '/api/dlq/delete', method: 'POST' },
         { path: '/api/process/run', method: 'POST' },
       ];

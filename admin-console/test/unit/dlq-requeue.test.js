@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const { requeueDlqMessages } = require('../../backend/src/dlq-requeue');
+const { requeueDlqMessages, requeueAllDlqMessages } = require('../../backend/src/dlq-requeue');
 
 describe('requeueDlqMessages', () => {
   it('requeues unique files and only deletes successful message ids', async () => {
@@ -131,5 +131,46 @@ describe('requeueDlqMessages', () => {
       errors: [],
     });
     assert.equal(queryCount, 0);
+  });
+});
+
+describe('requeueAllDlqMessages', () => {
+  it('returns zero counts when the DLQ has no rows', async () => {
+    const queryCalls = [];
+    const bigquery = {
+      async query(request) {
+        queryCalls.push(request);
+        return [[]];
+      },
+    };
+
+    const storage = {
+      bucket() {
+        throw new Error('storage should not be used');
+      },
+    };
+
+    const result = await requeueAllDlqMessages({
+      bigquery,
+      storage,
+      config: {
+        projectId: 'proj',
+        datasetId: 'dataset',
+        deadLetterTableId: 'dead_letter',
+      },
+      location: 'US',
+    });
+
+    assert.deepEqual(result, {
+      requestedMessageCount: 0,
+      matchedMessageCount: 0,
+      requeuedCount: 0,
+      deletedMessageCount: 0,
+      failedFileCount: 0,
+      parseErrorCount: 0,
+      errors: [],
+    });
+    assert.equal(queryCalls.length, 1);
+    assert.ok(/^\s*SELECT/i.test(queryCalls[0].query));
   });
 });

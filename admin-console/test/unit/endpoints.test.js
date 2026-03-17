@@ -197,6 +197,22 @@ describe('HTTP Endpoints Specification', () => {
       });
     });
 
+    describe('POST /api/dlq/requeue-all', () => {
+      it('should return requeue-all counters', () => {
+        const response = {
+          requestedMessageCount: 7,
+          requeuedCount: 5,
+          deletedMessageCount: 5,
+          failedFileCount: 2,
+        };
+
+        assert.ok(typeof response.requestedMessageCount === 'number');
+        assert.ok(typeof response.requeuedCount === 'number');
+        assert.ok(typeof response.deletedMessageCount === 'number');
+        assert.ok(typeof response.failedFileCount === 'number');
+      });
+    });
+
     describe('POST /api/dlq/delete', () => {
       it('should return deleted count', () => {
         const response = { deletedCount: 3 };
@@ -438,6 +454,7 @@ describe('HTTP Endpoints Specification', () => {
         'dlq.count': '/api/dlq/count',
         'dlq.summary': '/api/dlq/summary',
         'dlq.requeue': '/api/dlq/requeue',
+        'dlq.requeueAll': '/api/dlq/requeue-all',
         'dlq.delete': '/api/dlq/delete',
         'process.run': '/api/process/run',
       };

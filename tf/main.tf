@@ -350,6 +350,10 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
     timeout                          = "3600s" # 1 hour timeout for processing large archive files
     max_instance_request_concurrency = 16      # Process up to 16 files concurrently per instance
 
+    scaling {
+      max_instance_count = var.dcm2bq_max_instance_count
+    }
+
     containers {
       image = var.dcm2bq_image
       resources {
@@ -367,10 +371,6 @@ resource "google_cloud_run_v2_service" "dcm2bq_service" {
         value = var.debug_mode ? "true" : "false"
       }
     }
-  }
-
-  scaling {
-    max_instance_count = 100
   }
 
 }
