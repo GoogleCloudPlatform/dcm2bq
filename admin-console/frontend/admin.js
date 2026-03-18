@@ -1528,6 +1528,12 @@
       if (nextBtn) nextBtn.disabled = showingEnd >= total;
     }
 
+    function setDlpSummaryStatus(text) {
+      const summaryNode = document.getElementById('dlp-summary');
+      if (!summaryNode) return;
+      summaryNode.textContent = String(text || '');
+    }
+
     async function refreshDlp(options = {}) {
       const { resetOffset = false, overrideOffset = null } = options;
       const limit = state.dlpPaging.limit;
@@ -1605,14 +1611,55 @@
       const btn = document.getElementById('dlp-requeue-all');
       btn.disabled = true;
       try {
-        const result = await wsCall('dlq.requeueAll', {});
+        setDlpSummaryStatus(`Retrying all failed queue items (0/${totalCount})...`);
+        const result = await wsCall('dlq.requeueAll', {}, {
+          onProgress: (message) => {
+            const detail = message?.detail || {};
+            if (!detail || typeof detail !== 'object') return;
+
+            const totalFiles = Number(detail.totalFiles || 0);
+            const processedFiles = Number(detail.processedFiles || 0);
+            const requeuedCount = Number(detail.requeuedCount || 0);
+            const failedFileCount = Number(detail.failedFileCount || 0);
+            const deletedMessageCount = Number(detail.deletedMessageCount || 0);
+
+            if (detail.stage === 'started') {
+              setDlpSummaryStatus(`Retrying all failed queue items (0/${totalFiles})...`);
+              return;
+            }
+
+            if (detail.stage === 'item') {
+              const statusLabel = detail.status === 'failed' ? 'failed' : 'requeued';
+              setDlpSummaryStatus(
+                `Processed ${processedFiles}/${totalFiles} files · ` +
+                `Requeued: ${requeuedCount} · Failed: ${failedFileCount} · ` +
+                `Deleted messages: ${deletedMessageCount} · Last: ${statusLabel}`,
+              );
+              return;
+            }
+
+            if (detail.stage === 'completed') {
+              setDlpSummaryStatus(
+                `Completed ${processedFiles}/${totalFiles} files · ` +
+                `Requeued: ${requeuedCount} · Failed: ${failedFileCount} · ` +
+                `Deleted messages: ${deletedMessageCount}`,
+              );
+            }
+          },
+        });
         await refreshDlp({ resetOffset: true });
+        setDlpSummaryStatus(
+          `Retry all finished · Requeued: ${result.requeuedCount || 0} · ` +
+          `Failed: ${result.failedFileCount || 0} · ` +
+          `Deleted messages: ${result.deletedMessageCount || 0}`,
+        );
         alert(
           `Requeued ${result.requeuedCount || 0} file(s), ` +
           `deleted ${result.deletedMessageCount || 0} message(s), ` +
           `failed ${result.failedFileCount || 0} file(s).`,
         );
       } catch (error) {
+        setDlpSummaryStatus(`Retry all failed: ${formatRequestError(error)}`);
         alert(`Requeue all failed: ${formatRequestError(error)}`);
       } finally {
         btn.disabled = false;
