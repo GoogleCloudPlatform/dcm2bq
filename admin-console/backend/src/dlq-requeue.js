@@ -12,6 +12,21 @@ function buildEmptyRequeueResult(requestedMessageCount = 0) {
   };
 }
 
+async function emitProgress(onProgress, detail) {
+  if (typeof onProgress !== "function") return;
+  try {
+    await onProgress(detail);
+  } catch (_) {
+    // Progress callback failures should not fail requeue operations.
+  }
+}
+
+function resolveDeleteBatchSize() {
+  const raw = Number.parseInt(process.env.ADMIN_DLQ_REQUEUE_DELETE_BATCH_SIZE || "25", 10);
+  if (!Number.isFinite(raw)) return 25;
+  return Math.min(Math.max(raw, 1), 1000);
+}
+
 async function applyRequeueFromRows({
   bigquery,
   storage,
@@ -21,9 +36,18 @@ async function applyRequeueFromRows({
   requestedMessageCount,
   requeueSource,
   now,
+  onProgress,
 }) {
   const matchedRows = Array.isArray(rows) ? rows : [];
   if (matchedRows.length === 0) {
+    await emitProgress(onProgress, {
+      stage: "completed",
+      totalFiles: 0,
+      processedFiles: 0,
+      requeuedCount: 0,
+      failedFileCount: 0,
+      deletedMessageCount: 0,
+    });
     return buildEmptyRequeueResult(requestedMessageCount);
   }
   const files = new Map();
@@ -55,20 +79,58 @@ async function applyRequeueFromRows({
 
   let requeuedCount = 0;
   let failedFileCount = 0;
-  const messageIdsToDelete = [];
+  let deletedMessageCount = 0;
+  const deleteBatchSize = resolveDeleteBatchSize();
+  const pendingDeleteMessageIds = [];
   const orderedFiles = Array.from(files.entries()).sort((a, b) => b[1].publishTime - a[1].publishTime);
+  const dlqTable = `\`${config.projectId}.${config.datasetId}.${config.deadLetterTableId}\``;
+  const totalFiles = orderedFiles.length;
+  let processedFiles = 0;
+
+  const flushPendingDeletes = async ({ force = false } = {}) => {
+    if (pendingDeleteMessageIds.length === 0) return;
+    if (!force && pendingDeleteMessageIds.length < deleteBatchSize) return;
+
+    const messageIds = pendingDeleteMessageIds.splice(0, pendingDeleteMessageIds.length);
+    const deleteQuery = `
+      DELETE FROM ${dlqTable}
+      WHERE message_id IN UNNEST(@messageIds)
+    `;
+
+    try {
+      await bigquery.query({
+        query: deleteQuery,
+        location,
+        params: { messageIds },
+      });
+      deletedMessageCount += messageIds.length;
+      await emitProgress(onProgress, {
+        stage: "checkpoint",
+        deletedBatchCount: messageIds.length,
+        totalFiles,
+        processedFiles,
+        requeuedCount,
+        failedFileCount,
+        deletedMessageCount,
+      });
+    } catch (error) {
+      pendingDeleteMessageIds.unshift(...messageIds);
+      errors.push(`Failed to delete ${messageIds.length} DLQ message(s): ${error?.message || "Unknown error"}`);
+    }
+  };
+
+  await emitProgress(onProgress, {
+    stage: "started",
+    totalFiles,
+    processedFiles,
+    requeuedCount,
+    failedFileCount,
+    deletedMessageCount,
+  });
 
   for (const [path, entry] of orderedFiles) {
     try {
       const file = storage.bucket(entry.fileInfo.bucket).file(entry.fileInfo.name);
-      const [exists] = await file.exists();
-
-      if (!exists) {
-        failedFileCount++;
-        errors.push(`File not found for requeue: gs://${path}`);
-        continue;
-      }
-
       await file.setMetadata({
         metadata: {
           "dcm2bq-reprocess": now(),
@@ -77,33 +139,53 @@ async function applyRequeueFromRows({
       });
 
       requeuedCount++;
-      messageIdsToDelete.push(...entry.messageIds);
+      pendingDeleteMessageIds.push(...entry.messageIds);
+      await flushPendingDeletes({ force: false });
+      processedFiles++;
+      await emitProgress(onProgress, {
+        stage: "item",
+        status: "success",
+        filePath: `gs://${path}`,
+        totalFiles,
+        processedFiles,
+        requeuedCount,
+        failedFileCount,
+        deletedMessageCount,
+      });
     } catch (error) {
       failedFileCount++;
       errors.push(`Failed to requeue gs://${path}: ${error?.message || "Unknown error"}`);
+      processedFiles++;
+      await emitProgress(onProgress, {
+        stage: "item",
+        status: "failed",
+        filePath: `gs://${path}`,
+        error: error?.message || "Unknown error",
+        totalFiles,
+        processedFiles,
+        requeuedCount,
+        failedFileCount,
+        deletedMessageCount,
+      });
     }
   }
 
-  const dlqTable = `\`${config.projectId}.${config.datasetId}.${config.deadLetterTableId}\``;
+  await flushPendingDeletes({ force: true });
 
-  if (messageIdsToDelete.length > 0) {
-    const deleteQuery = `
-      DELETE FROM ${dlqTable}
-      WHERE message_id IN UNNEST(@messageIds)
-    `;
-
-    await bigquery.query({
-      query: deleteQuery,
-      location,
-      params: { messageIds: messageIdsToDelete },
-    });
-  }
+  await emitProgress(onProgress, {
+    stage: "completed",
+    totalFiles,
+    processedFiles,
+    requeuedCount,
+    failedFileCount,
+    deletedMessageCount,
+  });
 
   return {
     requestedMessageCount,
     matchedMessageCount: matchedRows.length,
     requeuedCount,
-    deletedMessageCount: messageIdsToDelete.length,
+    deletedMessageCount,
     failedFileCount,
     parseErrorCount,
     errors,
@@ -118,6 +200,7 @@ async function requeueDlqMessages({
   messageIds,
   requeueSource = "admin-console",
   now = () => new Date().toISOString(),
+  onProgress,
 }) {
   const normalizedMessageIds = Array.isArray(messageIds)
     ? messageIds.map((id) => String(id || "").trim()).filter(Boolean)
@@ -154,6 +237,7 @@ async function requeueDlqMessages({
     requestedMessageCount: normalizedMessageIds.length,
     requeueSource,
     now,
+    onProgress,
   });
 }
 
@@ -164,6 +248,7 @@ async function requeueAllDlqMessages({
   location,
   requeueSource = "admin-console",
   now = () => new Date().toISOString(),
+  onProgress,
 }) {
   const dlqTable = `\`${config.projectId}.${config.datasetId}.${config.deadLetterTableId}\``;
   const selectQuery = `
@@ -191,6 +276,7 @@ async function requeueAllDlqMessages({
     requestedMessageCount,
     requeueSource,
     now,
+    onProgress,
   });
 }
 

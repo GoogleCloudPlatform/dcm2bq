@@ -1343,6 +1343,26 @@ wss.on("connection", (socket, request) => {
         return;
       }
 
+      if (action === "dlq.requeueAll") {
+        const result = await requeueAllDlqMessages({
+          bigquery,
+          storage,
+          config: CONFIG,
+          location: BQ_LOCATION,
+          requeueSource: "admin-console",
+          onProgress: async (detail) => {
+            await sendJson("progress", {
+              stage: "dlq_requeue_all",
+              detail,
+            }, { action });
+          },
+        });
+
+        const durationMs = Number(formatDurationMs(startNs).toFixed(1));
+        await sendJson("result", { data: result }, { status: "ok", durationMs, action });
+        return;
+      }
+
       // WebSocket proxy pattern: proxy to HTTP endpoints
       // Map WebSocket actions to HTTP routes
       const routes = {
