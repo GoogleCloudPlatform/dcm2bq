@@ -85,6 +85,9 @@
     .muted { color: var(--muted); font-size: 12px; }
     .truncate { display: inline-block; max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
     .truncate-sm { display: inline-block; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+    .dlq-path-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+    .dlq-gcs-path { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+    .dlq-copy-btn { font-size: 14px; padding: 2px 4px; }
     .cell-ellipsis { display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .studies-header-row > div,
     .studies-summary-row > div { min-width: 0; overflow: hidden; }
@@ -211,6 +214,15 @@
     #dlp > #dlp-summary { position: sticky; top: 60px; z-index: 10; background: var(--bg); margin: 0; padding: 8px 12px; }
     #dlp > div { overflow: auto; }
     #dlp .dlp-table { border-collapse: collapse; }
+    #dlp .dlp-table { table-layout: fixed; }
+    #dlp .dlp-table th:nth-child(1),
+    #dlp .dlp-table td:nth-child(1) { width: 40px; }
+    #dlp .dlp-table th:nth-child(2),
+    #dlp .dlp-table td:nth-child(2) { width: 140px; }
+    #dlp .dlp-table th:nth-child(3),
+    #dlp .dlp-table td:nth-child(3) { width: 220px; }
+    #dlp .dlp-table th:nth-child(5),
+    #dlp .dlp-table td:nth-child(5) { width: 140px; }
     #dlp .dlp-table thead { background: var(--surface-alt); }
     #dlp .row { margin-bottom: 14px; }
     #dlp .dlp-table { font-size: 15px; width: 100%; border-collapse: collapse; }
