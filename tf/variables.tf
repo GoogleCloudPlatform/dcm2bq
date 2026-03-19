@@ -73,7 +73,25 @@ variable "debug_mode" {
 variable "dcm2bq_max_instance_count" {
   description = "Maximum number of Cloud Run instances for the dcm2bq service"
   type        = number
-  default     = 100
+  default     = 50
+}
+
+variable "dcm2bq_concurrency" {
+  description = "Maximum number of simultaneous requests per dcm2bq Cloud Run instance"
+  type        = number
+  default     = 32
+}
+
+variable "dcm2bq_memory" {
+  description = "Memory limit for each dcm2bq Cloud Run instance"
+  type        = string
+  default     = "8Gi"
+}
+
+variable "dcm2bq_cpu" {
+  description = "CPU limit for each dcm2bq Cloud Run instance"
+  type        = string
+  default     = "2"
 }
 
 variable "create_embedding_input" {

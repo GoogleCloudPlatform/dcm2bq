@@ -1507,10 +1507,37 @@
           <td><input type="checkbox" class="dlq-check" value="${item.messageId}" /></td>
           <td>${item.messageId || ''}</td>
           <td>${item.publishTime?.value || item.publishTime || ''}</td>
-          <td>${item.gcsPath ? `<span class="truncate" title="${escapeHtml(item.gcsPath)}">${escapeHtml(item.gcsPath)}</span>` : '<span class="muted">unparsed</span>'}</td>
+          <td>
+            ${item.gcsPath
+    ? `<div class="dlq-path-cell"><span class="truncate dlq-gcs-path" title="${escapeHtml(item.gcsPath)}">${escapeHtml(item.gcsPath)}</span><button class="icon-btn dlq-copy-btn" data-action="copy-gcs-path" title="Copy GCS path" aria-label="Copy GCS path"><i class="fa-solid fa-copy" aria-hidden="true"></i></button></div>`
+    : '<span class="muted">unparsed</span>'}
+          </td>
           <td>${item.generation || ''}</td>
         </tr>
       `).join('');
+    }
+
+    function setDlqCopyButtonState(button, stateName = 'default') {
+      const icon = button?.querySelector('i');
+      if (!button || !icon) return;
+
+      if (stateName === 'copied') {
+        button.title = 'Copied!';
+        button.setAttribute('aria-label', 'Copied');
+        icon.className = 'fa-solid fa-check';
+        return;
+      }
+
+      if (stateName === 'failed') {
+        button.title = 'Copy failed';
+        button.setAttribute('aria-label', 'Copy failed');
+        icon.className = 'fa-solid fa-triangle-exclamation';
+        return;
+      }
+
+      button.title = 'Copy GCS path';
+      button.setAttribute('aria-label', 'Copy GCS path');
+      icon.className = 'fa-solid fa-copy';
     }
 
     function renderDlpPaging(summary = {}) {
@@ -1585,6 +1612,30 @@
     });
     document.getElementById('select-all-dlp').addEventListener('change', (evt) => {
       document.querySelectorAll('.dlq-check').forEach((c) => c.checked = evt.target.checked);
+    });
+
+    document.getElementById('dlp-body').addEventListener('click', async (evt) => {
+      const button = evt.target.closest('button[data-action="copy-gcs-path"]');
+      if (!button) return;
+      evt.preventDefault();
+
+      const row = button.closest('tr');
+      const pathNode = row?.querySelector('.dlq-gcs-path');
+      const gcsPath = pathNode?.textContent?.trim();
+      if (!gcsPath) return;
+
+      button.disabled = true;
+      try {
+        await navigator.clipboard.writeText(gcsPath);
+        setDlqCopyButtonState(button, 'copied');
+      } catch (_) {
+        setDlqCopyButtonState(button, 'failed');
+      } finally {
+        setTimeout(() => {
+          button.disabled = false;
+          setDlqCopyButtonState(button, 'default');
+        }, 1600);
+      }
     });
 
     document.getElementById('dlp-requeue').addEventListener('click', async () => {
