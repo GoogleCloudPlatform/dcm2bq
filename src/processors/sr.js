@@ -16,6 +16,16 @@
 
 const { createTextInstance } = require("./text");
 
+function asArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    return [value];
+  }
+  return [];
+}
+
 /**
  * Extracts text from a structured report JSON object.
  * Handles various DICOM SR content item types and relationships according to DICOM PS3.3.
@@ -50,19 +60,19 @@ function getTextFromSR(metadata, options = {}) {
         }
         break;
       case "NUM":
-        if (includeNumeric && item.MeasuredValueSequence) {
-          for (const mv of item.MeasuredValueSequence) {
+        if (includeNumeric) {
+          for (const mv of asArray(item.MeasuredValueSequence)) {
             if (mv.NumericValue) {
               const value = mv.NumericValue;
-              const units = mv.MeasurementUnitsCodeSequence?.[0]?.CodeMeaning || '';
+              const units = asArray(mv.MeasurementUnitsCodeSequence)[0]?.CodeMeaning || '';
               textParts.push(`${value} ${units}`.trim());
             }
           }
         }
         break;
       case "CODE":
-        if (includeCodes && item.ConceptCodeSequence) {
-          const code = item.ConceptCodeSequence[0];
+        if (includeCodes) {
+          const code = asArray(item.ConceptCodeSequence)[0];
           if (code?.CodeMeaning) {
             textParts.push(code.CodeMeaning.trim());
           }
@@ -95,8 +105,8 @@ function getTextFromSR(metadata, options = {}) {
         break;
       case "CONTAINER":
         // Containers may have a concept name that provides context
-        if (includeCodes && item.ConceptNameCodeSequence) {
-          const concept = item.ConceptNameCodeSequence[0];
+        if (includeCodes) {
+          const concept = asArray(item.ConceptNameCodeSequence)[0];
           if (concept?.CodeMeaning) {
             textParts.push(concept.CodeMeaning.trim());
           }
@@ -105,12 +115,13 @@ function getTextFromSR(metadata, options = {}) {
     }
 
     // Handle relationships and nested content
-    if (Array.isArray(item.ContentSequence)) {
+    const contentItems = asArray(item.ContentSequence);
+    if (contentItems.length > 0) {
       // Process each content item in the sequence
-      for (const child of item.ContentSequence) {
+      for (const child of contentItems) {
         // Add relationship context if available
-        if (includeCodes && child.RelationshipType && child.ConceptNameCodeSequence) {
-          const concept = child.ConceptNameCodeSequence[0];
+        if (includeCodes && child.RelationshipType) {
+          const concept = asArray(child.ConceptNameCodeSequence)[0];
           if (concept?.CodeMeaning) {
             textParts.push(concept.CodeMeaning.trim());
           }
@@ -121,10 +132,8 @@ function getTextFromSR(metadata, options = {}) {
   }
 
   // Start processing from the root content sequence
-  if (Array.isArray(metadata.ContentSequence)) {
-    for (const item of metadata.ContentSequence) {
-      processContentItem(item);
-    }
+  for (const item of asArray(metadata.ContentSequence)) {
+    processContentItem(item);
   }
 
   // Filter out empty strings and join with newlines
