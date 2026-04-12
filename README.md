@@ -66,17 +66,18 @@ Before running vector searches, ensure you have created the embedding model and 
 
 ### Dependencies
 
-For image processing and vector embedding generation, `dcm2bq` relies on two external toolkits that must be installed in the execution environment:
+For DICOM parsing and image rendering, `dcm2bq` relies on the external `dcmnorm` CLI binary in the execution environment.
 
--   **DCMTK**: A collection of libraries and applications for working with DICOM files.
--   **GDCM**: A library for reading and writing DICOM files, used here for image format conversion.
+If you use MPEG4 rendering via dcmnorm, `ffmpeg` must also be installed and available on `PATH`.
 
-These are included in the provided Docker image. If you are building from source or running the CLI locally, you will need to install them manually.
+It is included in the provided Docker image. If you are building from source or running the CLI locally, you will need to install it manually.
 
-**On Debian/Ubuntu:**
+**On Debian/Ubuntu/macOS/Linux (recommended):**
 ```bash
-sudo apt-get update && sudo apt-get install -y dcmtk gdcm-tools
+./helpers/install-dcmnorm.sh /usr/local/bin
 ```
+
+You can pin a version by passing a second argument, for example `./helpers/install-dcmnorm.sh /usr/local/bin 0.1.3`.
 
 ### Docker
 
@@ -91,7 +92,7 @@ docker pull jasonklotzer/dcm2bq:latest
 To use the CLI, you can install it from the source code.
 
 1.  Ensure you have `node` and `npm` installed. We recommend using nvm.
-2.  Ensure you have installed the required [Dependencies](#dependencies).
+2.  Ensure you have installed the required [Dependencies](#dependencies) including `dcmnorm`.
 3.  Clone the repository:
     ```bash
     git clone https://github.com/googlecloudplatform/dcm2bq.git

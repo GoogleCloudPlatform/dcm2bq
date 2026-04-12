@@ -21,7 +21,6 @@
     "adm-zip": "^0.5.16",
     "ajv": "^8.17.1",
     "commander": "^14.0.0",
-    "dicom-parser": "^1.8.21",
     "express": "^5.1.0",
     "google-auth-library": "^10.3.0",
     "pdf-parse": "^2.4.5",

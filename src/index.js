@@ -21,7 +21,7 @@
 const url = require("url");
 const fs = require("fs");
 const { Command } = require("commander");
-const { DicomFile, DicomInMemory } = require("./dicomtojson");
+const { DicomFile } = require("./dicomtojson");
 const config = require("./config");
 const { HttpServer } = require("./server");
 const package = require("../package.json");
@@ -55,14 +55,14 @@ program
     } else if (gcpConfig.embedding?.input?.summarizeText) {
       delete gcpConfig.embedding.input.summarizeText;
     }
-    const buffer = fs.readFileSync(fileName);
-    const reader = new DicomInMemory(buffer);
+    const fileUrl = url.pathToFileURL(fileName);
+    const reader = new DicomFile(fileUrl);
     const metadata = reader.toJson(jsonOutput);
     let outFile = options.output;
     const sopClassUid = metadata?.SOPClassUID;
 
     if (isImage(sopClassUid)) {
-      const result = await processImage(metadata, buffer);
+      const result = await processImage(metadata, fileName);
       if (result && result.image && result.image.bytesBase64Encoded) {
         const jpgBuffer = Buffer.from(result.image.bytesBase64Encoded, "base64");
         if (!outFile) outFile = fileName.replace(/\.[^.]+$/, ".jpg");
@@ -73,6 +73,7 @@ program
       console.error("Could not render image from the DICOM file.");
       process.exit(1);
     } else if (isPdf(sopClassUid)) {
+      const buffer = fs.readFileSync(fileName);
       const result = await processPdf(metadata, buffer, requireEmbeddingCompatible);
       if (result && result.text) {
         if (!outFile) outFile = fileName.replace(/\.[^.]+$/, ".txt");
@@ -104,8 +105,8 @@ program
   .argument("<inputFile>", "file to parse")
   .action((fileName) => {
     const fileUrl = new URL(url.pathToFileURL(fileName));
-    const { dicomParser, jsonOutput } = config.get();
-    const reader = new DicomFile(fileUrl, dicomParser);
+    const { jsonOutput } = config.get();
+    const reader = new DicomFile(fileUrl);
     const json = reader.toJson(jsonOutput);
     console.log(JSON.stringify(json));
   });
@@ -116,10 +117,10 @@ program
   .argument("<inputFile>", "file to parse")
   .action(async (fileName) => {
     const { jsonOutput } = config.get();
-    const buffer = fs.readFileSync(fileName);
-    const reader = new DicomInMemory(buffer);
+    const fileUrl = url.pathToFileURL(fileName);
+    const reader = new DicomFile(fileUrl);
     const json = reader.toJson(jsonOutput);
-    const embedding = await createVectorEmbedding(json, buffer);
+    const embedding = await createVectorEmbedding(json, fileName);
     console.log(JSON.stringify(embedding));
   });
 

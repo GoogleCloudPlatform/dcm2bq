@@ -28,7 +28,13 @@ async function downloadToMemory(bucketId, objectId) {
   return response[0]; // First item
 }
 
+async function downloadToFile(bucketId, objectId, destinationPath) {
+  await storage.bucket(bucketId).file(objectId).download({ destination: destinationPath });
+  return destinationPath;
+}
+
 module.exports = {
   createUriPath,
   downloadToMemory,
+  downloadToFile,
 };

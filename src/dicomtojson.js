@@ -15,166 +15,170 @@
  */
 
 const fs = require("fs");
-const dicomParser = require("dicom-parser");
+const os = require("os");
+const path = require("path");
+const { fileURLToPath } = require("url");
+const { execFileSync } = require("child_process");
 
-const BIN_VR_LIST = ["OB", "OD", "OF", "OW", "UN"];
-const NUM_VR_LIST = ["AT", "FL", "FD", "SL", "SS", "UL", "US"];
-const STR_VR_LIST = ["AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "PN", "SH", "ST", "TM", "UI", "UT"];
-const BYTES_PER_VR = {
-  AT: { bytes: 4, type: "uint32" },
-  FL: { bytes: 4, type: "float" },
-  FD: { bytes: 8, type: "double" },
-  SL: { bytes: 4, type: "int32" },
-  SS: { bytes: 2, type: "int16" },
-  UL: { bytes: 4, type: "uint32" },
-  US: { bytes: 2, type: "uint16" },
-};
+const DCMNORM_PATH = process.env.DCM2BQ_DCMNORM_PATH || "dcmnorm";
 
-// Lazy initialize
-let tagLookupMap;
+const FILE_META_HEADER_KEYS = new Set([
+  "FileMetaInformationGroupLength",
+  "FileMetaInformationVersion",
+  "MediaStorageSOPClassUID",
+  "MediaStorageSOPInstanceUID",
+  "TransferSyntaxUID",
+  "ImplementationClassUID",
+  "ImplementationVersionName",
+  "SourceApplicationEntityTitle",
+  "SendingApplicationEntityTitle",
+  "ReceivingApplicationEntityTitle",
+  "PrivateInformationCreatorUID",
+  "PrivateInformation",
+]);
 
-function normalizeTag(tag) {
-  if (/x[0-9a-f]{8}/.test(tag)) {
-    return tag.substring(1).toLowerCase();
-  } else if (/\([0-9A-F],[0-9A-F]\)/.test(tag)) {
-    return `${tag.substring(1, 5).toLowerCase()}${tag.substring(5, 9).toLowerCase()}`;
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseDicomFileWithDcmnorm(inputPath) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm2bq-parse-"));
+  const outputPath = path.join(tempDir, "output.json");
+
+  try {
+    execFileSync(DCMNORM_PATH, [inputPath, outputPath, "--format", "flat", "--bulk-data", "uri"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    return JSON.parse(fs.readFileSync(outputPath, "utf8"));
+  } catch (error) {
+    const stderr = error && error.stderr ? String(error.stderr).trim() : "";
+    const detail = stderr ? `: ${stderr}` : "";
+    throw new Error(`Failed to parse DICOM with dcmnorm${detail}`);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
-  return tag;
 }
 
-function lookupTag(tag) {
-  if (!tagLookupMap) {
-    tagLookupMap = require("../tag-lookup.min.json");
+function isPrivateTagKey(key) {
+  if (!/^x[0-9a-f]{8}$/i.test(key)) {
+    return false;
   }
-  const normTag = normalizeTag(tag);
-  return tagLookupMap[normTag];
+  const group = parseInt(key.substring(1, 5), 16);
+  return Number.isInteger(group) && group % 2 === 1;
 }
 
-function isBinaryVR(vr) {
-  return BIN_VR_LIST.includes(vr);
+function hasBulkDataUri(value) {
+  if (Array.isArray(value)) {
+    return value.some((item) => hasBulkDataUri(item));
+  }
+  if (!isPlainObject(value)) {
+    return false;
+  }
+  if (typeof value.BulkDataURI === "string") {
+    return true;
+  }
+  return Object.values(value).some((item) => hasBulkDataUri(item));
 }
 
-function isNumericVR(vr) {
-  return NUM_VR_LIST.includes(vr);
-}
+function applyBulkDataRoot(value, bulkDataRoot) {
+  if (!bulkDataRoot) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => applyBulkDataRoot(item, bulkDataRoot));
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
 
-function isSequenceVR(vr) {
-  return vr === "SQ";
-}
-
-function isStringVR(vr) {
-  return STR_VR_LIST.includes(vr);
-}
-
-function isPrivateElem(elem) {
-  return dicomParser.isPrivateTag(elem.tag);
-}
-
-function isGroupLength(elem) {
-  return /0000$/.test(elem.tag);
-}
-
-function isMetaElem(elem) {
-  return elem.tag <= "x0002ffff";
-}
-
-function isEmptyElem(elem) {
-  return elem.length === 0;
-}
-
-function getVR(elem) {
-  return elem.vr || (lookupTag(elem.tag) || { vr: "UN" }).vr;
-}
-
-function getValues(rootObj, outputOptions) {
-  const jsonObj = {};
-  const dataset = rootObj.elements;
-  const keys = Object.keys(dataset).sort();
-  keys.forEach((key) => {
-    const elem = dataset[key];
-    if (excludeElement(outputOptions, elem)) return;
-    let normKey = normalizeTag(key);
-    if (outputOptions.useCommonNames) {
-      const tag = lookupTag(normKey);
-      normKey = tag ? tag.keyword : normKey;
+  const out = {};
+  for (const [key, itemValue] of Object.entries(value)) {
+    if (key === "BulkDataURI" && typeof itemValue === "string" && itemValue.startsWith("?")) {
+      out[key] = `${bulkDataRoot}${itemValue}`;
+    } else {
+      out[key] = applyBulkDataRoot(itemValue, bulkDataRoot);
     }
-    jsonObj[normKey] = getValue(rootObj, elem, outputOptions);
-  });
-  return jsonObj;
+  }
+  return out;
 }
 
-function getValue(rootObj, elem, outputOptions) {
-  let value = null;
-  const vr = getVR(elem);
-  if (isStringVR(vr)) {
-    value = rootObj.string(elem.tag);
-  } else if (isNumericVR(vr)) {
-    value = [];
-    const type = BYTES_PER_VR[vr].type;
-    const items = elem.length / BYTES_PER_VR[vr].bytes;
-    for (let i = 0; i < items; i++) {
-      value.push(rootObj[type](elem.tag, i));
+function filterByOutputOptions(json, outputOptions = {}) {
+  const out = {};
+
+  for (const [key, rawValue] of Object.entries(json)) {
+    if (outputOptions.ignoreGroupLength && /GroupLength$/.test(key)) {
+      continue;
     }
+    if (outputOptions.ignoreMetaHeader && FILE_META_HEADER_KEYS.has(key)) {
+      continue;
+    }
+    if (outputOptions.ignorePrivate && isPrivateTagKey(key)) {
+      continue;
+    }
+    if (outputOptions.ignoreEmpty && (rawValue === null || rawValue === "" || (Array.isArray(rawValue) && rawValue.length === 0))) {
+      continue;
+    }
+    if (outputOptions.ignoreBinary && hasBulkDataUri(rawValue)) {
+      continue;
+    }
+
+    let value = applyBulkDataRoot(rawValue, outputOptions.bulkDataRoot || "");
     if (!outputOptions.useArrayWithSingleValue && Array.isArray(value) && value.length === 1) {
       value = value[0];
     }
-  } else if (isBinaryVR(vr)) {
-    value = { BulkDataURI: `${outputOptions.bulkDataRoot || ""}?offset=${elem.dataOffset}&length=${elem.length}` };
-  } else if (isSequenceVR(vr)) {
-    value = [];
-    (elem.items || []).forEach((item) => {
-      const values = getValues(item.dataSet, outputOptions);
-      value.push(values);
-    });
+    out[key] = value;
   }
-  return value;
+
+  return out;
 }
 
-function excludeElement(outputOptions, elem) {
-  return (
-    (outputOptions.ignoreGroupLength && isGroupLength(elem)) ||
-    (outputOptions.ignorePrivate && isPrivateElem(elem)) ||
-    (outputOptions.ignoreEmpty && isEmptyElem(elem)) ||
-    (outputOptions.ignoreMetaHeader && isMetaElem(elem)) ||
-    (outputOptions.ignoreBinary && isBinaryVR(getVR(elem)))
-  );
-}
-
-class DicomInMemory {
-  constructor(buffer, parserOptions = {}) {
-    if (!(buffer instanceof Buffer)) {
-      throw "Expected instance of buffer for `buffer` parameter";
-    }
-    this.buffer = buffer;
-    this.parserOptions = parserOptions;
-  }
-
-  parse() {
-    return dicomParser.parseDicom(this.buffer, this.parserOptions);
-  }
-
-  toJson(outputOptions = {}) {
-    const rootObj = this.parse();
-    return getValues(rootObj, outputOptions);
-  }
-}
-
-class DicomFile extends DicomInMemory {
+class DicomFile {
   constructor(url, parserOptions = {}) {
     if (!(url instanceof URL)) {
       throw "Expected instance of URL for `url` parameter";
     }
-    const buffer = fs.readFileSync(url);
-    super(buffer, parserOptions);
+    this.url = url;
+    this.parserOptions = parserOptions;
+  }
+
+  parse() {
+    const inputPath = fileURLToPath(this.url);
+    return parseDicomFileWithDcmnorm(inputPath);
+  }
+
+  toJson(outputOptions = {}) {
+    const parsed = this.parse();
+    return filterByOutputOptions(parsed, outputOptions);
   }
 }
 
 function parseBulkDataUri(bulkDataUri) {
-  const match = bulkDataUri.match(/\?offset=(\d+)&length=(\d+)/);
-  if (match) {
-    return { offset: parseInt(match[1], 10), length: parseInt(match[2], 10) };
+  if (typeof bulkDataUri !== "string") {
+    return null;
   }
-  return null;
+
+  try {
+    const parsed = new URL(bulkDataUri, "https://dcm2bq.local");
+    const offset = Number.parseInt(parsed.searchParams.get("offset"), 10);
+    const length = Number.parseInt(parsed.searchParams.get("length"), 10);
+    if (Number.isFinite(offset) && Number.isFinite(length)) {
+      return { offset, length };
+    }
+  } catch (error) {
+    // Regex fallback for malformed URIs.
+  }
+
+  const offsetMatch = bulkDataUri.match(/[?&]offset=(\d+)/);
+  const lengthMatch = bulkDataUri.match(/[?&]length=(\d+)/);
+  if (!offsetMatch || !lengthMatch) {
+    return null;
+  }
+
+  return {
+    offset: Number.parseInt(offsetMatch[1], 10),
+    length: Number.parseInt(lengthMatch[1], 10),
+  };
 }
 
-module.exports = { DicomFile, DicomInMemory, parseBulkDataUri };
+module.exports = { DicomFile, parseBulkDataUri };

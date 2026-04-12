@@ -3,9 +3,10 @@
 */
 
 const assert = require("assert");
-const fs = require("fs");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const { createVectorEmbedding, doRequest } = require("../src/embeddings");
+const { DicomFile } = require("../src/dicomtojson");
 
 // Example: Describe a chest X-ray in text
 const anatomyText = "Black and white X-ray of a person's chest from the side. You can see the spine, ribs, and other bones.";
@@ -26,14 +27,11 @@ describe("Semantic comparison between text and image embeddings", function () {
   });
 
   it("should generate an embedding for the CR DICOM image", async () => {
-    const buffer = fs.readFileSync(crDicomPath);
-    // Extract real DICOM metadata using DicomInMemory
-    const { DicomInMemory } = require("../src/dicomtojson");
     const config = require("../src/config");
     const { jsonOutput } = config.get();
-    const reader = new DicomInMemory(buffer);
+    const reader = new DicomFile(pathToFileURL(crDicomPath));
     const metadata = reader.toJson(jsonOutput);
-    const result = await createVectorEmbedding(metadata, buffer);
+    const result = await createVectorEmbedding(metadata, crDicomPath);
     assert.ok(result, "Result should not be null");
     imageEmbedding = result.embedding;
     assert.ok(Array.isArray(imageEmbedding), "Image embedding should be an array");

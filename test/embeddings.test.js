@@ -16,9 +16,12 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const path = require("path");
+const { pathToFileURL } = require("url");
+const { spawnSync } = require("child_process");
 const glob = require("glob").globSync;
 const config = require("../src/config");
-const { DicomInMemory } = require("../src/dicomtojson");
+const { DicomFile } = require("../src/dicomtojson");
 const sinon = require("sinon");
 
 const testFiles = glob("./test/files/dcm/*.dcm");
@@ -36,7 +39,7 @@ describe("embeddings", () => {
     for (const file of testFiles) {
       const buffer = fs.readFileSync(file);
       try {
-        const reader = new DicomInMemory(buffer);
+        const reader = new DicomFile(pathToFileURL(path.resolve(file)));
         const metadata = reader.toJson({ useCommonNames: true });
         if (sopClassUids.includes(metadata.SOPClassUID)) {
           testData.push({ buffer, metadata, file });
@@ -141,6 +144,14 @@ describe("embeddings", () => {
     imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
     srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
     pdfTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
+  });
+
+  before(function () {
+    const dcmnormPath = process.env.DCM2BQ_DCMNORM_PATH || "dcmnorm";
+    const probe = spawnSync(dcmnormPath, ["--version"], { stdio: "ignore" });
+    if (probe.status !== 0) {
+      this.skip();
+    }
   });
 
   describe("processors", () => {

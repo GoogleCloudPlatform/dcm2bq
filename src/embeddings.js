@@ -15,6 +15,7 @@
  */
 
 const { Storage } = require("@google-cloud/storage");
+const fs = require("fs/promises");
 const { gcpConfig, jsonOutput } = require("./config").get();
 const { DEBUG_MODE, isRetryableError, createNonRetryableError } = require("./utils");
 const { processImage } = require("./processors/image");
@@ -151,14 +152,14 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
 }
 
 /**
- * Creates embedding input from DICOM metadata and buffer.
+ * Creates embedding input from DICOM metadata and DICOM input.
  * Extracts text or images and saves them to GCS.
  * @param {Object} metadata - DICOM metadata JSON
- * @param {Buffer} dicomBuffer - Raw DICOM file buffer
+ * @param {Buffer|string} dicomInput - Raw DICOM file buffer or local DICOM file path
  * @returns {Promise<{instance: Object, objectPath: string, objectSize: number, objectMimeType: string}|null>}
  * @throws {Error} If embedding input cannot be created or saved to GCS
  */
-async function createEmbeddingInput(metadata, dicomBuffer) {
+async function createEmbeddingInput(metadata, dicomInput) {
   if (!jsonOutput.useCommonNames) {
     throw createNonRetryableError("Embeddings generation code relies on jsonOutput.useCommonNames to be true in the configuration.");
   }
@@ -180,7 +181,7 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
   const instanceUid = metadata.SOPInstanceUID || "unknown";
 
   if (isImage(sopClassUid)) {
-    instance = await processImage(metadata, dicomBuffer);
+    instance = await processImage(metadata, dicomInput);
     if (instance?.image?.bytesBase64Encoded) {
       const imageBuffer = Buffer.from(instance.image.bytesBase64Encoded, 'base64');
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}.jpg`;
@@ -189,6 +190,7 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
       objectMimeType = 'image/jpeg';
     }
   } else if (isPdf(sopClassUid)) {
+    const dicomBuffer = Buffer.isBuffer(dicomInput) ? dicomInput : await fs.readFile(dicomInput);
     instance = await processPdf(metadata, dicomBuffer, requireEmbeddingCompatible);
     if (instance?.text) {
       const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
@@ -220,7 +222,7 @@ async function createEmbeddingInput(metadata, dicomBuffer) {
   return { instance, objectPath, objectSize, objectMimeType };
 }
 
-async function createVectorEmbedding(metadata, dicomBuffer) {
+async function createVectorEmbedding(metadata, dicomInput) {
   // Validate GCP configuration - these are permanent errors
   if (!gcpConfig.embedding?.input?.vector?.model) {
     throw createNonRetryableError("Vector embedding is not configured. Please set gcpConfig.embedding.input.vector.model in your configuration.");
@@ -230,7 +232,7 @@ async function createVectorEmbedding(metadata, dicomBuffer) {
     throw createNonRetryableError("GCP project ID is not configured. Please set the GCP_PROJECT environment variable or configure gcpConfig.projectId in your configuration file. Example: export GCP_PROJECT=your-actual-gcp-project");
   }
 
-  const inputResult = await createEmbeddingInput(metadata, dicomBuffer);
+  const inputResult = await createEmbeddingInput(metadata, dicomInput);
   if (!inputResult) {
     return null;
   }

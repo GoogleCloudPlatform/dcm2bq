@@ -32,6 +32,7 @@ describe("eventhandlers", () => {
   let createVectorEmbeddingStub;
   let mockBucket;
   let mockFile;
+  let currentDownloadBuffer;
   let eventhandlers;
 
   before(() => {
@@ -56,8 +57,14 @@ describe("eventhandlers", () => {
     });
     
     // Create mock file and bucket objects that can be reconfigured per test
+    currentDownloadBuffer = Buffer.from("mock-data");
     mockFile = {
-      download: sinon.stub().resolves([Buffer.from("mock-data")]),
+      download: sinon.stub().callsFake(async (options = {}) => {
+        if (options.destination) {
+          await fs.promises.writeFile(options.destination, currentDownloadBuffer);
+        }
+        return [currentDownloadBuffer];
+      }),
       save: sinon.stub().resolves(),
       getSignedUrl: sinon.stub().resolves(["gs://mock-bucket/path/to/file"])
     };
@@ -111,7 +118,7 @@ describe("eventhandlers", () => {
       
       // Reset and configure the mock to return the zip buffer for this test
       mockFile.download.resetHistory();
-      mockFile.download.resolves([zipBuffer]);
+      currentDownloadBuffer = zipBuffer;
 
       // Create mock pub/sub message for a zip file
       const ctx = {
@@ -169,7 +176,7 @@ describe("eventhandlers", () => {
       const tarBuffer = fs.readFileSync(tarPath);
 
       mockFile.download.resetHistory();
-      mockFile.download.resolves([tarBuffer]);
+      currentDownloadBuffer = tarBuffer;
 
       const ctx = {
         message: {
@@ -212,7 +219,7 @@ describe("eventhandlers", () => {
       
       // Reset and configure the mock to return invalid zip for this test
       mockFile.download.resetHistory();
-      mockFile.download.resolves([invalidZipBuffer]);
+      currentDownloadBuffer = invalidZipBuffer;
 
       const ctx = {
         message: {
@@ -249,7 +256,7 @@ describe("eventhandlers", () => {
       
       // Reset and configure the mock to return DICOM buffer for this test
       mockFile.download.resetHistory();
-      mockFile.download.resolves([dcmBuffer]);
+      currentDownloadBuffer = dcmBuffer;
 
       const ctx = {
         message: {
@@ -287,7 +294,7 @@ describe("eventhandlers", () => {
       const dcmPath = path.join(__dirname, "files/dcm/ct.dcm");
       const dcmBuffer = fs.readFileSync(dcmPath);
       mockFile.download.resetHistory();
-      mockFile.download.resolves([dcmBuffer]);
+      currentDownloadBuffer = dcmBuffer;
 
       createVectorEmbeddingStub.rejects(
         createNonRetryableError("Unsupported SOP for embedding", 422)
@@ -326,7 +333,7 @@ describe("eventhandlers", () => {
       const dcmPath = path.join(__dirname, "files/dcm/ct.dcm");
       const dcmBuffer = fs.readFileSync(dcmPath);
       mockFile.download.resetHistory();
-      mockFile.download.resolves([dcmBuffer]);
+      currentDownloadBuffer = dcmBuffer;
 
       const retryableError = new Error("Too many requests");
       retryableError.code = 429;
@@ -454,7 +461,7 @@ describe("eventhandlers", () => {
       // Reset the stub
       bqInsertStub.resetHistory();
       mockFile.download.resetHistory();
-      mockFile.download.resolves([dicomBuffer]);
+      currentDownloadBuffer = dicomBuffer;
 
       // Create mock pub/sub message
       const ctx = {

@@ -33,7 +33,8 @@ const crypto = require("crypto");
 const config = require("../src/config");
 const { handleEvent } = require("../src/eventhandlers");
 const consts = require("../src/consts");
-const { DicomInMemory } = require("../src/dicomtojson");
+const { DicomFile } = require("../src/dicomtojson");
+const { pathToFileURL } = require("url");
 
 describe("End-to-End Pipeline Integration Tests", function () {
   this.timeout(60000); // Allow time for API calls and processing
@@ -165,7 +166,7 @@ describe("End-to-End Pipeline Integration Tests", function () {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Query BigQuery to verify the row was inserted
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
       const sopInstanceUID = metadata.SOPInstanceUID;
 

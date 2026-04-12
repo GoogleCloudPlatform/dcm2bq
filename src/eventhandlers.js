@@ -16,7 +16,7 @@
 
 const consts = require("./consts");
 const config = require("./config");
-const { DicomInMemory } = require("./dicomtojson");
+const { DicomFile } = require("./dicomtojson");
 const { insert } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
@@ -26,6 +26,7 @@ const crypto = require("crypto");
 const fs = require("fs").promises;
 const path = require("path");
 const os = require("os");
+const url = require("url");
 const AdmZip = require("adm-zip");
 const tar = require("tar");
 const { gcpConfig } = config.get();
@@ -37,7 +38,7 @@ const embeddingInputConfig = gcpConfig.embedding?.input;
  * Process and persist a single DICOM file.
  * @param {number} version The version identifier
  * @param {Date} timestamp The timestamp of the event
- * @param {Buffer} dicomBuffer The DICOM file content
+ * @param {string} dicomFilePath The local path to a DICOM file
  * @param {string} uriPath The URI path for this file (uniquely identifies the file)
  * @param {string} eventType The event type
  * @param {number} fileSize The size of the file
@@ -45,12 +46,13 @@ const embeddingInputConfig = gcpConfig.embedding?.input;
  * @param {string} storageClass The storage class of the object (e.g., STANDARD, NEARLINE, COLDLINE, ARCHIVE)
  * @returns {Promise<void>}
  */
-async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, eventType, fileSize, storageType, storageClass) {
+async function processAndPersistDicom(version, timestamp, dicomFilePath, uriPath, eventType, fileSize, storageType, storageClass) {
+  const resolvedFileSize = fileSize ?? (await fs.stat(dicomFilePath)).size;
   if (DEBUG_MODE) {
-    console.log(`Processing DICOM: ${uriPath} (size: ${fileSize} bytes)`);
+    console.log(`Processing DICOM: ${uriPath} (size: ${resolvedFileSize} bytes)`);
   }
   
-  const { metadata, embeddings } = await processDicom(dicomBuffer, uriPath);
+  const { metadata, embeddings } = await processDicom(dicomFilePath, uriPath);
   
   const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType)
     ? { path: embeddings.objectPath, size: embeddings.objectSize, mimeType: embeddings.objectMimeType }
@@ -61,7 +63,7 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
   // Fixes issue https://github.com/GoogleCloudPlatform/dcm2bq/issues/22
   const infoObj = {
     event: eventType,
-    input: { size: fileSize, type: storageType, storageClass: storageClass || null },
+    input: { size: resolvedFileSize, type: storageType, storageClass: storageClass || null },
     embedding: {
       model: embeddingVectorModel || null,
       input: objectMetadata,
@@ -82,24 +84,25 @@ async function processAndPersistDicom(version, timestamp, dicomBuffer, uriPath, 
 }
 
 /**
- * Processes a DICOM file buffer to extract metadata and optionally generate embedding input and vector embedding.
+ * Processes a DICOM file on disk to extract metadata and optionally generate embedding input and vector embedding.
  * Embedding failures are handled as follows:
  * - Retryable embedding errors are re-thrown to trigger retry.
  * - Non-retryable embedding errors are logged and processing continues without embeddings.
- * @param {Buffer} buffer The DICOM file content as a buffer.
+ * @param {string} dicomFilePath The local path to a DICOM file.
  * @param {string} uriPath The URI of the DICOM file.
  * @returns {Promise<{metadata: string, size: number, embeddings?: object}>} An object containing the stringified JSON metadata, buffer size, and optional embeddings.
  * @throws {Error} For parsing failures and retryable embedding failures
  */
-async function processDicom(buffer, uriPath) {
+async function processDicom(dicomFilePath, uriPath) {
   const configObject = config.get();
   const configProvidedOptions = configObject.jsonOutput;
   const bulkDataRoot = configProvidedOptions.explicitBulkDataRoot ? uriPath : "";
   const outputOptions = deepAssign({}, configProvidedOptions, { bulkDataRoot });
-  
+
   let json;
   try {
-    const reader = new DicomInMemory(buffer);
+    const fileUrl = url.pathToFileURL(dicomFilePath);
+    const reader = new DicomFile(fileUrl);
     json = reader.toJson(outputOptions);
   } catch (error) {
     // DICOM parsing errors are non-retryable - the file is permanently invalid
@@ -113,6 +116,7 @@ async function processDicom(buffer, uriPath) {
   const shouldCreateInput = embeddingInputConfig?.gcsBucketPath;
   // Check if we should generate actual embeddings (call Vertex AI)
   const shouldGenerateEmbedding = embeddingInputConfig?.vector?.model;
+  const fileStats = await fs.stat(dicomFilePath);
   
   // Generate embeddings/input if configured.
   // Only retryable embedding errors should fail the event and trigger retries.
@@ -120,10 +124,10 @@ async function processDicom(buffer, uriPath) {
   try {
     if (shouldGenerateEmbedding) {
       // Generate full embedding (includes input creation + vector generation)
-      embeddingsResult = await createVectorEmbedding(json, buffer);
+      embeddingsResult = await createVectorEmbedding(json, dicomFilePath);
     } else if (shouldCreateInput) {
       // Only create embedding input (extract and save, but don't generate vector)
-      embeddingsResult = await createEmbeddingInput(json, buffer);
+      embeddingsResult = await createEmbeddingInput(json, dicomFilePath);
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -136,7 +140,7 @@ async function processDicom(buffer, uriPath) {
   
   return {
     metadata: JSON.stringify(json),
-    size: buffer.length,
+    size: fileStats.size,
     embeddings: embeddingsResult,
   };
 }
@@ -228,20 +232,18 @@ function getArchiveType(objectId) {
 /**
  * Extract supported archive to a temporary directory.
  * @param {('zip'|'tar')} archiveType The archive format
- * @param {Buffer} archiveBuffer The archive contents
+ * @param {string} archiveFilePath Path to archive file on disk
  * @param {string} tempDir Path to extract into
  */
-async function extractArchiveToTempDir(archiveType, archiveBuffer, tempDir) {
+async function extractArchiveToTempDir(archiveType, archiveFilePath, tempDir) {
   if (archiveType === 'zip') {
-    const zip = new AdmZip(archiveBuffer);
+    const zip = new AdmZip(archiveFilePath);
     zip.extractAllTo(tempDir, true);
     return;
   }
 
   if (archiveType === 'tar') {
-    const archivePath = path.join(tempDir, 'archive.tar.gz');
-    await fs.writeFile(archivePath, archiveBuffer);
-    await tar.x({ file: archivePath, cwd: tempDir });
+    await tar.x({ file: archiveFilePath, cwd: tempDir });
     return;
   }
 
@@ -250,7 +252,7 @@ async function extractArchiveToTempDir(archiveType, archiveBuffer, tempDir) {
 
 /**
  * Handle a supported archive file containing DICOM files.
- * @param {Buffer} archiveBuffer The archive file content
+ * @param {string} archiveFilePath The local path to the archive file
  * @param {string} bucketId The GCS bucket ID
  * @param {string} objectId The GCS object ID (archive file name)
  * @param {Date} timestamp The timestamp of the event
@@ -259,16 +261,13 @@ async function extractArchiveToTempDir(archiveType, archiveBuffer, tempDir) {
  * @param {('zip'|'tar')} archiveType The archive format
  * @param {string} storageClass The storage class of the archive object
  */
-async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass) {
+async function handleArchiveFile(archiveFilePath, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass) {
   let tempDir = null;
   const archiveUriPath = gcs.createUriPath(bucketId, objectId);
   try {
     // Extract archive to temporary directory
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
-    await extractArchiveToTempDir(archiveType, archiveBuffer, tempDir);
-    
-    // Clear archive buffer from memory immediately after extraction
-    archiveBuffer = null;
+    await extractArchiveToTempDir(archiveType, archiveFilePath, tempDir);
     
     // Find all .dcm files
     const dcmFiles = await findDcmFiles(tempDir);
@@ -282,19 +281,18 @@ async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, v
     let errorCount = 0;
     
     for (const dcmFile of dcmFiles) {
-      let fileBuffer = null;
       try {
-        fileBuffer = await fs.readFile(dcmFile);
+        const fileStats = await fs.stat(dcmFile);
         const fileName = path.basename(dcmFile);
         const uriPath = `${archiveUriPath}#${fileName}`;
         
         await processAndPersistDicom(
           version,
           timestamp,
-          fileBuffer,
+          dcmFile,
           uriPath,
           eventType,
-          fileBuffer.length,
+          fileStats.size,
           consts.STORAGE_TYPE_GCS,
           storageClass
         );
@@ -305,9 +303,6 @@ async function handleArchiveFile(archiveBuffer, bucketId, objectId, timestamp, v
         const errorStack = error instanceof Error ? error.stack : '';
         console.error(`Error processing DICOM ${path.basename(dcmFile)}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
       } finally {
-        // Clear file buffer immediately after processing
-        fileBuffer = null;
-        
         // Delete processed file to free disk space
         try {
           await fs.unlink(dcmFile);
@@ -366,17 +361,19 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     case consts.GCS_OBJ_FINALIZE: {
       const uriPath = gcs.createUriPath(bucketId, objectId);
       const fileSize = Number(msgData.size || 0) || null;
-      let buffer = null;
+      let tempDir = null;
       try {
-        // Use memory to read, avoiding volume mount in container
-        buffer = await gcs.downloadToMemory(bucketId, objectId);
-        perfCtx.addRef("afterGcsDownloadToMemory");
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
+        const localFilePath = path.join(tempDir, path.basename(objectId || 'downloaded-object'));
+        await gcs.downloadToFile(bucketId, objectId, localFilePath);
+        perfCtx.addRef("afterGcsDownloadToFile");
 
         const archiveType = getArchiveType(objectId);
         if (archiveType) {
-          await handleArchiveFile(buffer, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass);
+          await handleArchiveFile(localFilePath, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass);
         } else {
-          await processAndPersistDicom(version, timestamp, buffer, uriPath, eventType, buffer.length, consts.STORAGE_TYPE_GCS, storageClass);
+          const effectiveFileSize = fileSize ?? (await fs.stat(localFilePath)).size;
+          await processAndPersistDicom(version, timestamp, localFilePath, uriPath, eventType, effectiveFileSize, consts.STORAGE_TYPE_GCS, storageClass);
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -385,7 +382,9 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         }
         console.error(`Non-retryable processing error for ${uriPath}; acknowledging without retry: ${errorMsg}`);
       } finally {
-        buffer = null;
+        if (tempDir) {
+          await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+        }
       }
       perfCtx.addRef("afterProcessDicom");
       perfCtx.addRef("afterBqInsert");
@@ -400,16 +399,19 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
 async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
   const dicomWebPath = Buffer.from(ctx.message.data, "base64").toString();
   const uriPath = hcapi.createUriPath(dicomWebPath);
-  let buffer;
+  let tempDir = null;
   try {
-    buffer = await hcapi.downloadToMemory(uriPath);
-    perfCtx.addRef("afterHcapiDownloadToMemory");
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
+    const localFilePath = path.join(tempDir, 'hcapi-download.dcm');
+    await hcapi.downloadToFile(uriPath, localFilePath);
+    perfCtx.addRef("afterHcapiDownloadToFile");
 
     const timestamp = new Date();
     const version = ctx.message.attributes?.versionId || Date.now();
     const storageClass = ctx.message.attributes?.storageClass || null;
+    const fileSize = (await fs.stat(localFilePath)).size;
 
-    await processAndPersistDicom(version, timestamp, buffer, uriPath, consts.HCAPI_FINALIZE, buffer.length, consts.STORAGE_TYPE_DICOMWEB, storageClass);
+    await processAndPersistDicom(version, timestamp, localFilePath, uriPath, consts.HCAPI_FINALIZE, fileSize, consts.STORAGE_TYPE_DICOMWEB, storageClass);
     perfCtx.addRef("afterProcessDicom");
     perfCtx.addRef("afterBqInsert");
   } catch (error) {
@@ -420,7 +422,9 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
     }
     console.error(`Non-retryable HCAPI processing error for ${uriPath}; acknowledging without retry: ${errorMsg}`);
   } finally {
-    buffer = null;
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
   if (DEBUG_MODE) {
     console.log(JSON.stringify({ path: dicomWebPath }));

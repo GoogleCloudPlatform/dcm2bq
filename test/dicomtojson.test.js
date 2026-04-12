@@ -16,50 +16,40 @@
 
 const assert = require("assert");
 const fs = require("fs");
+const path = require("path");
+const { pathToFileURL } = require("url");
+const { spawnSync } = require("child_process");
 const { globSync } = require("glob");
-const { DicomFile, DicomInMemory, parseBulkDataUri } = require("../src/dicomtojson");
+const { DicomFile, parseBulkDataUri } = require("../src/dicomtojson");
 
 const testFiles = globSync("./test/files/dcm/*.dcm");
 const notDicomFile = "./test/files/dcm/notdicom.txt";
 
 describe("dicomtojson", () => {
-  describe("DicomInMemory", () => {
-    it("should parse a DICOM file from buffer", () => {
-      const testFile = testFiles[0];
-      const buffer = fs.readFileSync(testFile);
-      const dicom = new DicomInMemory(buffer);
-      const json = dicom.toJson();
-      assert.ok(json);
-      assert.ok(Object.keys(json).length > 0);
-    });
-
-    it("should throw error for non-buffer input", () => {
-      try {
-        new DicomInMemory("not a buffer");
-        assert.fail("Should have thrown an error");
-      } catch (e) {
-        assert.strictEqual(e, "Expected instance of buffer for `buffer` parameter");
+  describe("DicomFile", () => {
+    before(function () {
+      const dcmnormPath = process.env.DCM2BQ_DCMNORM_PATH || "dcmnorm";
+      const probe = spawnSync(dcmnormPath, ["--version"], { stdio: "ignore" });
+      if (probe.status !== 0) {
+        this.skip();
       }
     });
 
-    it("should fail to parse a non-DICOM file", () => {
-        const buffer = fs.readFileSync(notDicomFile);
-        const dicom = new DicomInMemory(buffer);
-        try {
-            dicom.parse();
-            assert.fail("Should have thrown an error");
-        } catch (e) {
-        }
-    });
-  });
-
-  describe("DicomFile", () => {
     it("should parse a DICOM file from file path", () => {
       const testFile = testFiles[0];
-      const dicom = new DicomFile(new URL(`file://${require.resolve(`../${testFile}`)}`));
+      const dicom = new DicomFile(pathToFileURL(path.resolve(testFile)));
       const json = dicom.toJson();
       assert.ok(json);
       assert.ok(Object.keys(json).length > 0);
+    });
+
+    it("should fail to parse a non-DICOM file", () => {
+      const dicom = new DicomFile(pathToFileURL(path.resolve(notDicomFile)));
+      try {
+        dicom.parse();
+        assert.fail("Should have thrown an error");
+      } catch (e) {
+      }
     });
 
     it("should throw error for non-URL input", () => {

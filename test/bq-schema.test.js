@@ -17,6 +17,7 @@
 const assert = require("assert");
 const sinon = require("sinon");
 const fs = require("fs");
+const path = require("path");
 
 /**
  * Validate the row object against expected BigQuery schema constraints.
@@ -65,6 +66,7 @@ describe("BigQuery insert payload matches schema", () => {
   let originalEnv;
   let insertStub;
   let originalBigQueryModule;
+  const validDicomBuffer = fs.readFileSync(path.join(__dirname, "files", "dcm", "ct.dcm"));
 
   beforeEach(() => {
     originalEnv = process.env.DCM2BQ_CONFIG;
@@ -99,12 +101,12 @@ describe("BigQuery insert payload matches schema", () => {
 
     const dicomToJsonPath = require.resolve("../src/dicomtojson");
     delete require.cache[dicomToJsonPath];
-    class FakeDicomInMemory {
-      constructor(buffer) { this.buffer = buffer; }
+    class FakeDicomFile {
+      constructor(fileUrl) { this.fileUrl = fileUrl; }
       toJson() { return { SOPInstanceUID: "1.2.3", PatientID: "P1" }; }
     }
     require.cache[dicomToJsonPath] = {
-      exports: { DicomInMemory: FakeDicomInMemory },
+      exports: { DicomFile: FakeDicomFile },
     };
 
     const embeddingsPath = require.resolve("../src/embeddings");
@@ -115,6 +117,14 @@ describe("BigQuery insert payload matches schema", () => {
         createEmbeddingInput: async () => null,
       },
     };
+
+    // Ensure gcs module is reloaded fresh per test to avoid cross-suite cache bleed.
+    const gcsPath = require.resolve("../src/gcs");
+    delete require.cache[gcsPath];
+
+    // Ensure eventhandlers is reloaded fresh so it binds to current test stubs.
+    const eventhandlersPath = require.resolve("../src/eventhandlers");
+    delete require.cache[eventhandlersPath];
   });
 
   afterEach(() => {
@@ -130,10 +140,10 @@ describe("BigQuery insert payload matches schema", () => {
     
     // Restore all GCS stubs to prevent double-wrap errors
     const gcsModule = require("../src/gcs");
-    if (gcsModule.downloadToMemory && gcsModule.downloadToMemory.restore) gcsModule.downloadToMemory.restore();
+    if (gcsModule.downloadToFile && gcsModule.downloadToFile.restore) gcsModule.downloadToFile.restore();
     if (gcsModule.createUriPath && gcsModule.createUriPath.restore) gcsModule.createUriPath.restore();
-    // Clear caches (but NOT gcs to preserve Storage stub from eventhandlers.test.js)
-    ["../src/dicomtojson", "../src/embeddings", "../src/eventhandlers"].forEach((m) => {
+    // Clear caches to avoid cross-suite state contamination.
+    ["../src/dicomtojson", "../src/embeddings", "../src/eventhandlers", "../src/gcs"].forEach((m) => {
       try { delete require.cache[require.resolve(m)]; } catch {}
     });
   });
@@ -156,9 +166,12 @@ describe("BigQuery insert payload matches schema", () => {
     // Stub GCS module used inside eventhandlers after require
     const gcsPath = require.resolve("../src/gcs");
     const gcsModule = require(gcsPath);
-    if (gcsModule.downloadToMemory && gcsModule.downloadToMemory.restore) gcsModule.downloadToMemory.restore();
+    if (gcsModule.downloadToFile && gcsModule.downloadToFile.restore) gcsModule.downloadToFile.restore();
     if (gcsModule.createUriPath && gcsModule.createUriPath.restore) gcsModule.createUriPath.restore();
-    sinon.stub(gcsModule, "downloadToMemory").resolves(Buffer.from("fake-dcm"));
+    sinon.stub(gcsModule, "downloadToFile").callsFake(async (_bucket, _object, destinationPath) => {
+      await fs.promises.writeFile(destinationPath, validDicomBuffer);
+      return destinationPath;
+    });
     sinon.stub(gcsModule, "createUriPath").callsFake((bucket, object) => `gs://${bucket}/${object}`);
 
     await eventhandlers.handleGcsPubSubUnwrap(ctx, perfCtx);
@@ -186,9 +199,12 @@ describe("BigQuery insert payload matches schema", () => {
       // Stub GCS per test safely
       const gcsPath = require.resolve("../src/gcs");
       const gcsModule = require(gcsPath);
-      if (gcsModule.downloadToMemory && gcsModule.downloadToMemory.restore) gcsModule.downloadToMemory.restore();
+      if (gcsModule.downloadToFile && gcsModule.downloadToFile.restore) gcsModule.downloadToFile.restore();
       if (gcsModule.createUriPath && gcsModule.createUriPath.restore) gcsModule.createUriPath.restore();
-      sinon.stub(gcsModule, "downloadToMemory").resolves(Buffer.from("fake-dcm"));
+      sinon.stub(gcsModule, "downloadToFile").callsFake(async (_bucket, _object, destinationPath) => {
+        await fs.promises.writeFile(destinationPath, validDicomBuffer);
+        return destinationPath;
+      });
       sinon.stub(gcsModule, "createUriPath").callsFake((bucket, object) => `gs://${bucket}/${object}`);
 
       await eventhandlers.handleGcsPubSubUnwrap(ctx, perfCtx);
@@ -232,9 +248,12 @@ describe("BigQuery insert payload matches schema", () => {
 
     // Stub GCS
     const gcsModule = require("../src/gcs");
-    if (gcsModule.downloadToMemory && gcsModule.downloadToMemory.restore) gcsModule.downloadToMemory.restore();
+    if (gcsModule.downloadToFile && gcsModule.downloadToFile.restore) gcsModule.downloadToFile.restore();
     if (gcsModule.createUriPath && gcsModule.createUriPath.restore) gcsModule.createUriPath.restore();
-    sinon.stub(gcsModule, "downloadToMemory").resolves(Buffer.from("fake-dcm"));
+    sinon.stub(gcsModule, "downloadToFile").callsFake(async (_bucket, _object, destinationPath) => {
+      await fs.promises.writeFile(destinationPath, validDicomBuffer);
+      return destinationPath;
+    });
     sinon.stub(gcsModule, "createUriPath").callsFake((bucket, object) => `gs://${bucket}/${object}`);
 
     const ctx = {

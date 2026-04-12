@@ -15,6 +15,8 @@
  */
 
 const { GoogleAuth } = require("google-auth-library");
+const { createWriteStream } = require("fs");
+const { pipeline } = require("stream/promises");
 
 function createUriPath(dicomWebPath) {
   return `https://healthcare.googleapis.com/v1/${dicomWebPath}`;
@@ -30,7 +32,18 @@ async function downloadToMemory(url) {
   return buff;
 }
 
+async function downloadToFile(url, destinationPath) {
+  const auth = new GoogleAuth({
+    scopes: "https://www.googleapis.com/auth/cloud-platform",
+  });
+  const client = await auth.getClient();
+  const res = await client.request({ url, headers: { Accept: "application/dicom; transfer-syntax=*" }, responseType: "stream" });
+  await pipeline(res.data, createWriteStream(destinationPath));
+  return destinationPath;
+}
+
 module.exports = {
   createUriPath,
   downloadToMemory,
+  downloadToFile,
 };

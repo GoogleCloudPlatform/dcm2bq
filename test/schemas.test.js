@@ -30,13 +30,13 @@ describe("schemas", () => {
     assert.ok(result);
   });
 
-  it("matchEventSchema", () => {
+  it("matchEventSchema (GCS Pub/Sub unwrap)", () => {
     const data = gcsPubSubUnwrapExample;
     const result = matchEventSchema(data);
     assert.ok(result);
   });
 
-  it("matchEventSchema", () => {
+  it("matchEventSchema (HCAPI Pub/Sub unwrap)", () => {
     const data = hcapiPubSubUnwrapExample;
     const result = matchEventSchema(data);
     assert.ok(result);

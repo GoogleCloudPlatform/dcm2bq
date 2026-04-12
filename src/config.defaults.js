@@ -49,7 +49,7 @@ module.exports = {
       },
     },
   },
-  // Passed to DICOM parser (https://github.com/cornerstonejs/dicomParser)
+  // Legacy parser options key retained for backward-compatible config validation.
   dicomParser: {},
   // Passed to JSON formatter
   jsonOutput: {

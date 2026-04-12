@@ -19,7 +19,7 @@ const { mkdtemp, writeFile, readFile, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
-// TODO[P1]: Replace complex shell script with pure JS solution (or WASM) if possible
+// TODO[P1]: Replace shell wrapper with direct in-process rendering if a stable library becomes available.
 
 // Supported transfer syntaxes for image rendering
 const SUPPORTED_TRANSFER_SYNTAXES = new Set([
@@ -41,8 +41,8 @@ const SUPPORTED_TRANSFER_SYNTAXES = new Set([
 ]);
 
 // Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
-// This requires dcmtk and gdcm to be installed in the execution environment.
-async function renderDicomImage(metadata, dicomBuffer) {
+// This requires dcmnorm to be installed in the execution environment.
+async function renderDicomImage(metadata, dicomInput) {
   // Check for supported transfer syntaxes
   const transferSyntax = metadata && metadata.TransferSyntaxUID;
   if (!transferSyntax || !SUPPORTED_TRANSFER_SYNTAXES.has(transferSyntax)) {
@@ -54,28 +54,33 @@ async function renderDicomImage(metadata, dicomBuffer) {
   try {
     // Create a temporary directory to avoid file collisions
     tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-"));
-    const dicomPath = path.join(tempDir, "input.dcm");
+    const dicomPath = typeof dicomInput === "string" ? dicomInput : path.join(tempDir, "input.dcm");
     const jpgPath = path.join(tempDir, "output.jpg");
     const scriptPath = path.resolve(__dirname, "..", "..", "helpers", "convert_dcm_to_jpg.sh");
 
-    // Write the DICOM buffer to a temporary file
-    await writeFile(dicomPath, dicomBuffer);
+    if (Buffer.isBuffer(dicomInput)) {
+      // Backward compatibility for callers that still provide a Buffer.
+      await writeFile(dicomPath, dicomInput);
+    } else if (typeof dicomInput !== "string") {
+      throw new Error("Expected dicom input to be a file path or Buffer");
+    }
 
     // Multi-frame support: select the middle frame if present
     let frameArg = null;
     const numFrames = parseInt(metadata?.NumberOfFrames, 10);
     if (!isNaN(numFrames) && numFrames > 1) {
-      // DICOM frames are 1-based
-      frameArg = Math.floor((numFrames + 1) / 2);
+      // dcmnorm expects zero-based frame indices.
+      // Keep the previous "lower middle" behavior for even frame counts.
+      frameArg = Math.floor((numFrames - 1) / 2);
     }
 
     // Build arguments for the script
     const args = [dicomPath, jpgPath];
-    if (frameArg) {
+    if (frameArg !== null) {
       args.push(frameArg.toString());
     }
 
-    // Execute convert_dcm_to_jpg.sh to convert the DICOM to a JPG.
+    // Execute convert_dcm_to_jpg.sh (dcmnorm wrapper) to convert the DICOM to a JPG.
     await new Promise((resolve, reject) => {
       execFile(scriptPath, args, (error, stdout, stderr) => {
         if (error) {
@@ -94,7 +99,7 @@ async function renderDicomImage(metadata, dicomBuffer) {
     return jpgBuffer;
   } catch (error) {
     const stderrDetails = error?.stderr ? `\n${error.stderr}` : "";
-    console.error(`Could not render DICOM image for embedding using convert_dcm_to_jpg.sh: ${error.message}${stderrDetails}`);
+    console.error(`Could not render DICOM image for embedding using dcmnorm renderer: ${error.message}${stderrDetails}`);
     return null;
   } finally {
     if (tempDir) {
@@ -105,8 +110,8 @@ async function renderDicomImage(metadata, dicomBuffer) {
   }
 }
 
-async function processImage(metadata, dicomBuffer) {
-  const imageBuffer = await renderDicomImage(metadata, dicomBuffer);
+async function processImage(metadata, dicomInput) {
+  const imageBuffer = await renderDicomImage(metadata, dicomInput);
   if (imageBuffer) {
     return {
       image: { bytesBase64Encoded: imageBuffer.toString("base64") },

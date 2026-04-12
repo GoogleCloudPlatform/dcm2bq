@@ -63,8 +63,8 @@ describe("error-handling integration", () => {
     const hcapi = require("../src/hcapi");
     const bigquery = require("../src/bigquery");
     
-    gcsStub = sinon.stub(gcs, "downloadToMemory");
-    hcapiStub = sinon.stub(hcapi, "downloadToMemory");
+    gcsStub = sinon.stub(gcs, "downloadToFile");
+    hcapiStub = sinon.stub(hcapi, "downloadToFile");
     bigqueryStub = sinon.stub(bigquery, "insert").resolves();
 
     // Clear require cache and load server
@@ -107,8 +107,11 @@ describe("error-handling integration", () => {
     it("should return 200 for invalid DICOM file", async () => {
       const invalidDicomData = fs.readFileSync(invalidFile);
       
-      // Mock GCS to return invalid DICOM data
-      gcsStub.resolves(invalidDicomData);
+      // Mock GCS to download invalid DICOM data to local file
+      gcsStub.callsFake(async (_bucketId, _objectId, destinationPath) => {
+        await fs.promises.writeFile(destinationPath, invalidDicomData);
+        return destinationPath;
+      });
       
       const message = {
         message: {
@@ -128,21 +131,12 @@ describe("error-handling integration", () => {
         }
       };
 
-      // Mock GCS download
-      const gcs = require("../src/gcs");
-      const originalDownload = gcs.downloadToMemory;
-      gcs.downloadToMemory = async () => invalidDicomData;
+      await request(app)
+        .post("/")
+        .send(message)
+        .expect(200);
 
-      try {
-        await request(app)
-          .post("/")
-          .send(message)
-          .expect(200);
-
-        assert.strictEqual(bigqueryStub.called, false, "Should not persist synthetic non-retryable failure rows");
-      } finally {
-        gcs.downloadToMemory = originalDownload;
-      }
+      assert.strictEqual(bigqueryStub.called, false, "Should not persist synthetic non-retryable failure rows");
     });
   });
 

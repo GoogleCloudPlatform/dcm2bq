@@ -26,12 +26,12 @@
 */
 
 const assert = require("assert");
-const fs = require("fs");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const { Storage } = require("@google-cloud/storage");
 const config = require("../src/config");
 const { createVectorEmbedding, saveToGCS } = require("../src/embeddings");
-const { DicomInMemory } = require("../src/dicomtojson");
+const { DicomFile } = require("../src/dicomtojson");
 const { processImage } = require("../src/processors/image");
 const { processSR } = require("../src/processors/sr");
 const { processPdf } = require("../src/processors/pdf");
@@ -90,12 +90,11 @@ describe("Storage and Embedding Integration Tests", function () {
   describe("Image Processing and Embedding", function () {
     it("should process and embed a CT image", async function () {
       const testFile = path.join(__dirname, "files/dcm/ct.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
-      const result = await createVectorEmbedding(metadata, buffer);
+      const result = await createVectorEmbedding(metadata, testFile);
       
       assert.ok(result, "Should return embedding result");
       assert.ok(result.embedding, "Result should have embedding");
@@ -124,12 +123,11 @@ describe("Storage and Embedding Integration Tests", function () {
 
     it("should process and embed an MR image", async function () {
       const testFile = path.join(__dirname, "files/dcm/mr.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
-      const result = await createVectorEmbedding(metadata, buffer);
+      const result = await createVectorEmbedding(metadata, testFile);
       
       assert.ok(result, "Should return embedding result");
       assert.strictEqual(result.embedding.length, 1408, "Embedding should have 1408 dimensions");
@@ -146,12 +144,11 @@ describe("Storage and Embedding Integration Tests", function () {
 
     it("should process and embed an ultrasound image", async function () {
       const testFile = path.join(__dirname, "files/dcm/us.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
-      const result = await createVectorEmbedding(metadata, buffer);
+      const result = await createVectorEmbedding(metadata, testFile);
       
       assert.ok(result, "Should return embedding result");
       assert.strictEqual(result.embedding.length, 1408, "Embedding should have 1408 dimensions");
@@ -170,12 +167,11 @@ describe("Storage and Embedding Integration Tests", function () {
   describe("Text Processing and Embedding", function () {
     it("should process and embed a structured report", async function () {
       const testFile = path.join(__dirname, "files/dcm/sr.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
-      const result = await createVectorEmbedding(metadata, buffer);
+      const result = await createVectorEmbedding(metadata, testFile);
       
       assert.ok(result, "Should return embedding result");
       assert.ok(result.embedding, "Result should have embedding");
@@ -198,12 +194,11 @@ describe("Storage and Embedding Integration Tests", function () {
       }
 
       const testFile = path.join(__dirname, "files/dcm/pdf.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
-      const result = await createVectorEmbedding(metadata, buffer);
+      const result = await createVectorEmbedding(metadata, testFile);
       
       assert.ok(result, "Should return embedding result");
       assert.ok(result.embedding, "Result should have embedding");
@@ -227,13 +222,12 @@ describe("Storage and Embedding Integration Tests", function () {
       }
 
       const testFile = path.join(__dirname, "files/dcm/dx.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
       // Process the image
-      const imageResult = await processImage(metadata, buffer);
+      const imageResult = await processImage(metadata, testFile);
       
       assert.ok(imageResult, "Should process image");
       assert.ok(imageResult.image, "Should have image data");
@@ -271,9 +265,8 @@ describe("Storage and Embedding Integration Tests", function () {
       }
 
       const testFile = path.join(__dirname, "files/dcm/sr.dcm");
-      const buffer = fs.readFileSync(testFile);
       
-      const reader = new DicomInMemory(buffer);
+      const reader = new DicomFile(pathToFileURL(testFile));
       const metadata = reader.toJson({ useCommonNames: true });
 
       // Process the structured report
@@ -316,12 +309,11 @@ describe("Storage and Embedding Integration Tests", function () {
 
       for (const filename of files) {
         const testFile = path.join(__dirname, "files/dcm", filename);
-        const buffer = fs.readFileSync(testFile);
         
-        const reader = new DicomInMemory(buffer);
+        const reader = new DicomFile(pathToFileURL(testFile));
         const metadata = reader.toJson({ useCommonNames: true });
 
-        const result = await createVectorEmbedding(metadata, buffer);
+        const result = await createVectorEmbedding(metadata, testFile);
         embeddings.push(result.embedding);
         
         if (result.objectPath) {
@@ -357,12 +349,11 @@ describe("Storage and Embedding Integration Tests", function () {
 
       for (const filename of files) {
         const testFile = path.join(__dirname, "files/dcm", filename);
-        const buffer = fs.readFileSync(testFile);
         
-        const reader = new DicomInMemory(buffer);
+        const reader = new DicomFile(pathToFileURL(testFile));
         const metadata = reader.toJson({ useCommonNames: true });
 
-        const result = await createVectorEmbedding(metadata, buffer);
+        const result = await createVectorEmbedding(metadata, testFile);
         dimensions.push(result.embedding.length);
         
         if (result.objectPath) {
