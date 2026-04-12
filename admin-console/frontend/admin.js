@@ -1364,6 +1364,44 @@
       return { found: false, count: 0, studyCount: 0, elapsed: ((Date.now() - startTime) / 1000).toFixed(1) };
     }
 
+    async function uploadFileToBackend(file, options = {}) {
+      return await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/uploads/file');
+        xhr.responseType = 'json';
+        xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+        if (file.type) {
+          xhr.setRequestHeader('Content-Type', file.type);
+        }
+
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable || typeof options.onProgress !== 'function') return;
+          options.onProgress({
+            loaded: Number(event.loaded || 0),
+            total: Number(event.total || file.size || 0),
+          });
+        };
+
+        xhr.onload = () => {
+          const response = xhr.response || {};
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(response);
+            return;
+          }
+          reject(createWsRequestError(response?.error || `HTTP ${xhr.status}`, {
+            code: xhr.status,
+            details: response,
+          }));
+        };
+
+        xhr.onerror = () => {
+          reject(createWsRequestError('Upload request failed', { code: xhr.status || 0 }));
+        };
+
+        xhr.send(file);
+      });
+    }
+
     document.getElementById('upload-run').addEventListener('click', async () => {
       const fileInput = document.getElementById('upload-file');
       const file = fileInput.files?.[0];
@@ -1381,38 +1419,33 @@
       btn.disabled = true;
 
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
         const isArchive = isArchiveFile(file.name);
 
         const progressLines = [];
         const startTime = Date.now();
 
-        const result = await wsCallBinary('process.run', {
-          fileName: file.name,
-          fileSizeBytes: bytes.length,
-          mimeType: file.type || 'application/dicom',
-        }, bytes, {
-          onProgress: (event) => {
+        progressLines.push(`[0.0s] starting upload`);
+        output.textContent = `${progressLines.join('\n')}\n\n⏳ Uploading...`;
+
+        const result = await uploadFileToBackend(file, {
+          onProgress: ({ loaded, total }) => {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            const stage = String(event.stage || 'processing').replace(/_/g, ' ');
-            
-            let progressMsg = `[${elapsed}s] ${stage}`;
-            
-            if (event.detail) {
-              const detail = event.detail;
-              if (detail.bucket && detail.object) {
-                progressMsg += `\n  → gs://${detail.bucket}/${detail.object}`;
-              }
-              if (detail.bytes) {
-                const sizeMB = (detail.bytes / (1024 * 1024)).toFixed(2);
-                progressMsg += ` (${sizeMB} MB)`;
-              }
+            const percent = total > 0 ? ((loaded / total) * 100).toFixed(1) : '0.0';
+            const loadedMB = (loaded / (1024 * 1024)).toFixed(2);
+            const totalMB = (Math.max(total, file.size) / (1024 * 1024)).toFixed(2);
+            const latest = `[${elapsed}s] uploading ${percent}% (${loadedMB} / ${totalMB} MB)`;
+            if (progressLines.length === 1) {
+              progressLines.push(latest);
+            } else {
+              progressLines[1] = latest;
             }
-            
-            progressLines.push(progressMsg);
-            output.textContent = `${progressLines.join('\n')}\n\n⏳ Waiting for completion...`;
+            output.textContent = `${progressLines.join('\n')}\n\n⏳ Uploading...`;
           },
         });
+
+        const uploadedSize = Number(result.bytesUploaded || file.size || 0);
+        const uploadedSizeMB = (uploadedSize / (1024 * 1024)).toFixed(2);
+        progressLines.push(`[${((Date.now() - startTime) / 1000).toFixed(1)}s] upload complete (${uploadedSizeMB} MB)`);
 
         const uploadTime = ((Date.now() - startTime) / 1000).toFixed(1);
         

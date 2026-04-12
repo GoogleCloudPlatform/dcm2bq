@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { pipeline } = require("stream/promises");
 const express = require("express");
 const { BigQuery } = require("@google-cloud/bigquery");
 const { Storage } = require("@google-cloud/storage");
@@ -886,6 +887,59 @@ app.post("/api/process/run", async (req, res) => {
     });
   } catch (error) {
     console.error("Process run error:", error);
+    return res.status(500).json({ error: error?.message || "Internal error" });
+  }
+});
+
+// Stream upload endpoint used by frontend for large files.
+app.post("/api/uploads/file", async (req, res) => {
+  try {
+    const rawFileName = decodeURIComponent(String(req.get("x-file-name") || ""));
+    const fileName = path.basename(rawFileName || "").trim();
+    const mimeType = String(req.get("content-type") || "application/octet-stream").trim() || "application/octet-stream";
+
+    if (!fileName) {
+      return res.status(400).json({ error: "Missing x-file-name header" });
+    }
+
+    const bucketName = getUploadBucketName();
+    if (!bucketName) {
+      return res.status(500).json({
+        error: "Upload bucket is not configured. Set one of: ADMIN_UPLOAD_GCS_BUCKET, GCS_BUCKET_NAME, GCS_BUCKET, DCM2BQ_GCS_BUCKET_NAME, DICOM_GCS_BUCKET",
+      });
+    }
+
+    const objectName = buildUploadObjectName(fileName);
+    const gcsFile = storage.bucket(bucketName).file(objectName);
+    const gcsWriteStream = gcsFile.createWriteStream({
+      resumable: false,
+      metadata: {
+        contentType: mimeType,
+      },
+    });
+
+    let bytesReceived = 0;
+    req.on("data", (chunk) => {
+      bytesReceived += Buffer.byteLength(chunk);
+    });
+
+    await pipeline(req, gcsWriteStream);
+    const [uploadedMetadata] = await gcsFile.getMetadata();
+
+    return res.json({
+      status: "completed",
+      fileName,
+      processedAt: new Date().toISOString(),
+      success: true,
+      bytesReceived,
+      bytesUploaded: Number(uploadedMetadata?.size || bytesReceived),
+      bucket: bucketName,
+      object: objectName,
+      gcsPath: `gs://${bucketName}/${objectName}`,
+      generation: uploadedMetadata?.generation || null,
+    });
+  } catch (error) {
+    console.error("File upload error:", error);
     return res.status(500).json({ error: error?.message || "Internal error" });
   }
 });
