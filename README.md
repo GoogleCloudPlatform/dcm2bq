@@ -74,10 +74,10 @@ It is included in the provided Docker image. If you are building from source or 
 
 **On Debian/Ubuntu/macOS/Linux (recommended):**
 ```bash
-./helpers/install-dcmnorm.sh /usr/local/bin
+./helpers/install-dcmnorm.sh
 ```
 
-You can pin a version by passing a second argument, for example `./helpers/install-dcmnorm.sh /usr/local/bin 0.1.3`.
+You can pin a version by passing it as the only argument, for example `./helpers/install-dcmnorm.sh 0.1.3`.
 
 ### Docker
 

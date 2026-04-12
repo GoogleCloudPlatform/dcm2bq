@@ -16,16 +16,16 @@
 
 set -euo pipefail
 
-# Default values
-DEFAULT_INSTALL_DIR="/usr/local/bin"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INSTALL_DIR="$REPO_ROOT/bin"
 DEFAULT_VERSION="latest"
 MIN_SUPPORTED_VERSION="0.1.3"
 GITHUB_REPO="pohcee/dcmnorm"
 PLATFORM="linux-x86_64"
 
 # Parse command line arguments
-INSTALL_DIR="${1:-$DEFAULT_INSTALL_DIR}"
-VERSION="${2:-$DEFAULT_VERSION}"
+VERSION="${1:-$DEFAULT_VERSION}"
 
 # Detect platform if needed
 detect_platform() {
@@ -68,19 +68,17 @@ version_lt() {
 
 print_usage() {
     cat << EOF
-Usage: $0 [INSTALL_DIR] [VERSION]
+Usage: $0 [VERSION]
 
-Downloads and installs dcmnorm from GitHub releases.
+Downloads and installs dcmnorm from GitHub releases into ./bin.
 
 Arguments:
-  INSTALL_DIR   Installation directory (default: $DEFAULT_INSTALL_DIR)
     VERSION       Version to install (default: latest GitHub release)
                                 If specified, must be >= $MIN_SUPPORTED_VERSION
 
 Examples:
-    $0                                    # Install latest release to system bin
-  $0 /opt/dcmnorm                      # Install to custom directory
-    $0 ./bin $MIN_SUPPORTED_VERSION      # Install a specific supported version
+    $0                        # Install latest release to ./bin
+    $0 $MIN_SUPPORTED_VERSION # Install a specific supported version to ./bin
 
 Environment variables:
   DCMNORM_PLATFORM  Override platform detection (e.g., linux-x86_64, macos-aarch64)
@@ -102,11 +100,6 @@ if [[ "$VERSION" != "latest" ]] && version_lt "$VERSION" "$MIN_SUPPORTED_VERSION
     echo "Error: Minimum supported explicit version is ${MIN_SUPPORTED_VERSION}." >&2
     echo "Use 'latest' or specify a version >= ${MIN_SUPPORTED_VERSION}." >&2
     exit 1
-fi
-
-# Convert relative paths to absolute paths (before changing directories)
-if [[ ! "$INSTALL_DIR" = /* ]]; then
-    INSTALL_DIR="$(cd "$(dirname "$INSTALL_DIR")" && pwd)/$(basename "$INSTALL_DIR")"
 fi
 
 if [[ "$VERSION" == "latest" ]]; then
@@ -166,16 +159,13 @@ else
 fi
 
 # Verify installation
-if ! "$INSTALL_DIR/dcmnorm" --version 2>/dev/null; then
-    echo "Warning: Could not verify installation with --version flag" >&2
+if ! "$INSTALL_DIR/dcmnorm" --help >/dev/null 2>&1; then
+    echo "Warning: Could not verify installation with --help flag" >&2
 fi
 
-# Add to PATH if using non-standard directory (not system paths)
-if [[ ! "$INSTALL_DIR" =~ ^(/usr/local/bin|/usr/bin|/bin|/opt/bin)$ ]]; then
-    echo ""
-    echo "To use dcmnorm, add it to your PATH:"
-    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
-fi
+echo ""
+echo "To use dcmnorm locally, add it to your PATH:"
+echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
 
 echo ""
 echo "Installation complete!"
