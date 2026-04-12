@@ -79,7 +79,7 @@ variable "dcm2bq_max_instance_count" {
 variable "dcm2bq_concurrency" {
   description = "Maximum number of simultaneous requests per dcm2bq Cloud Run instance"
   type        = number
-  default     = 32
+  default     = 80
 }
 
 variable "dcm2bq_memory" {

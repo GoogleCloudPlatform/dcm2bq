@@ -394,6 +394,12 @@ A helper script is provided to automate the process:
 - `--no-admin-console`: Skip standalone admin-console deployment.
 - `--help` or `-h`: Show usage instructions.
 
+The Terraform default for `dcm2bq_concurrency` is `80`, so new Cloud Run deployments allow up to 80 simultaneous requests per instance by default. If you need a different value, set it through Terraform before running the helper script, for example:
+
+```bash
+TF_VAR_dcm2bq_concurrency=120 ./helpers/deploy.sh my-gcp-project-id
+```
+
 When `deploy_admin_console` is enabled, admin-console IAP is configured using Cloud Run native IAP (`iap_enabled = true`). The legacy HTTPS load balancer + OAuth client flow is no longer required.
 
 **Examples**
