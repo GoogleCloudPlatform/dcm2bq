@@ -33,7 +33,7 @@ app.use(/.*/, (req, res, next) => {
   if (DEBUG_MODE && req.body) {
     const output = { url: req.url, body: req.body };
     try {
-      console.log(JSON.stringify(output, null, 2));
+      console.log(JSON.stringify(output));
     } catch (e) {}
   }
   next();
