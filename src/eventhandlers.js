@@ -327,7 +327,11 @@ async function handleArchiveFile(archiveFilePath, bucketId, objectId, timestamp,
         errorCount++;
         const errorMsg = error instanceof Error ? error.message : String(error);
         const errorStack = error instanceof Error ? error.stack : '';
-        console.error(`Error processing DICOM ${path.basename(dcmFile)}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
+        console.error(JSON.stringify({
+          message: `Error processing DICOM ${path.basename(dcmFile)}`,
+          error: errorMsg,
+          stack: errorStack || null,
+        }));
       } finally {
         // Delete processed file to free disk space
         try {
@@ -344,7 +348,11 @@ async function handleArchiveFile(archiveFilePath, bucketId, objectId, timestamp,
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : '';
-    console.error(`Error processing ${archiveType} file ${archiveUriPath}: ${errorMsg}${errorStack ? '\n' + errorStack : ''}`);
+    console.error(JSON.stringify({
+      message: `Error processing ${archiveType} file ${archiveUriPath}`,
+      error: errorMsg,
+      stack: errorStack || null,
+    }));
   } finally {
     // Clean up temporary directory
     if (tempDir) {
@@ -365,6 +373,8 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
   const timestamp = new Date();
   const version = msgData.generation;
   const storageClass = msgData.storageClass || null;
+  const rawFileSize = Number(msgData.size);
+  const fileSize = Number.isFinite(rawFileSize) ? rawFileSize : null;
 
   if (isParallelCompositeUploadObject(objectId)) {
     if (DEBUG_MODE) {
@@ -400,7 +410,12 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
     // The object has been replaced with a new version
     case consts.GCS_OBJ_FINALIZE: {
       const uriPath = gcs.createUriPath(bucketId, objectId);
-      const fileSize = Number(msgData.size || 0) || null;
+      if (fileSize === 0) {
+        if (DEBUG_MODE) {
+          console.log(`Ignoring zero-size finalize event: ${uriPath}`);
+        }
+        break;
+      }
       let tempDir = null;
       try {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));

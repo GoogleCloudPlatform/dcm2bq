@@ -318,6 +318,37 @@ describe("eventhandlers", () => {
       assert.strictEqual(bqInsertStub.callCount, 0, "Should not persist rows for temporary parallel composite objects");
     });
 
+    it("should ignore zero-size finalize objects", async function() {
+      this.timeout(5000);
+
+      mockFile.download.resetHistory();
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: "test-bucket",
+            objectId: "empty.dcm"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "empty.dcm",
+            generation: "123456",
+            size: "0"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      assert.strictEqual(mockFile.download.callCount, 0, "Should not download zero-size finalize objects");
+      assert.strictEqual(bqInsertStub.callCount, 0, "Should not persist rows for zero-size finalize objects");
+    });
+
     it("should persist metadata when embedding fails with non-retryable error", async function() {
       this.timeout(5000);
 

@@ -24,6 +24,30 @@ const { DEBUG_MODE } = require("./utils");
 const pkg = require("../package.json");
 const { PerfCtx } = require("./perf");
 
+function serializeErrorForLog(error) {
+  if (!error || typeof error !== "object") {
+    return { message: String(error) };
+  }
+
+  const serialized = {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    stack: error.stack,
+    retryable: error.retryable,
+  };
+
+  if (error.response) {
+    serialized.response = {
+      status: error.response.status,
+      statusText: error.response.statusText,
+      data: error.response.data,
+    };
+  }
+
+  return serialized;
+}
+
 const app = express();
 
 app.use(express.json());
@@ -84,7 +108,12 @@ function handleHttpError(req, res, e) {
   
   err.messageId = req.body?.message?.messageId || "unknown";
   res.status(err.code).json({ code: err.code, messageId: err.messageId, reason: err.message });
-  console.error(e);
+  console.error(JSON.stringify({
+    message: "Request failed",
+    error: serializeErrorForLog(e),
+    messageId: err.messageId,
+    statusCode: err.code,
+  }));
 }
 
 class HttpServer {
@@ -106,7 +135,7 @@ class HttpServer {
       if (error?.code === "EADDRINUSE") {
         console.error(`Failed to bind to port ${this.port}: address already in use.`);
       } else {
-        console.error("HTTP server error:", error);
+        console.error(JSON.stringify({ message: "HTTP server error", error: serializeErrorForLog(error) }));
       }
       process.exitCode = 1;
     });

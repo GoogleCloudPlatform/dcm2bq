@@ -33,8 +33,8 @@ async function insert(obj) {
       errors: error.errors,
       name: error.name,
       code: error.code
-    }, null, 2));
-    console.error('Row data being inserted:', JSON.stringify(obj, null, 2));
+    }));
+    console.error('Row data being inserted:', JSON.stringify(obj));
     
     let errorDetails = 'Unknown error';
     if (error.errors && Array.isArray(error.errors) && error.errors.length > 0) {

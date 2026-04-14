@@ -84,7 +84,10 @@ async function renderDicomImage(metadata, dicomInput) {
     await new Promise((resolve, reject) => {
       execFile(scriptPath, args, (error, stdout, stderr) => {
         if (error) {
-          console.error(`convert_dcm_to_jpg.sh execution failed: ${stderr}`);
+          console.error(JSON.stringify({
+            message: "convert_dcm_to_jpg.sh execution failed",
+            stderr,
+          }));
           const enhancedError = new Error(error.message);
           enhancedError.cause = error;
           enhancedError.stderr = stderr;
@@ -98,13 +101,16 @@ async function renderDicomImage(metadata, dicomInput) {
     const jpgBuffer = await readFile(jpgPath);
     return jpgBuffer;
   } catch (error) {
-    const stderrDetails = error?.stderr ? `\n${error.stderr}` : "";
-    console.error(`Could not render DICOM image for embedding using dcmnorm renderer: ${error.message}${stderrDetails}`);
+    console.error(JSON.stringify({
+      message: "Could not render DICOM image for embedding using dcmnorm renderer",
+      error: error?.message || String(error),
+      stderr: error?.stderr || null,
+    }));
     return null;
   } finally {
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true }).catch((cleanupError) =>
-        console.error(`Failed to clean up temporary directory ${tempDir}:`, cleanupError)
+        console.error(`Failed to clean up temporary directory ${tempDir}: ${cleanupError?.message || String(cleanupError)}`)
       );
     }
   }
