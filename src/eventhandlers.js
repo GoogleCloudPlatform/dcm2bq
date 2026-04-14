@@ -128,7 +128,6 @@ async function processDicom(dicomFilePath, uriPath) {
   const shouldCreateInput = embeddingInputConfig?.gcsBucketPath;
   // Check if we should generate actual embeddings (call Vertex AI)
   const shouldGenerateEmbedding = embeddingInputConfig?.vector?.model;
-  const fileStats = await fs.stat(dicomFilePath);
   
   // Generate embeddings/input if configured.
   // Only retryable embedding errors should fail the event and trigger retries.
