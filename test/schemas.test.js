@@ -44,11 +44,12 @@ describe("schemas", () => {
 
   it("matchEventSchema (fail)", () => {
     const data = utils.deepClone(gcsPubSubUnwrapExample);
-    data.message.attributes.objectId = "test.jpg";
+    data.message.attributes.payloadFormat = "INVALID_FORMAT";
     try {
       matchEventSchema(data);
-      assert.fail("Should have thrown an error for invalid object type");
+      assert.fail("Should have thrown an error for invalid payload format");
     } catch (e) {
+      assert.ok(String(e.message || e).includes("GCS_PUBSUB_UNWRAP"), "Should fail GCS schema, not route to HCAPI schema");
       assert.ok(e, "Should throw an error for schema validation failure");
     }
   });

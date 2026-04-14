@@ -106,7 +106,7 @@ addSchema(
             properties: {
               payloadFormat: { const: consts.GCS_PUBSUB_MSG_V1 },
               eventType: { enum: consts.GCS_EVENT_TYPES },
-              objectId: { type: "string", pattern: "\\.(dcm|DCM|dicom|zip|tar\\.gz|tgz)$" },
+              objectId: { type: "string" },
             },
           },
           data: {
@@ -148,7 +148,36 @@ function getSchema(key) {
   return ajv.getSchema(key);
 }
 
+function isGcsLikeEvent(obj) {
+  const attrs = obj && obj.message && obj.message.attributes;
+  if (!attrs || typeof attrs !== "object") {
+    return false;
+  }
+
+  if (attrs.payloadFormat === consts.GCS_PUBSUB_MSG_V1) {
+    return true;
+  }
+  if (typeof attrs.eventType === "string" && consts.GCS_EVENT_TYPES.includes(attrs.eventType)) {
+    return true;
+  }
+  if (typeof attrs.bucketId === "string" || typeof attrs.objectId === "string") {
+    return true;
+  }
+
+  return false;
+}
+
 function matchEventSchema(obj) {
+  // Never route GCS-like payloads to HCAPI handler.
+  if (isGcsLikeEvent(obj)) {
+    const validateGcs = ajv.getSchema(consts.GCS_PUBSUB_UNWRAP);
+    if (validateGcs(obj)) {
+      return consts.GCS_PUBSUB_UNWRAP;
+    }
+    const gcsErrors = (validateGcs.errors || []).map((e) => `${e.instancePath || "root"}: ${e.message}`).join("; ");
+    throw utils.createHttpError(400, `GCS_PUBSUB_UNWRAP validation failed: ${gcsErrors}`);
+  }
+
   const schema = consts.EVENT_HANDLER_NAMES.find((s) => {
     const validate = ajv.getSchema(s);
     return validate(obj);

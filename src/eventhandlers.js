@@ -240,6 +240,21 @@ function getArchiveType(objectId) {
   return null;
 }
 
+function isSupportedDicomObjectPath(objectId) {
+  if (!objectId || typeof objectId !== "string") {
+    return false;
+  }
+  const lower = objectId.toLowerCase();
+  return lower.endsWith(".dcm") || lower.endsWith(".dicom") || lower.endsWith(".zip") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
+}
+
+function isParallelCompositeUploadObject(objectId) {
+  if (!objectId || typeof objectId !== "string") {
+    return false;
+  }
+  return objectId.toLowerCase().includes("/gcloud/tmp/parallel_composite_uploads/");
+}
+
 /**
  * Extract supported archive to a temporary directory.
  * @param {('zip'|'tar')} archiveType The archive format
@@ -350,6 +365,20 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
   const timestamp = new Date();
   const version = msgData.generation;
   const storageClass = msgData.storageClass || null;
+
+  if (isParallelCompositeUploadObject(objectId)) {
+    if (DEBUG_MODE) {
+      console.log(`Ignoring temporary parallel composite upload event: gs://${bucketId}/${objectId} (${eventType})`);
+    }
+    return;
+  }
+
+  if (!isSupportedDicomObjectPath(objectId)) {
+    if (DEBUG_MODE) {
+      console.log(`Ignoring unsupported GCS object event: gs://${bucketId}/${objectId} (${eventType})`);
+    }
+    return;
+  }
   
   switch (eventType) {
     // The object is no longer current

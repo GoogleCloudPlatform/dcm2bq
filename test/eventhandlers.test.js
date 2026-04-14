@@ -288,6 +288,36 @@ describe("eventhandlers", () => {
         "Path should be the DICOM file uriPath");
     });
 
+    it("should ignore temporary parallel composite upload objects", async function() {
+      this.timeout(5000);
+
+      mockFile.download.resetHistory();
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_ARCHIVE",
+            bucketId: "test-bucket",
+            objectId: "gcloud/tmp/parallel_composite_uploads/some-temp-object"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "gcloud/tmp/parallel_composite_uploads/some-temp-object",
+            generation: "123456"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      assert.strictEqual(mockFile.download.callCount, 0, "Should not download temporary parallel composite objects");
+      assert.strictEqual(bqInsertStub.callCount, 0, "Should not persist rows for temporary parallel composite objects");
+    });
+
     it("should persist metadata when embedding fails with non-retryable error", async function() {
       this.timeout(5000);
 

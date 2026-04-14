@@ -474,7 +474,7 @@ resource "google_storage_notification" "bucket_notification" {
   bucket         = local.bucket_name
   payload_format = "JSON_API_V1"
   topic          = google_pubsub_topic.gcs_events.id
-  event_types    = ["OBJECT_FINALIZE", "OBJECT_DELETE", "OBJECT_ARCHIVE", "OBJECT_METADATA_UPDATE"]
+  event_types    = ["OBJECT_FINALIZE", "OBJECT_DELETE"]
 
   depends_on = [
     google_pubsub_topic.gcs_events,
@@ -488,6 +488,7 @@ resource "google_pubsub_subscription" "gcs_to_cloudrun" {
   topic                      = google_pubsub_topic.gcs_events.name
   ack_deadline_seconds       = 600      # 10 minutes to process before retry
   message_retention_duration = "86400s" # 1 day
+  filter                     = "attributes.payloadFormat = \"JSON_API_V1\" AND (attributes.eventType = \"OBJECT_FINALIZE\" OR attributes.eventType = \"OBJECT_DELETE\") AND !(hasPrefix(attributes.objectId, \"gcloud/tmp/parallel_composite_uploads/\"))"
 
   expiration_policy {
     ttl = ""
