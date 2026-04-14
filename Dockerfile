@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Use the repo-managed dcmnorm binary and place it on PATH.
 COPY bin/dcmnorm /usr/local/bin/dcmnorm
-RUN chmod +x /usr/local/bin/dcmnorm
+RUN chmod 755 /usr/local/bin/dcmnorm
 
 # Install npm dependencies
 WORKDIR /usr/src/app

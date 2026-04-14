@@ -99,6 +99,18 @@ async function processDicom(dicomFilePath, uriPath) {
   const bulkDataRoot = configProvidedOptions.explicitBulkDataRoot ? uriPath : "";
   const outputOptions = deepAssign({}, configProvidedOptions, { bulkDataRoot });
 
+  // Validate file is readable before parsing
+  let fileStats;
+  try {
+    fileStats = await fs.stat(dicomFilePath);
+    if (fileStats.size === 0) {
+      throw new Error(`DICOM file is empty (0 bytes)`);
+    }
+  } catch (statError) {
+    const errorMsg = statError instanceof Error ? statError.message : String(statError);
+    throw createNonRetryableError(`Failed to access DICOM file: ${errorMsg}`);
+  }
+
   let json;
   try {
     const fileUrl = url.pathToFileURL(dicomFilePath);
@@ -107,7 +119,7 @@ async function processDicom(dicomFilePath, uriPath) {
   } catch (error) {
     // DICOM parsing errors are non-retryable - the file is permanently invalid
     const errorMsg = error instanceof Error ? error.message : String(error);
-    throw createNonRetryableError(`Failed to parse DICOM file: ${errorMsg}`);
+    throw createNonRetryableError(`Failed to parse DICOM file (${fileStats.size} bytes): ${errorMsg}`);
   }
   
   let embeddingsResult = null;
@@ -367,6 +379,12 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
         const localFilePath = path.join(tempDir, path.basename(objectId || 'downloaded-object'));
         await gcs.downloadToFile(bucketId, objectId, localFilePath);
         perfCtx.addRef("afterGcsDownloadToFile");
+
+        // Validate downloaded file size matches expected size
+        const downloadedStats = await fs.stat(localFilePath);
+        if (fileSize && downloadedStats.size !== fileSize) {
+          throw createNonRetryableError(`Downloaded file size mismatch: expected ${fileSize} bytes, got ${downloadedStats.size} bytes`);
+        }
 
         const archiveType = getArchiveType(objectId);
         if (archiveType) {

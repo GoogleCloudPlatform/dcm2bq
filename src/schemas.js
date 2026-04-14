@@ -154,7 +154,18 @@ function matchEventSchema(obj) {
     return validate(obj);
   });
   if (!schema) {
-    throw utils.createHttpError(400, `No match to supported schemas: ${consts.EVENT_HANDLER_NAMES}`);
+    // Include validation errors to help diagnose schema mismatches
+    const errors = [];
+    for (const handlerName of consts.EVENT_HANDLER_NAMES) {
+      const validate = ajv.getSchema(handlerName);
+      validate(obj);
+      if (validate.errors && validate.errors.length > 0) {
+        const errorDetail = validate.errors.map(e => `${e.instancePath || 'root'}: ${e.message}`).join("; ");
+        errors.push(`${handlerName}: ${errorDetail}`);
+      }
+    }
+    const errorDetail = errors.length > 0 ? ` Validation errors: ${errors.join(" | ")}` : "";
+    throw utils.createHttpError(400, `No match to supported schemas: ${consts.EVENT_HANDLER_NAMES}${errorDetail}`);
   }
   return schema;
 }

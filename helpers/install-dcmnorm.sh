@@ -144,12 +144,12 @@ tar -xzf dcmnorm.tar.gz
 if [ -f "dcmnorm" ]; then
     # Single binary file
     cp dcmnorm "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/dcmnorm"
+    chmod 755 "$INSTALL_DIR/dcmnorm"
     echo "✓ dcmnorm installed to $INSTALL_DIR/dcmnorm"
 elif [ -d "dcmnorm" ]; then
     # Directory structure
     cp -r dcmnorm/* "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/dcmnorm" 2>/dev/null || true
+    chmod 755 "$INSTALL_DIR/dcmnorm" 2>/dev/null || true
     echo "✓ dcmnorm installed to $INSTALL_DIR/"
 else
     echo "Error: Could not find dcmnorm binary in extracted archive" >&2
