@@ -16,9 +16,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INSTALL_DIR="$REPO_ROOT/bin"
+INSTALL_DIR="${HOME}/.cargo/bin"
 DEFAULT_VERSION="latest"
 MIN_SUPPORTED_VERSION="0.1.3"
 GITHUB_REPO="pohcee/dcmnorm"
@@ -159,13 +157,10 @@ else
 fi
 
 # Verify installation
-if ! "$INSTALL_DIR/dcmnorm" --help >/dev/null 2>&1; then
-    echo "Warning: Could not verify installation with --help flag" >&2
+if ! dcmnorm --help >/dev/null 2>&1; then
+    echo "Warning: Could not verify installation. Ensure $INSTALL_DIR is in your PATH." >&2
+    echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" >&2
 fi
-
-echo ""
-echo "To use dcmnorm locally, add it to your PATH:"
-echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
 
 echo ""
 echo "Installation complete!"

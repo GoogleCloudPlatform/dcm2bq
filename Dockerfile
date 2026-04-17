@@ -19,13 +19,14 @@ ENV PATH=/usr/local/bin:${PATH}
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates ffmpeg libstdc++6 \
+    ca-certificates curl ffmpeg libstdc++6 \
     libpng16-16 libxml2 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-# Use the repo-managed dcmnorm binary and place it on PATH.
-COPY bin/dcmnorm /usr/local/bin/dcmnorm
-RUN chmod 755 /usr/local/bin/dcmnorm
+# Download and install dcmnorm from GitHub releases
+RUN curl -fsSL "https://github.com/pohcee/dcmnorm/releases/latest/download/dcmnorm-linux-x86_64.tar.gz" \
+    | tar -xz -C /usr/local/bin dcmnorm \
+    && chmod 755 /usr/local/bin/dcmnorm
 
 # Install npm dependencies
 WORKDIR /usr/src/app
