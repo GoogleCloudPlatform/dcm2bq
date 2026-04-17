@@ -32,7 +32,7 @@
     "@playwright/test": "^1.40.0",
     "mocha": "^10.2.0",
     "nodemon": "^3.0.2",
-    "release-it": "^19.0.4"
+    "release-it": "^20.0.0"
   },
   "release-it": {
     "github": {
