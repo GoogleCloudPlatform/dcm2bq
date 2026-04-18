@@ -174,31 +174,47 @@ resource "google_bigquery_table" "instances_view" {
 
   view {
     query          = <<-EOT
-      WITH latest_by_path AS (
+      WITH latest_tombstone_by_object AS (
         SELECT
-          ROW_NUMBER() OVER (PARTITION BY path, version ORDER BY timestamp DESC) AS _row_id,
-          *
+          path AS base_path,
+          version,
+          MAX(timestamp) AS tombstone_timestamp
         FROM
           `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}`
+        WHERE
+          metadata IS NULL
+        GROUP BY
+          base_path,
+          version
+      ),
+      active_not_deleted AS (
+        SELECT
+          active.*
+        FROM
+          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}` active
+        LEFT JOIN
+          latest_tombstone_by_object tombstone
+        ON
+          tombstone.base_path = SPLIT(active.path, '#')[SAFE_OFFSET(0)]
+          AND tombstone.version = active.version
+          AND tombstone.tombstone_timestamp >= active.timestamp
+        WHERE
+          active.metadata IS NOT NULL
+          AND tombstone.base_path IS NULL
+      ),
+      latest_by_id AS (
+        SELECT
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY timestamp DESC) AS _row_id,
+          *
+        FROM
+          active_not_deleted
       )
       SELECT
         l.* EXCEPT(_row_id)
       FROM
-        latest_by_path l
+        latest_by_id l
       WHERE
         l._row_id = 1
-        AND l.metadata IS NOT NULL
-        AND NOT EXISTS (
-          SELECT
-            1
-          FROM
-            `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}` tombstone
-          WHERE
-            tombstone.path = SPLIT(l.path, '#')[SAFE_OFFSET(0)]
-            AND tombstone.version = l.version
-            AND tombstone.metadata IS NULL
-            AND tombstone.timestamp >= l.timestamp
-        )
     EOT
     use_legacy_sql = false
   }
