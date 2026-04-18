@@ -66,6 +66,8 @@ Before running vector searches, ensure you have created the embedding model and 
 
 ### Dependencies
 
+`dcm2bq` uses `dcmnorm`, a very fast, Rust-based DICOM parser and renderer.
+
 For DICOM parsing and image rendering, `dcm2bq` relies on the external `dcmnorm` CLI binary in the execution environment.
 
 If you use MPEG4 rendering via dcmnorm, `ffmpeg` must also be installed and available on `PATH`.
