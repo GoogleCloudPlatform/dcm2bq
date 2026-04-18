@@ -16,7 +16,7 @@
 
 const fs = require("fs");
 const { BigQuery } = require("@google-cloud/bigquery");
-const { Storage } = require("@google-cloud/storage");
+const { PubSub } = require("@google-cloud/pubsub");
 
 /**
  * Parse the data field (base64 encoded JSON) to extract file information
@@ -24,11 +24,33 @@ const { Storage } = require("@google-cloud/storage");
  * @returns {object} Parsed object information
  */
 function parseDataField(base64Data) {
+  if (!base64Data) return null;
+
+  if (Buffer.isBuffer(base64Data)) {
+    const text = base64Data.toString("utf-8").trim();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return text;
+    }
+  }
+
   try {
-    const decoded = Buffer.from(base64Data, "base64").toString("utf-8");
-    return JSON.parse(decoded);
-  } catch (error) {
-    console.warn("Failed to parse data field:", error.message);
+    const decoded = Buffer.from(String(base64Data), "base64").toString("utf-8");
+    try {
+      return JSON.parse(decoded);
+    } catch (_) {
+      const text = decoded.trim();
+      if (text) return text;
+    }
+  } catch (_) {
+    // Fall through to raw JSON parse below.
+  }
+
+  try {
+    return JSON.parse(String(base64Data));
+  } catch (_) {
     return null;
   }
 }
@@ -39,50 +61,55 @@ function parseDataField(base64Data) {
  * @returns {object} Parsed attributes
  */
 function parseAttributes(attributesJson) {
+  if (!attributesJson) return null;
+  if (typeof attributesJson === "object") return attributesJson;
   try {
     return JSON.parse(attributesJson);
-  } catch (error) {
-    console.warn("Failed to parse attributes field:", error.message);
+  } catch (_) {
     return null;
   }
 }
 
-/**
- * Extract file information from dead letter record
- * @param {object} row - BigQuery row from dead_letter table
- * @returns {object} File information {bucket, name, generation}
- */
-function extractFileInfo(row) {
-  // Try to parse data field first
-  if (row.data) {
-    const data = parseDataField(row.data);
-    if (data && data.bucket && data.name) {
-      return {
-        bucket: data.bucket,
-        name: data.name,
-        generation: data.generation,
-        source: 'data'
-      };
+function extractRequeueTarget(row) {
+  const attrs = row.attributes ? parseAttributes(row.attributes) || {} : {};
+  const data = row.data ? parseDataField(row.data) : null;
+
+  const bucket = data?.bucket || attrs.bucketId;
+  const objectId = data?.name || attrs.objectId;
+  if (bucket && objectId) {
+    const eventData = {
+      ...(data && typeof data === "object" ? data : {}),
+      bucket,
+      name: objectId,
+    };
+    if (eventData.generation || attrs.objectGeneration) {
+      eventData.generation = String(eventData.generation || attrs.objectGeneration);
     }
+
+    return {
+      key: `gcs:${bucket}/${objectId}`,
+      displayPath: `gs://${bucket}/${objectId}`,
+      publishData: Buffer.from(JSON.stringify(eventData), "utf8"),
+      publishAttributes: {
+        payloadFormat: "JSON_API_V1",
+        eventType: "OBJECT_FINALIZE",
+        bucketId: bucket,
+        objectId,
+        ...(eventData.generation ? { objectGeneration: String(eventData.generation) } : {}),
+      },
+    };
   }
 
-  // Fall back to attributes field
-  if (row.attributes) {
-    const attrs = parseAttributes(row.attributes);
-    if (attrs) {
-      const bucket = attrs.bucketId;
-      const name = attrs.objectId;
-      const generation = attrs.objectGeneration;
-      
-      if (bucket && name) {
-        return {
-          bucket,
-          name,
-          generation,
-          source: 'attributes'
-        };
-      }
-    }
+  if (typeof data === "string" && data.trim() && /\/dicomWeb\//.test(data)) {
+    const dicomWebPath = data.trim();
+    return {
+      key: `hcapi:${dicomWebPath}`,
+      displayPath: `https://healthcare.googleapis.com/v1/${dicomWebPath}`,
+      publishData: Buffer.from(dicomWebPath, "utf8"),
+      publishAttributes: {
+        ...(attrs && typeof attrs === "object" ? attrs : {}),
+      },
+    };
   }
 
   return null;
@@ -129,22 +156,20 @@ async function listDLQ(config, options) {
     return;
   }
 
-  // Extract file names and buckets
-  const files = new Map(); // key: bucket/name, value: {count, generation}
+  // Extract requeue targets (GCS and HCAPI)
+  const files = new Map(); // key: target.key, value: {count, displayPath}
   let parseErrors = 0;
 
   for (const row of rows) {
-    const fileInfo = extractFileInfo(row);
-    if (fileInfo) {
-      const key = `${fileInfo.bucket}/${fileInfo.name}`;
+    const target = extractRequeueTarget(row);
+    if (target) {
+      const key = target.key;
       if (files.has(key)) {
         files.get(key).count++;
       } else {
         files.set(key, {
           count: 1,
-          bucket: fileInfo.bucket,
-          name: fileInfo.name,
-          generation: fileInfo.generation
+          displayPath: target.displayPath,
         });
       }
     } else {
@@ -164,14 +189,14 @@ async function listDLQ(config, options) {
   console.log(`📁 Failed Files:\n`);
   const sortedFiles = Array.from(files.entries()).sort((a, b) => b[1].count - a[1].count);
   
-  for (const [path, info] of sortedFiles) {
-    console.log(`   ${info.count}x  gs://${path}`);
+  for (const [, info] of sortedFiles) {
+    console.log(`   ${info.count}x  ${info.displayPath}`);
   }
   console.log();
 }
 
 /**
- * Requeue items from dead letter queue by updating GCS object metadata
+ * Requeue items from dead letter queue by publishing Pub/Sub messages
  * @param {object} config - Configuration object
  * @param {object} options - Command options
  */
@@ -191,7 +216,9 @@ async function requeueDLQ(config, options) {
   console.log(`   Limit: ${limit}\n`);
 
   const bigquery = new BigQuery({ projectId });
-  const storage = new Storage({ projectId });
+  const pubsub = new PubSub({ projectId });
+  const requeueTopicName = process.env.PUBSUB_REQUEUE_TOPIC || config.pubsubRequeueTopic || "dcm2bq-gcs-events";
+  const requeueTopic = pubsub.topic(requeueTopicName);
 
   // Query to get items to requeue
   const query = `
@@ -212,26 +239,27 @@ async function requeueDLQ(config, options) {
     return;
   }
 
-  // Extract unique files
-  // Even if a file appears multiple times in DLQ, we only requeue it once
-  const files = new Map(); // key: bucket/name, value: { fileInfo, publishTime, messageIds }
+  // Extract unique requeue targets.
+  // Even if an object appears multiple times in DLQ, publish only once.
+  const files = new Map(); // key: target.key, value: { target, publishTime, messageIds }
   let parseErrors = 0;
 
   for (const row of rows) {
-    const fileInfo = extractFileInfo(row);
-    if (fileInfo) {
-      const key = `${fileInfo.bucket}/${fileInfo.name}`;
+    const target = extractRequeueTarget(row);
+    if (target) {
+      const key = target.key;
       const rowPublishTime = row.publish_time ? new Date(row.publish_time.value || row.publish_time).getTime() : 0;
       const messageId = row.message_id;
       const existing = files.get(key);
       
       if (!existing) {
-        files.set(key, { fileInfo, publishTime: rowPublishTime, messageIds: [messageId] });
+        files.set(key, { target, publishTime: rowPublishTime, messageIds: [messageId] });
       } else {
         // Keep the latest publish_time and accumulate all message_ids
         existing.messageIds.push(messageId);
         if (rowPublishTime > existing.publishTime) {
           existing.publishTime = rowPublishTime;
+          existing.target = target;
         }
       }
     } else {
@@ -244,43 +272,31 @@ async function requeueDLQ(config, options) {
     console.log(`⚠️  ${parseErrors} records could not be parsed\n`);
   }
 
-  // Requeue files by updating metadata
+  // Requeue files by publishing schema-compliant Pub/Sub messages
   let succeeded = 0;
   let failed = 0;
   const messageIdsToDelete = [];
 
   const orderedFiles = Array.from(files.entries()).sort((a, b) => b[1].publishTime - a[1].publishTime);
 
-  for (const [path, entry] of orderedFiles) {
-    const fileInfo = entry.fileInfo;
+  for (const [, entry] of orderedFiles) {
     try {
-      const bucket = storage.bucket(fileInfo.bucket);
-      const file = bucket.file(fileInfo.name);
-
-      // Check if file exists
-      const [exists] = await file.exists();
-      if (!exists) {
-        console.log(`   ⚠️  File not found: gs://${path}`);
-        failed++;
-        continue;
-      }
-
-      // Update metadata to trigger reprocessing
-      // Adding/updating metadata causes GCS to emit an OBJECT_METADATA_UPDATE event
-      await file.setMetadata({
-        metadata: {
-          'dcm2bq-reprocess': new Date().toISOString(),
-          'dcm2bq-requeue-source': 'dlq'
-        }
+      await requeueTopic.publishMessage({
+        data: entry.target.publishData,
+        attributes: {
+          ...entry.target.publishAttributes,
+          dcm2bqRequeueSource: 'dlq',
+          dcm2bqRequeueAt: new Date().toISOString(),
+        },
       });
 
-      console.log(`   ✅ Requeued: gs://${path}`);
+      console.log(`   ✅ Requeued: ${entry.target.displayPath}`);
       succeeded++;
       
       // Track message IDs for deletion
       messageIdsToDelete.push(...entry.messageIds);
     } catch (error) {
-      console.log(`   ❌ Failed: gs://${path} - ${error.message}`);
+      console.log(`   ❌ Failed: ${entry.target.displayPath} - ${error.message}`);
       failed++;
     }
   }

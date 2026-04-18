@@ -16,6 +16,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/pubsub": "^5.2.0",
     "@google-cloud/storage": "^7.17.0",
     "@google/genai": "^1.18.0",
     "adm-zip": "^0.5.16",
@@ -27,7 +28,6 @@
     "tar": "^7.4.3"
   },
   "devDependencies": {
-    "@google-cloud/pubsub": "^5.2.0",
     "axios": "^1.11.0",
     "glob": "^13.0.0",
     "mocha": "^11.3.0",

@@ -38,5 +38,8 @@ module.exports = {
     
     // BigQuery location (must match dataset location)
     bqLocation: process.env.BQ_LOCATION || "US",
+
+    // Pub/Sub topic used to publish requeue messages back to the processing pipeline
+    requeueTopic: process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
   },
 };

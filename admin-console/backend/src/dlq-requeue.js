@@ -1,4 +1,4 @@
-const { extractDlqFileInfo } = require("./dlq-utils");
+const { extractDlqRequeueTarget } = require("./dlq-utils");
 
 function buildEmptyRequeueResult(requestedMessageCount = 0) {
   return {
@@ -29,7 +29,7 @@ function resolveDeleteBatchSize() {
 
 async function applyRequeueFromRows({
   bigquery,
-  storage,
+  pubsubTopic,
   config,
   location,
   rows,
@@ -55,25 +55,26 @@ async function applyRequeueFromRows({
   const errors = [];
 
   for (const row of matchedRows) {
-    const fileInfo = extractDlqFileInfo(row);
-    if (!fileInfo?.bucket || !fileInfo?.name) {
+    const target = extractDlqRequeueTarget(row);
+    if (!target?.key) {
       parseErrorCount++;
       errors.push(`Could not determine file path for DLQ message ${row.message_id}`);
       continue;
     }
 
-    const key = `${fileInfo.bucket}/${fileInfo.name}`;
+    const key = target.key;
     const rowPublishTime = row.publish_time ? new Date(row.publish_time.value || row.publish_time).getTime() : 0;
     const existing = files.get(key);
 
     if (!existing) {
-      files.set(key, { fileInfo, publishTime: rowPublishTime, messageIds: [row.message_id] });
+      files.set(key, { target, publishTime: rowPublishTime, messageIds: [row.message_id] });
       continue;
     }
 
     existing.messageIds.push(row.message_id);
     if (rowPublishTime > existing.publishTime) {
       existing.publishTime = rowPublishTime;
+      existing.target = target;
     }
   }
 
@@ -130,11 +131,12 @@ async function applyRequeueFromRows({
 
   for (const [path, entry] of orderedFiles) {
     try {
-      const file = storage.bucket(entry.fileInfo.bucket).file(entry.fileInfo.name);
-      await file.setMetadata({
-        metadata: {
-          "dcm2bq-reprocess": now(),
-          "dcm2bq-requeue-source": requeueSource,
+      await pubsubTopic.publishMessage({
+        data: entry.target.publishDataBuffer,
+        attributes: {
+          ...entry.target.publishAttributes,
+          dcm2bqRequeueSource: requeueSource,
+          dcm2bqRequeueAt: now(),
         },
       });
 
@@ -145,7 +147,7 @@ async function applyRequeueFromRows({
       await emitProgress(onProgress, {
         stage: "item",
         status: "success",
-        filePath: `gs://${path}`,
+        filePath: entry.target.displayPath,
         totalFiles,
         processedFiles,
         requeuedCount,
@@ -154,12 +156,12 @@ async function applyRequeueFromRows({
       });
     } catch (error) {
       failedFileCount++;
-      errors.push(`Failed to requeue gs://${path}: ${error?.message || "Unknown error"}`);
+      errors.push(`Failed to requeue ${entry.target.displayPath}: ${error?.message || "Unknown error"}`);
       processedFiles++;
       await emitProgress(onProgress, {
         stage: "item",
         status: "failed",
-        filePath: `gs://${path}`,
+        filePath: entry.target.displayPath,
         error: error?.message || "Unknown error",
         totalFiles,
         processedFiles,
@@ -194,7 +196,7 @@ async function applyRequeueFromRows({
 
 async function requeueDlqMessages({
   bigquery,
-  storage,
+  pubsubTopic,
   config,
   location,
   messageIds,
@@ -230,7 +232,7 @@ async function requeueDlqMessages({
 
   return applyRequeueFromRows({
     bigquery,
-    storage,
+    pubsubTopic,
     config,
     location,
     rows,
@@ -243,7 +245,7 @@ async function requeueDlqMessages({
 
 async function requeueAllDlqMessages({
   bigquery,
-  storage,
+  pubsubTopic,
   config,
   location,
   requeueSource = "admin-console",
@@ -269,7 +271,7 @@ async function requeueAllDlqMessages({
   const requestedMessageCount = Array.isArray(rows) ? rows.length : 0;
   return applyRequeueFromRows({
     bigquery,
-    storage,
+    pubsubTopic,
     config,
     location,
     rows,

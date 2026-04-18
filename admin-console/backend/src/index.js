@@ -4,6 +4,7 @@ const path = require("path");
 const { pipeline } = require("stream/promises");
 const express = require("express");
 const { BigQuery } = require("@google-cloud/bigquery");
+const { PubSub } = require("@google-cloud/pubsub");
 const { Storage } = require("@google-cloud/storage");
 const { WebSocketServer } = require("ws");
 
@@ -31,8 +32,10 @@ app.set("trust proxy", true);
 // Load configuration first, then initialize BigQuery with correct projectId
 const CONFIG = config.get().admin;
 const bigquery = CONFIG.projectId ? new BigQuery({ projectId: CONFIG.projectId }) : new BigQuery();
+const pubsub = CONFIG.projectId ? new PubSub({ projectId: CONFIG.projectId }) : new PubSub();
 const storage = new Storage();
 const BQ_LOCATION = CONFIG.bqLocation || "US";
+const REQUEUE_TOPIC = pubsub.topic(CONFIG.requeueTopic || "dcm2bq-gcs-events");
 
 const frontendDir = path.join(__dirname, "..", "..", "frontend");
 
@@ -112,6 +115,30 @@ function parseWsBinaryPayload(payloadBuffer) {
   const meta = JSON.parse(metaRaw || "{}");
   const dataBuffer = raw.subarray(4 + metaLength);
   return { meta, dataBuffer };
+}
+
+async function publishGcsRequeueMessage(topic, bucket, object, source, generation = null) {
+  const nowIso = new Date().toISOString();
+  const payload = {
+    bucket,
+    name: object,
+    timeCreated: nowIso,
+    updated: nowIso,
+    ...(generation ? { generation: String(generation) } : {}),
+  };
+
+  await topic.publishMessage({
+    data: Buffer.from(JSON.stringify(payload), "utf8"),
+    attributes: {
+      payloadFormat: "JSON_API_V1",
+      eventType: "OBJECT_FINALIZE",
+      bucketId: bucket,
+      objectId: object,
+      ...(generation ? { objectGeneration: String(generation) } : {}),
+      dcm2bqRequeueSource: source,
+      dcm2bqRequeueAt: nowIso,
+    },
+  });
 }
 
 // ============================================================================
@@ -716,7 +743,7 @@ app.post("/api/studies/reprocess", async (req, res) => {
     
     // Get instances and paths for these studies
     const query = `
-      SELECT DISTINCT path
+      SELECT DISTINCT path, version
       FROM ${instancesTable}
       WHERE JSON_VALUE(metadata, '$.StudyInstanceUID') IN UNNEST(@studyIds)
         AND path IS NOT NULL
@@ -728,27 +755,41 @@ app.post("/api/studies/reprocess", async (req, res) => {
       params: { studyIds },
     });
 
-    const filePaths = rows?.map(r => r.path).filter(Boolean) || [];
+    const filePaths = rows?.map((r) => r.path).filter(Boolean) || [];
 
-    const normalizedPaths = filePaths
-      .map((filePath) => String(filePath || "").trim())
-      .filter(Boolean)
-      .map((filePath) => (filePath.includes("#") ? filePath.split("#")[0] : filePath));
+    const normalizedObjects = (rows || [])
+      .map((row) => {
+        const fullPath = String(row?.path || "").trim();
+        if (!fullPath) return null;
+        return {
+          path: fullPath,
+          basePath: fullPath.includes("#") ? fullPath.split("#")[0] : fullPath,
+          generation: row?.version != null ? String(row.version) : null,
+        };
+      })
+      .filter(Boolean);
 
-    // Deduplicate by normalized base object path to prevent repeated updates
-    // for archive member references that share the same .zip/.tar/.tgz source object.
-    const uniquePaths = Array.from(new Set(normalizedPaths));
+    // Deduplicate by base object path + generation so requeue targets the exact
+    // object version that produced the existing rows.
+    const uniqueObjects = Array.from(
+      new Map(
+        normalizedObjects.map((entry) => [
+          `${entry.basePath}@@${entry.generation || ""}`,
+          entry,
+        ]),
+      ).values(),
+    );
 
-    console.log(`Reprocess request: ${studyIds.length} studies, ${filePaths.length} total paths, ${uniquePaths.length} unique base paths to update`);
+    console.log(`Reprocess request: ${studyIds.length} studies, ${filePaths.length} total paths, ${uniqueObjects.length} unique object versions to requeue`);
     
     let succeeded = 0;
     let failed = 0;
     const errors = [];
 
-    // Trigger reprocessing by updating GCS object metadata
-    // This causes GCS to emit OBJECT_METADATA_UPDATE events that Cloud Run is subscribed to
-    for (const filePath of uniquePaths) {
+    // Trigger reprocessing by publishing schema-compliant Pub/Sub messages.
+    for (const entry of uniqueObjects) {
       try {
+        const filePath = entry.basePath;
         // Parse normalized GCS path (gs://bucket/object/path)
         const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
         
@@ -761,13 +802,7 @@ app.post("/api/studies/reprocess", async (req, res) => {
         const bucket = gsMatch[1];
         const object = gsMatch[2];
 
-        // Update metadata to trigger reprocessing
-        await storage.bucket(bucket).file(object).setMetadata({
-          metadata: {
-            'dcm2bq-reprocess': new Date().toISOString(),
-            'dcm2bq-requeue-source': 'admin-console'
-          }
-        });
+        await publishGcsRequeueMessage(REQUEUE_TOPIC, bucket, object, "admin-console", entry.generation);
 
         succeeded++;
         console.log(`Reprocessing triggered: gs://${bucket}/${object}`);
@@ -783,7 +818,7 @@ app.post("/api/studies/reprocess", async (req, res) => {
       reprocessedFileCount: succeeded,
       failedFileCount: failed,
       filePaths,
-      uniquePaths,
+      uniquePaths: uniqueObjects.map((entry) => entry.basePath),
       succeeded,
       failed,
       errors,
@@ -807,7 +842,7 @@ app.post("/api/dlq/requeue", async (req, res) => {
 
     const result = await requeueDlqMessages({
       bigquery,
-      storage,
+      pubsubTopic: REQUEUE_TOPIC,
       config: CONFIG,
       location: BQ_LOCATION,
       messageIds,
@@ -826,7 +861,7 @@ app.post("/api/dlq/requeue-all", async (_, res) => {
   try {
     const result = await requeueAllDlqMessages({
       bigquery,
-      storage,
+      pubsubTopic: REQUEUE_TOPIC,
       config: CONFIG,
       location: BQ_LOCATION,
       requeueSource: "admin-console",
@@ -1400,7 +1435,7 @@ wss.on("connection", (socket, request) => {
       if (action === "dlq.requeueAll") {
         const result = await requeueAllDlqMessages({
           bigquery,
-          storage,
+          pubsubTopic: REQUEUE_TOPIC,
           config: CONFIG,
           location: BQ_LOCATION,
           requeueSource: "admin-console",

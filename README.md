@@ -208,7 +208,7 @@ This command queries the BigQuery dead letter table and displays a summary showi
 dcm2bq dlq requeue
 ```
 
-This command reads the dead letter queue, identifies the failed GCS files, and triggers reprocessing by updating their metadata. Each file will be reprocessed via Cloud Run. You can limit the number of items with `--limit 50`.
+This command reads the dead letter queue, identifies failed GCS and HCAPI objects, and republishes schema-compliant Pub/Sub messages so they are processed again via Cloud Run. You can limit the number of items with `--limit 50`. By default it publishes to topic `dcm2bq-gcs-events`; override with `PUBSUB_REQUEUE_TOPIC` if needed.
 
 ## Configuration
 

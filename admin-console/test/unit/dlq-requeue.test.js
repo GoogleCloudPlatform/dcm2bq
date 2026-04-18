@@ -5,7 +5,7 @@ const { requeueDlqMessages, requeueAllDlqMessages } = require('../../backend/src
 describe('requeueDlqMessages', () => {
   it('requeues unique files and only deletes successful message ids', async () => {
     const queryCalls = [];
-    const metadataUpdates = [];
+    const publishedMessages = [];
 
     const bigquery = {
       async query(request) {
@@ -39,26 +39,19 @@ describe('requeueDlqMessages', () => {
       },
     };
 
-    const storage = {
-      bucket(bucketName) {
-        return {
-          file(fileName) {
-            return {
-              async setMetadata(payload) {
-                if (fileName === 'missing-file.dcm') {
-                  throw new Error('not found');
-                }
-                metadataUpdates.push({ bucketName, fileName, payload });
-              },
-            };
-          },
-        };
+    const pubsubTopic = {
+      async publishMessage(message) {
+        const attrs = message.attributes || {};
+        if (attrs.objectId === 'missing-file.dcm') {
+          throw new Error('not found');
+        }
+        publishedMessages.push(message);
       },
     };
 
     const result = await requeueDlqMessages({
       bigquery,
-      storage,
+      pubsubTopic,
       config: {
         projectId: 'proj',
         datasetId: 'dataset',
@@ -77,21 +70,61 @@ describe('requeueDlqMessages', () => {
     assert.equal(result.parseErrorCount, 1);
     assert.equal(result.errors.length, 2);
 
-    assert.equal(metadataUpdates.length, 1);
-    assert.deepEqual(metadataUpdates[0], {
-      bucketName: 'bucket-a',
-      fileName: 'file-a.dcm',
-      payload: {
-        metadata: {
-          'dcm2bq-reprocess': '2026-03-17T12:00:00.000Z',
-          'dcm2bq-requeue-source': 'admin-console',
-        },
-      },
-    });
+    assert.equal(publishedMessages.length, 1);
+    assert.equal(publishedMessages[0].attributes.eventType, 'OBJECT_FINALIZE');
+    assert.equal(publishedMessages[0].attributes.bucketId, 'bucket-a');
+    assert.equal(publishedMessages[0].attributes.objectId, 'file-a.dcm');
 
     assert.equal(queryCalls.length, 2);
     assert.deepEqual(queryCalls[0].params, { messageIds: ['msg-1', 'msg-2', 'msg-3', 'msg-4'] });
     assert.deepEqual(queryCalls[1].params, { messageIds: ['msg-1', 'msg-2'] });
+  });
+
+  it('requeues HCAPI payloads by publishing raw dicomWebPath data', async () => {
+    const queryCalls = [];
+    const publishedMessages = [];
+
+    const bigquery = {
+      async query(request) {
+        queryCalls.push(request);
+        if (/^\s*SELECT/i.test(request.query)) {
+          return [[
+            {
+              message_id: 'msg-h1',
+              publish_time: '2026-03-17T10:00:00.000Z',
+              data: Buffer.from('projects/p/locations/l/datasets/d/dicomStores/s/dicomWeb/studies/1/series/2/instances/3').toString('base64'),
+            },
+          ]];
+        }
+        return [[]];
+      },
+    };
+
+    const pubsubTopic = {
+      async publishMessage(message) {
+        publishedMessages.push(message);
+      },
+    };
+
+    const result = await requeueDlqMessages({
+      bigquery,
+      pubsubTopic,
+      config: {
+        projectId: 'proj',
+        datasetId: 'dataset',
+        deadLetterTableId: 'dead_letter',
+      },
+      location: 'US',
+      messageIds: ['msg-h1'],
+      now: () => '2026-03-17T12:00:00.000Z',
+    });
+
+    assert.equal(result.requeuedCount, 1);
+    assert.equal(result.failedFileCount, 0);
+    assert.equal(publishedMessages.length, 1);
+    assert.equal(publishedMessages[0].data.toString('utf8'), 'projects/p/locations/l/datasets/d/dicomStores/s/dicomWeb/studies/1/series/2/instances/3');
+    assert.equal(publishedMessages[0].attributes.dcm2bqRequeueSource, 'admin-console');
+    assert.equal(queryCalls.length, 2);
   });
 
   it('returns zero counts when there are no message ids', async () => {
@@ -103,15 +136,15 @@ describe('requeueDlqMessages', () => {
       },
     };
 
-    const storage = {
-      bucket() {
-        throw new Error('storage should not be used');
+    const pubsubTopic = {
+      async publishMessage() {
+        throw new Error('pubsubTopic should not be used');
       },
     };
 
     const result = await requeueDlqMessages({
       bigquery,
-      storage,
+      pubsubTopic,
       config: {
         projectId: 'proj',
         datasetId: 'dataset',
@@ -144,15 +177,15 @@ describe('requeueAllDlqMessages', () => {
       },
     };
 
-    const storage = {
-      bucket() {
-        throw new Error('storage should not be used');
+    const pubsubTopic = {
+      async publishMessage() {
+        throw new Error('pubsubTopic should not be used');
       },
     };
 
     const result = await requeueAllDlqMessages({
       bigquery,
-      storage,
+      pubsubTopic,
       config: {
         projectId: 'proj',
         datasetId: 'dataset',
@@ -176,7 +209,7 @@ describe('requeueAllDlqMessages', () => {
 
   it('persists partial progress when a later file fails', async () => {
     const queryCalls = [];
-    const metadataUpdates = [];
+    const publishedMessages = [];
     const progressEvents = [];
 
     const bigquery = {
@@ -205,29 +238,18 @@ describe('requeueAllDlqMessages', () => {
       },
     };
 
-    const storage = {
-      bucket(bucketName) {
-        return {
-          file(fileName) {
-            return {
-              async exists() {
-                return [true];
-              },
-              async setMetadata(payload) {
-                metadataUpdates.push({ bucketName, fileName, payload });
-                if (fileName === 'file-b.dcm') {
-                  throw new Error('simulated metadata failure');
-                }
-              },
-            };
-          },
-        };
+    const pubsubTopic = {
+      async publishMessage(message) {
+        publishedMessages.push(message);
+        if (message.attributes?.objectId === 'file-b.dcm') {
+          throw new Error('simulated publish failure');
+        }
       },
     };
 
     const result = await requeueAllDlqMessages({
       bigquery,
-      storage,
+      pubsubTopic,
       config: {
         projectId: 'proj',
         datasetId: 'dataset',
@@ -249,7 +271,7 @@ describe('requeueAllDlqMessages', () => {
     assert.equal(deleteCalls.length, 1);
     assert.deepEqual(deleteCalls[0].params, { messageIds: ['msg-a1', 'msg-a2'] });
 
-    const attemptedFiles = metadataUpdates.map((entry) => entry.fileName);
+    const attemptedFiles = publishedMessages.map((entry) => entry.attributes?.objectId);
     assert.deepEqual(attemptedFiles, ['file-a.dcm', 'file-b.dcm']);
 
     assert.ok(progressEvents.length >= 4);

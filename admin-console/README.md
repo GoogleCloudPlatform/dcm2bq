@@ -29,6 +29,7 @@ The admin console is a standalone UI for exploring DICOM studies and instance da
 - Set `BQ_INSTANCES_TABLE_ID` only if you use delete endpoints (`/api/studies/delete`, `/api/instances/delete`) and need a writable base table.
 - Set `BQ_DEAD_LETTER_TABLE_ID` to your dead letter table.
 - Set `BQ_LOCATION` to match your BigQuery dataset location (e.g., `US`, `EU`, `us-central1`). Defaults to `US`.
+- Set `PUBSUB_REQUEUE_TOPIC` to the ingest Pub/Sub topic that pushes into dcm2bq (defaults to `dcm2bq-gcs-events`).
 - Set `GCS_BUCKET_NAME` (or `ADMIN_UPLOAD_GCS_BUCKET`) to the source DICOM bucket used by your dcm2bq pipeline. The Upload tab writes files to this bucket.
 
 ### Local development
@@ -44,4 +45,5 @@ Use the standalone admin console Terraform in [terraform/README.md](terraform/RE
 ### Permissions
 
 - BigQuery read access to `instancesView` and the dead letter table
-- GCS read/write access for original and extracted assets (write is required for reprocess metadata updates and upload workflows)
+- GCS read/write access for original and extracted assets (write is required for upload workflows)
+- Pub/Sub publish access on the requeue topic (`PUBSUB_REQUEUE_TOPIC`)

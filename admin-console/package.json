@@ -23,6 +23,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@google-cloud/bigquery": "^8.0.0",
+    "@google-cloud/pubsub": "^5.2.0",
     "@google-cloud/storage": "^7.12.0",
     "archiver": "^6.0.0",
     "express": "^5.1.0",

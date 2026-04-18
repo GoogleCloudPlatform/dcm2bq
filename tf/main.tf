@@ -283,6 +283,13 @@ resource "google_project_iam_member" "admin_console_sa_gcs_writer" {
   member  = "serviceAccount:${google_service_account.admin_console_sa[0].email}"
 }
 
+resource "google_project_iam_member" "admin_console_sa_pubsub_publisher" {
+  count  = local.deploy_admin_console ? 1 : 0
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.admin_console_sa[0].email}"
+}
+
 # IAM grants for the Cloud Run service account
 resource "google_project_iam_member" "cloudrun_sa_bq_writer" {
   project = var.project_id
@@ -435,6 +442,11 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
       env {
         name  = "ADMIN_UPLOAD_GCS_BUCKET"
         value = local.bucket_name
+      }
+
+      env {
+        name  = "PUBSUB_REQUEUE_TOPIC"
+        value = google_pubsub_topic.gcs_events.name
       }
 
       resources {
