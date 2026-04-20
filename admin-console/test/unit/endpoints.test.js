@@ -213,6 +213,22 @@ describe('HTTP Endpoints Specification', () => {
       });
     });
 
+    describe('POST /api/dlq/queue-paths', () => {
+      it('should return queue-path counters', () => {
+        const response = {
+          totalPathCount: 12000,
+          succeededCount: 11990,
+          failedCount: 10,
+          results: [],
+        };
+
+        assert.ok(typeof response.totalPathCount === 'number');
+        assert.ok(typeof response.succeededCount === 'number');
+        assert.ok(typeof response.failedCount === 'number');
+        assert.ok(Array.isArray(response.results));
+      });
+    });
+
     describe('POST /api/dlq/delete', () => {
       it('should return deleted count', () => {
         const response = { deletedCount: 3 };
@@ -456,6 +472,7 @@ describe('HTTP Endpoints Specification', () => {
         'dlq.requeue': '/api/dlq/requeue',
         'dlq.requeueAll': '/api/dlq/requeue-all',
         'dlq.delete': '/api/dlq/delete',
+        'dlq.queuePaths': '/api/dlq/queue-paths',
         'process.run': '/api/process/run',
       };
       

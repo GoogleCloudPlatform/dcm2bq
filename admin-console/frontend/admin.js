@@ -1298,6 +1298,193 @@
       }
     });
 
+    // -----------------------------------------------------------------------
+    // Queue Paths Section
+    // -----------------------------------------------------------------------
+
+    const queuePathsState = {
+      parsedPaths: [],
+      file: null,
+      running: false,
+    };
+
+    function parsePathsFile(text) {
+      return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith('#'));
+    }
+
+    function renderQueuePathsList(results) {
+      const list = document.getElementById('queue-paths-list');
+      if (!list) return;
+      list.innerHTML = results.map((r, index) => {
+        const isOk = r.status === 'ok';
+        const isPending = r.status === 'pending';
+        const iconClass = isPending
+          ? 'fa-solid fa-clock queue-paths-icon-pending'
+          : isOk
+            ? 'fa-solid fa-circle-check queue-paths-icon-ok'
+            : 'fa-solid fa-circle-xmark queue-paths-icon-error';
+        const label = isPending ? 'pending' : isOk ? 'queued' : `error: ${escapeHtml(r.error || 'unknown')}`;
+        return `<div class="queue-paths-list-row" data-queue-path-index="${index}">
+          <i class="${iconClass} queue-paths-list-icon" aria-hidden="true"></i>
+          <span class="queue-paths-list-path" title="${escapeHtml(r.path)}">${escapeHtml(r.path)}</span>
+          <span class="queue-paths-list-status ${isPending ? 'muted' : isOk ? 'queue-paths-ok' : 'queue-paths-err'}">${label}</span>
+        </div>`;
+      }).join('');
+      list.style.display = results.length ? 'block' : 'none';
+    }
+
+    function updateQueuePathsRows(updates) {
+      for (const update of updates || []) {
+        const row = document.querySelector(`[data-queue-path-index="${update.index}"]`);
+        if (!row) continue;
+
+        const icon = row.querySelector('.queue-paths-list-icon');
+        const status = row.querySelector('.queue-paths-list-status');
+        const isOk = update.status === 'ok';
+
+        if (icon) {
+          icon.className = isOk
+            ? 'fa-solid fa-circle-check queue-paths-icon-ok queue-paths-list-icon'
+            : 'fa-solid fa-circle-xmark queue-paths-icon-error queue-paths-list-icon';
+        }
+
+        if (status) {
+          status.className = `queue-paths-list-status ${isOk ? 'queue-paths-ok' : 'queue-paths-err'}`;
+          status.textContent = isOk ? 'queued' : `error: ${update.error || 'unknown'}`;
+        }
+      }
+    }
+
+    function setQueuePathsStatus(text, kind = 'info') {
+      const el = document.getElementById('queue-paths-status');
+      if (!el) return;
+      el.textContent = text || '';
+      el.className = `queue-paths-status queue-paths-status-${kind}`;
+      el.style.display = text ? 'block' : 'none';
+    }
+
+    document.getElementById('queue-paths-file').addEventListener('change', (evt) => {
+      const file = evt.target.files?.[0];
+      const labelText = document.getElementById('queue-paths-file-label-text');
+      const runBtn = document.getElementById('queue-paths-run');
+      const listEl = document.getElementById('queue-paths-list');
+      if (!file) {
+        queuePathsState.parsedPaths = [];
+        queuePathsState.file = null;
+        if (labelText) labelText.textContent = 'Choose a paths file…';
+        if (runBtn) runBtn.disabled = true;
+        if (listEl) listEl.style.display = 'none';
+        setQueuePathsStatus('');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const paths = parsePathsFile(e.target.result || '');
+        queuePathsState.parsedPaths = paths;
+        queuePathsState.file = file;
+        if (labelText) labelText.textContent = `${file.name} (${paths.length} path${paths.length !== 1 ? 's' : ''})`;
+        if (runBtn) runBtn.disabled = paths.length === 0;
+        if (paths.length === 0) {
+          setQueuePathsStatus('No valid paths found in file.', 'error');
+          renderQueuePathsList([]);
+        } else {
+          setQueuePathsStatus(`Ready to queue ${paths.length} path${paths.length !== 1 ? 's' : ''}.`, 'info');
+          renderQueuePathsList(paths.map((p) => ({ path: p, status: 'pending' })));
+        }
+      };
+      reader.onerror = () => {
+        setQueuePathsStatus('Failed to read file.', 'error');
+      };
+      reader.readAsText(file);
+    });
+
+    document.getElementById('queue-paths-run').addEventListener('click', async () => {
+      const paths = queuePathsState.parsedPaths;
+      const file = queuePathsState.file;
+      if (!paths.length || !file || queuePathsState.running) return;
+
+      const fileInput = document.getElementById('queue-paths-file');
+      const runBtn = document.getElementById('queue-paths-run');
+      const clearBtn = document.getElementById('queue-paths-clear');
+      runBtn.disabled = true;
+      if (fileInput) fileInput.disabled = true;
+      queuePathsState.running = true;
+
+      renderQueuePathsList(paths.map((p) => ({ path: p, status: 'pending' })));
+      setQueuePathsStatus(`Uploading file and queueing ${paths.length} path${paths.length !== 1 ? 's' : ''}…`, 'info');
+
+      try {
+        const fileBytes = new Uint8Array(await file.arrayBuffer());
+        const result = await wsCallBinary('dlq.queuePathsUpload', {
+          fileName: file.name,
+          mimeType: file.type || 'text/plain',
+        }, fileBytes, {
+          onProgress: (message) => {
+            const detail = message?.detail || {};
+            const totalPaths = Number(detail.totalPaths || paths.length || 0);
+            const processedPaths = Number(detail.processedPaths || 0);
+            const ok = Number(detail.succeededCount || 0);
+            const fail = Number(detail.failedCount || 0);
+
+            if (detail.stage === 'started') {
+              setQueuePathsStatus(`Uploaded ${file.name}; starting queue run for ${totalPaths} path${totalPaths !== 1 ? 's' : ''}…`, 'info');
+              return;
+            }
+
+            if (detail.stage === 'item_batch') {
+              updateQueuePathsRows(detail.updates);
+              const kind = fail > 0 ? 'warn' : 'info';
+              setQueuePathsStatus(`Processed ${processedPaths}/${totalPaths} · Queued: ${ok} · Failed: ${fail}`, kind);
+              return;
+            }
+
+            if (detail.stage === 'completed') {
+              const kind = fail > 0 ? (ok > 0 ? 'warn' : 'error') : 'ok';
+              setQueuePathsStatus(`Done — Processed ${processedPaths}/${totalPaths} · Queued: ${ok} · Failed: ${fail}`, kind);
+            }
+          },
+        });
+
+        const ok = Number(result.succeededCount || 0);
+        const fail = Number(result.failedCount || 0);
+        const kind = fail > 0 ? (ok > 0 ? 'warn' : 'error') : 'ok';
+        setQueuePathsStatus(`Done — Queued: ${ok}, Failed: ${fail}`, kind);
+        if (clearBtn) clearBtn.style.display = '';
+      } catch (error) {
+        setQueuePathsStatus(`Failed: ${formatRequestError(error)}`, 'error');
+      } finally {
+        queuePathsState.running = false;
+        runBtn.disabled = false;
+        if (fileInput) fileInput.disabled = false;
+      }
+    });
+
+    document.getElementById('queue-paths-clear').addEventListener('click', () => {
+      queuePathsState.parsedPaths = [];
+      queuePathsState.file = null;
+      queuePathsState.running = false;
+      const fileInput = document.getElementById('queue-paths-file');
+      const labelText = document.getElementById('queue-paths-file-label-text');
+      const runBtn = document.getElementById('queue-paths-run');
+      const clearBtn = document.getElementById('queue-paths-clear');
+      const listEl = document.getElementById('queue-paths-list');
+      if (fileInput) fileInput.value = '';
+      if (fileInput) fileInput.disabled = false;
+      if (labelText) labelText.textContent = 'Choose a paths file…';
+      if (runBtn) runBtn.disabled = true;
+      if (clearBtn) clearBtn.style.display = 'none';
+      if (listEl) listEl.style.display = 'none';
+      setQueuePathsStatus('');
+    });
+
+    // -----------------------------------------------------------------------
+    // Upload / Process tab
+    // -----------------------------------------------------------------------
+
     function isArchiveFile(fileName) {
       const lower = String(fileName || '').toLowerCase();
       return lower.endsWith('.zip') || lower.endsWith('.tgz') || lower.endsWith('.tar.gz');

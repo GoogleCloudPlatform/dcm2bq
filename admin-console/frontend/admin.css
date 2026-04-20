@@ -261,4 +261,121 @@
     #monitoring-status { font-size: 14px; line-height: 1.4; margin-bottom: 12px !important; }
     #monitoring-history { margin-top: 16px; max-height: 300px; overflow-y: auto; font-size: 13px; line-height: 1.5; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 8px 10px; }
     #monitoring-history .muted { font-size: 13px; }
+
+    /* -----------------------------------------------------------------------
+       Queue Paths Section (inside Failed Queue tab)
+    ----------------------------------------------------------------------- */
+    .queue-paths-section {
+      flex-shrink: 0;
+      margin-top: 20px;
+      border-top: 2px solid var(--accent-strong);
+      border-radius: 0 0 8px 8px;
+      background: var(--surface-alt);
+      padding: 16px 18px 18px;
+      border: 1px solid var(--accent-strong);
+      border-radius: 8px;
+    }
+    .queue-paths-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+    .queue-paths-header .fa-solid { color: var(--accent); font-size: 16px; }
+    .queue-paths-header strong { color: var(--text); font-size: 15px; }
+    .queue-paths-header-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--accent-strong);
+      color: #fff;
+      border-radius: 4px;
+      padding: 2px 7px;
+    }
+    .queue-paths-description {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 0 8px;
+      line-height: 1.55;
+    }
+    .queue-paths-format-list {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0 0 14px 18px;
+      padding: 0;
+      line-height: 1.7;
+    }
+    .queue-paths-format-list code {
+      background: var(--code-bg);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 12px;
+      color: var(--accent);
+    }
+    .queue-paths-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .queue-paths-file-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text);
+      transition: border-color 0.15s;
+    }
+    .queue-paths-file-label:hover { border-color: var(--accent); }
+    .queue-paths-file-label input[type="file"] { display: none; }
+    .queue-paths-status {
+      font-size: 13px;
+      padding: 7px 10px;
+      border-radius: 5px;
+      margin-bottom: 10px;
+    }
+    .queue-paths-status-info { background: rgba(79,193,255,0.08); color: var(--accent); border: 1px solid rgba(79,193,255,0.25); }
+    .queue-paths-status-ok { background: rgba(52,183,95,0.1); color: #4caf7d; border: 1px solid rgba(52,183,95,0.3); }
+    .queue-paths-status-warn { background: rgba(230,175,50,0.1); color: #d4a017; border: 1px solid rgba(230,175,50,0.3); }
+    .queue-paths-status-error { background: rgba(199,78,57,0.12); color: #e07060; border: 1px solid rgba(199,78,57,0.3); }
+    .queue-paths-list {
+      max-height: 340px;
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 0;
+    }
+    .queue-paths-list-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .queue-paths-list-row:last-child { border-bottom: none; }
+    .queue-paths-list-path {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+      font-family: monospace;
+    }
+    .queue-paths-list-status { flex-shrink: 0; font-size: 11px; font-weight: 600; }
+    .queue-paths-icon-pending { color: var(--muted); }
+    .queue-paths-icon-ok { color: #4caf7d; }
+    .queue-paths-icon-error { color: var(--danger); }
+    .queue-paths-ok { color: #4caf7d; }
+    .queue-paths-err { color: var(--danger); }
   

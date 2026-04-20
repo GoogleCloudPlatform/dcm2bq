@@ -134,6 +134,37 @@
       <div style="overflow: auto; flex: 1;"><table class="dlp-table" style="margin-top: 0;">
         <tbody id="dlp-body"></tbody>
       </table></div>
+
+      <!-- Queue Paths Section — separate from the Failed Queue list above -->
+      <div class="queue-paths-section">
+        <div class="queue-paths-header">
+          <i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i>
+          <strong>Queue Paths for Processing</strong>
+          <span class="queue-paths-header-badge">Manual Enqueue</span>
+        </div>
+        <p class="queue-paths-description">
+          Upload a plain-text file containing one path per line to queue those files directly for processing —
+          as if they had been retried from the Failed Queue above. Blank lines and lines starting with <code>#</code> are ignored.
+        </p>
+        <ul class="queue-paths-format-list">
+          <li><strong>GCS path:</strong> <code>gs://my-bucket/path/to/instance.dcm</code></li>
+          <li><strong>HCAPI/DICOMweb path:</strong> <code>projects/PROJECT/locations/LOC/datasets/DS/dicomStores/STORE/dicomWeb/studies/…</code></li>
+        </ul>
+        <div class="queue-paths-controls">
+          <label class="queue-paths-file-label" for="queue-paths-file">
+            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+            <span id="queue-paths-file-label-text">Choose a paths file…</span>
+            <input type="file" id="queue-paths-file" accept=".txt,text/plain" />
+          </label>
+          <button class="primary" id="queue-paths-run" disabled>
+            <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+            Queue All
+          </button>
+          <button id="queue-paths-clear" style="display:none;">Clear</button>
+        </div>
+        <div id="queue-paths-status" class="queue-paths-status" style="display:none;"></div>
+        <div id="queue-paths-list" class="queue-paths-list" style="display:none;"></div>
+      </div>
     </section>
 
     <section id="upload" class="panel">

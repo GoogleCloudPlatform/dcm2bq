@@ -21,6 +21,7 @@ const {
 const { buildNormalizedStudyMetadata, parseJsonValue } = require("./study-metadata");
 const { extractDlqFileInfo } = require("./dlq-utils");
 const { requeueDlqMessages, requeueAllDlqMessages } = require("./dlq-requeue");
+const { parseQueuePathsText, queuePathsForProcessing } = require("./queue-paths");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -830,6 +831,37 @@ app.post("/api/studies/reprocess", async (req, res) => {
   }
 });
 
+// DLQ queue-paths endpoint: accept a list of GCS / HCAPI paths and publish
+// each directly to the requeue topic, just as if they had come from the failed queue.
+app.post("/api/dlq/queue-paths", async (req, res) => {
+  try {
+    const rawPaths = Array.isArray(req.body?.paths)
+      ? req.body.paths.map((p) => String(p || "").trim()).filter(Boolean)
+      : [];
+
+    if (rawPaths.length === 0) {
+      return res.status(400).json({ error: "Missing paths array" });
+    }
+
+    if (rawPaths.length > 5000) {
+      return res.status(400).json({ error: "Too many paths for direct queueing (max 5000). Upload a text file through the Failed Queue UI for larger batches." });
+    }
+
+    const result = await queuePathsForProcessing({
+      paths: rawPaths,
+      pubsubTopic: REQUEUE_TOPIC,
+      publishGcsRequeueMessage,
+      requeueSource: "admin-console-queue-paths",
+      collectResults: true,
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error("DLQ queue-paths error:", error);
+    return res.status(500).json({ error: error?.message || "Internal error" });
+  }
+});
+
 // DLQ requeue endpoint
 app.post("/api/dlq/requeue", async (req, res) => {
   try {
@@ -1378,6 +1410,54 @@ wss.on("connection", (socket, request) => {
     });
 
     try {
+      if (action === "dlq.queuePathsUpload" && binaryDataBuffer) {
+        const fileName = String(payload?.fileName || "queue-paths.txt").trim() || "queue-paths.txt";
+        const text = binaryDataBuffer.toString("utf8");
+        const paths = parseQueuePathsText(text);
+        if (paths.length === 0) {
+          await sendError("Uploaded file does not contain any valid paths", 400);
+          return;
+        }
+
+        await sendJson("progress", {
+          stage: "dlq_queue_paths_upload",
+          detail: {
+            stage: "started",
+            fileName,
+            bytesReceived: binaryDataBuffer.length,
+            totalPaths: paths.length,
+            processedPaths: 0,
+            succeededCount: 0,
+            failedCount: 0,
+          },
+        }, { action });
+
+        const result = await queuePathsForProcessing({
+          paths,
+          pubsubTopic: REQUEUE_TOPIC,
+          publishGcsRequeueMessage,
+          requeueSource: "admin-console-queue-paths",
+          collectResults: false,
+          emitStarted: false,
+          onProgress: async (detail) => {
+            await sendJson("progress", {
+              stage: "dlq_queue_paths_upload",
+              detail,
+            }, { action });
+          },
+        });
+
+        const durationMs = Number(formatDurationMs(startNs).toFixed(1));
+        await sendJson("result", {
+          data: {
+            ...result,
+            fileName,
+            bytesReceived: binaryDataBuffer.length,
+          },
+        }, { status: "ok", durationMs, action });
+        return;
+      }
+
       if (action === "process.run" && binaryDataBuffer) {
         const fileName = String(payload?.fileName || "").trim();
         if (!fileName) {
@@ -1483,6 +1563,7 @@ wss.on("connection", (socket, request) => {
         "dlq.requeue": { method: "POST", path: "/api/dlq/requeue" },
         "dlq.requeueAll": { method: "POST", path: "/api/dlq/requeue-all" },
         "dlq.delete": { method: "POST", path: "/api/dlq/delete" },
+        "dlq.queuePaths": { method: "POST", path: "/api/dlq/queue-paths" },
         "process.run": { method: "POST", path: "/api/process/run" },
       };
 
