@@ -3,12 +3,12 @@ FROM node:24-slim
 ENV NODE_ENV=production
 WORKDIR /usr/src/app
 
-COPY package*.json ./
+COPY --chown=node:node package*.json ./
 RUN npm ci --omit=dev
 
-COPY backend ./backend
-COPY frontend ./frontend
+COPY --chown=node:node backend ./backend
+COPY --chown=node:node frontend ./frontend
 
 USER node
 EXPOSE 8080
-CMD ["npm", "start"]
+CMD ["node", "backend/src/index.js"]
