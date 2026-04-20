@@ -788,6 +788,9 @@ app.post("/api/studies/reprocess", async (req, res) => {
     const errors = [];
 
     // Trigger reprocessing by publishing schema-compliant Pub/Sub messages.
+    // TODO: Reprocess currently does not include object storage class metadata,
+    // and version metadata may be missing depending on source rows.
+    // Include storage class and stable object version metadata for reprocess publishes.
     for (const entry of uniqueObjects) {
       try {
         const filePath = entry.basePath;
@@ -1165,6 +1168,174 @@ app.use((_, res) => {
 
 const server = http.createServer(app);
 
+// TODO: Persist websocket job state in shared storage (for example Redis/Firestore/BigQuery)
+// so progress recovery works when multiple admin-console backend instances are running.
+const QUEUE_PATHS_JOB_TTL_MS = 60 * 60 * 1000;
+const queuePathsJobs = new Map();
+const DLQ_REQUEUE_ALL_JOB_TTL_MS = 60 * 60 * 1000;
+const dlqRequeueAllJobs = new Map();
+
+function createQueuePathsJob({ fileName, bytesReceived, totalPaths }) {
+  const jobId = `qp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const job = {
+    jobId,
+    fileName,
+    bytesReceived,
+    totalPaths: Number(totalPaths || 0),
+    processedPaths: 0,
+    succeededCount: 0,
+    failedCount: 0,
+    status: "running",
+    result: null,
+    error: null,
+    updateSeq: 0,
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  queuePathsJobs.set(jobId, job);
+  return job;
+}
+
+function updateQueuePathsJob(job, detail) {
+  if (!job || !detail || typeof detail !== "object") return;
+
+  if (typeof detail.totalPaths !== "undefined") {
+    job.totalPaths = Number(detail.totalPaths || 0);
+  }
+  if (typeof detail.processedPaths !== "undefined") {
+    job.processedPaths = Number(detail.processedPaths || 0);
+  }
+  if (typeof detail.succeededCount !== "undefined") {
+    job.succeededCount = Number(detail.succeededCount || 0);
+  }
+  if (typeof detail.failedCount !== "undefined") {
+    job.failedCount = Number(detail.failedCount || 0);
+  }
+
+  job.updateSeq += 1;
+
+  job.updatedAt = Date.now();
+}
+
+function finalizeQueuePathsJob(job, result, error = null) {
+  if (!job) return;
+  if (error) {
+    job.status = "failed";
+    job.error = String(error?.message || error || "Unknown error");
+  } else {
+    job.status = "completed";
+    job.result = result || null;
+  }
+  job.updatedAt = Date.now();
+
+  setTimeout(() => {
+    const current = queuePathsJobs.get(job.jobId);
+    if (!current) return;
+    if ((Date.now() - current.updatedAt) >= QUEUE_PATHS_JOB_TTL_MS) {
+      queuePathsJobs.delete(job.jobId);
+    }
+  }, QUEUE_PATHS_JOB_TTL_MS);
+}
+
+function getQueuePathsJobSnapshot(job, _afterSeq = 0) {
+  if (!job) return null;
+
+  return {
+    jobId: job.jobId,
+    fileName: job.fileName,
+    bytesReceived: job.bytesReceived,
+    status: job.status,
+    totalPaths: job.totalPaths,
+    processedPaths: job.processedPaths,
+    succeededCount: job.succeededCount,
+    failedCount: job.failedCount,
+    nextUpdateSeq: job.updateSeq,
+    result: job.result,
+    error: job.error,
+  };
+}
+
+function createDlqRequeueAllJob() {
+  const jobId = `dlqra_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const job = {
+    jobId,
+    status: "running",
+    totalFiles: 0,
+    processedFiles: 0,
+    requeuedCount: 0,
+    failedFileCount: 0,
+    deletedMessageCount: 0,
+    updateSeq: 0,
+    updatedAt: Date.now(),
+    startedAt: Date.now(),
+    result: null,
+    error: null,
+  };
+  dlqRequeueAllJobs.set(jobId, job);
+  return job;
+}
+
+function updateDlqRequeueAllJob(job, detail) {
+  if (!job || !detail || typeof detail !== "object") return;
+
+  if (typeof detail.totalFiles !== "undefined") {
+    job.totalFiles = Number(detail.totalFiles || 0);
+  }
+  if (typeof detail.processedFiles !== "undefined") {
+    job.processedFiles = Number(detail.processedFiles || 0);
+  }
+  if (typeof detail.requeuedCount !== "undefined") {
+    job.requeuedCount = Number(detail.requeuedCount || 0);
+  }
+  if (typeof detail.failedFileCount !== "undefined") {
+    job.failedFileCount = Number(detail.failedFileCount || 0);
+  }
+  if (typeof detail.deletedMessageCount !== "undefined") {
+    job.deletedMessageCount = Number(detail.deletedMessageCount || 0);
+  }
+
+  job.updateSeq += 1;
+  job.updatedAt = Date.now();
+}
+
+function finalizeDlqRequeueAllJob(job, result, error = null) {
+  if (!job) return;
+
+  if (error) {
+    job.status = "failed";
+    job.error = String(error?.message || error || "Unknown error");
+  } else {
+    job.status = "completed";
+    job.result = result || null;
+  }
+  job.updatedAt = Date.now();
+
+  setTimeout(() => {
+    const current = dlqRequeueAllJobs.get(job.jobId);
+    if (!current) return;
+    if ((Date.now() - current.updatedAt) >= DLQ_REQUEUE_ALL_JOB_TTL_MS) {
+      dlqRequeueAllJobs.delete(job.jobId);
+    }
+  }, DLQ_REQUEUE_ALL_JOB_TTL_MS);
+}
+
+function getDlqRequeueAllJobSnapshot(job) {
+  if (!job) return null;
+
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    totalFiles: job.totalFiles,
+    processedFiles: job.processedFiles,
+    requeuedCount: job.requeuedCount,
+    failedFileCount: job.failedFileCount,
+    deletedMessageCount: job.deletedMessageCount,
+    nextUpdateSeq: job.updateSeq,
+    result: job.result,
+    error: job.error,
+  };
+}
+
 // Logging utilities
 function logStructured(level, event, fields = {}) {
   const entry = {
@@ -1419,10 +1590,17 @@ wss.on("connection", (socket, request) => {
           return;
         }
 
+        const job = createQueuePathsJob({
+          fileName,
+          bytesReceived: binaryDataBuffer.length,
+          totalPaths: paths.length,
+        });
+
         await sendJson("progress", {
           stage: "dlq_queue_paths_upload",
           detail: {
             stage: "started",
+            jobId: job.jobId,
             fileName,
             bytesReceived: binaryDataBuffer.length,
             totalPaths: paths.length,
@@ -1432,29 +1610,68 @@ wss.on("connection", (socket, request) => {
           },
         }, { action });
 
-        const result = await queuePathsForProcessing({
-          paths,
-          pubsubTopic: REQUEUE_TOPIC,
-          publishGcsRequeueMessage,
-          requeueSource: "admin-console-queue-paths",
-          collectResults: false,
-          emitStarted: false,
-          onProgress: async (detail) => {
-            await sendJson("progress", {
-              stage: "dlq_queue_paths_upload",
-              detail,
-            }, { action });
-          },
+        let result;
+        try {
+          result = await queuePathsForProcessing({
+            paths,
+            pubsubTopic: REQUEUE_TOPIC,
+            publishGcsRequeueMessage,
+            requeueSource: "admin-console-queue-paths",
+            collectResults: false,
+            emitStarted: false,
+            onProgress: async (detail) => {
+              const detailWithoutUpdates = {
+                ...detail,
+              };
+              delete detailWithoutUpdates.updates;
+              updateQueuePathsJob(job, detailWithoutUpdates);
+              await sendJson("progress", {
+                stage: "dlq_queue_paths_upload",
+                detail: {
+                  ...detailWithoutUpdates,
+                  jobId: job.jobId,
+                },
+              }, { action });
+            },
+          });
+        } catch (error) {
+          finalizeQueuePathsJob(job, null, error);
+          throw error;
+        }
+
+        finalizeQueuePathsJob(job, {
+          ...result,
+          fileName,
+          bytesReceived: binaryDataBuffer.length,
         });
 
         const durationMs = Number(formatDurationMs(startNs).toFixed(1));
         await sendJson("result", {
           data: {
             ...result,
+            jobId: job.jobId,
             fileName,
             bytesReceived: binaryDataBuffer.length,
           },
         }, { status: "ok", durationMs, action });
+        return;
+      }
+
+      if (action === "dlq.queuePathsUploadStatus") {
+        const jobId = String(payload?.jobId || "").trim();
+        if (!jobId) {
+          await sendError("Missing jobId", 400);
+          return;
+        }
+        const job = queuePathsJobs.get(jobId);
+        if (!job) {
+          await sendError("Queue paths upload job not found or expired", 404);
+          return;
+        }
+
+        const snapshot = getQueuePathsJobSnapshot(job, payload?.afterSeq);
+        const durationMs = Number(formatDurationMs(startNs).toFixed(1));
+        await sendJson("result", { data: snapshot }, { status: "ok", durationMs, action });
         return;
       }
 
@@ -1513,22 +1730,58 @@ wss.on("connection", (socket, request) => {
       }
 
       if (action === "dlq.requeueAll") {
-        const result = await requeueAllDlqMessages({
-          bigquery,
-          pubsubTopic: REQUEUE_TOPIC,
-          config: CONFIG,
-          location: BQ_LOCATION,
-          requeueSource: "admin-console",
-          onProgress: async (detail) => {
-            await sendJson("progress", {
-              stage: "dlq_requeue_all",
-              detail,
-            }, { action });
-          },
-        });
+        const job = createDlqRequeueAllJob();
+        let result;
+        try {
+          result = await requeueAllDlqMessages({
+            bigquery,
+            pubsubTopic: REQUEUE_TOPIC,
+            config: CONFIG,
+            location: BQ_LOCATION,
+            requeueSource: "admin-console",
+            onProgress: async (detail) => {
+              updateDlqRequeueAllJob(job, detail);
+              await sendJson("progress", {
+                stage: "dlq_requeue_all",
+                detail: {
+                  ...detail,
+                  jobId: job.jobId,
+                },
+              }, { action });
+            },
+          });
+        } catch (error) {
+          finalizeDlqRequeueAllJob(job, null, error);
+          throw error;
+        }
+
+        finalizeDlqRequeueAllJob(job, result);
 
         const durationMs = Number(formatDurationMs(startNs).toFixed(1));
-        await sendJson("result", { data: result }, { status: "ok", durationMs, action });
+        await sendJson("result", {
+          data: {
+            ...result,
+            jobId: job.jobId,
+          },
+        }, { status: "ok", durationMs, action });
+        return;
+      }
+
+      if (action === "dlq.requeueAllStatus") {
+        const jobId = String(payload?.jobId || "").trim();
+        if (!jobId) {
+          await sendError("Missing jobId", 400);
+          return;
+        }
+        const job = dlqRequeueAllJobs.get(jobId);
+        if (!job) {
+          await sendError("Requeue-all job not found or expired", 404);
+          return;
+        }
+
+        const snapshot = getDlqRequeueAllJobSnapshot(job);
+        const durationMs = Number(formatDurationMs(startNs).toFixed(1));
+        await sendJson("result", { data: snapshot }, { status: "ok", durationMs, action });
         return;
       }
 

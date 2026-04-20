@@ -1218,6 +1218,80 @@
       }
     });
 
+    const dlpRequeueAllState = {
+      running: false,
+      activeJobId: null,
+      lastUpdateSeq: 0,
+    };
+
+    function isWsDisconnectedError(error) {
+      const msg = String(error?.message || '').toLowerCase();
+      return msg.includes('websocket disconnected') || msg.includes('websocket is not connected');
+    }
+
+    async function delay(ms) {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function renderDlpRequeueAllSnapshot(snapshot, fallbackTotal = 0) {
+      if (!snapshot || typeof snapshot !== 'object') return;
+
+      const totalFiles = Number(snapshot.totalFiles || fallbackTotal || 0);
+      const processedFiles = Number(snapshot.processedFiles || 0);
+      const requeuedCount = Number(snapshot.requeuedCount || 0);
+      const failedFileCount = Number(snapshot.failedFileCount || 0);
+      const deletedMessageCount = Number(snapshot.deletedMessageCount || 0);
+
+      if (snapshot.status === 'completed') {
+        setDlpSummaryStatus(
+          `Retry all finished · Requeued: ${requeuedCount} · ` +
+          `Failed: ${failedFileCount} · ` +
+          `Deleted messages: ${deletedMessageCount}`,
+        );
+        return;
+      }
+
+      if (snapshot.status === 'failed') {
+        setDlpSummaryStatus(`Retry all failed: ${String(snapshot.error || 'Unknown error')}`);
+        return;
+      }
+
+      setDlpSummaryStatus(
+        `Processed ${processedFiles}/${totalFiles} files · ` +
+        `Requeued: ${requeuedCount} · Failed: ${failedFileCount} · ` +
+        `Deleted messages: ${deletedMessageCount}`,
+      );
+    }
+
+    async function resumeDlpRequeueAllUntilComplete(totalCount) {
+      while (dlpRequeueAllState.running && dlpRequeueAllState.activeJobId) {
+        try {
+          const snapshot = await wsCall('dlq.requeueAllStatus', {
+            jobId: dlpRequeueAllState.activeJobId,
+            afterSeq: dlpRequeueAllState.lastUpdateSeq,
+          });
+
+          dlpRequeueAllState.lastUpdateSeq = Number(snapshot.nextUpdateSeq || dlpRequeueAllState.lastUpdateSeq || 0);
+          renderDlpRequeueAllSnapshot(snapshot, totalCount);
+
+          if (snapshot.status === 'completed' || snapshot.status === 'failed') {
+            return snapshot;
+          }
+
+          await delay(1500);
+        } catch (error) {
+          if (isWsDisconnectedError(error)) {
+            setDlpSummaryStatus('Retry all in progress; reconnecting to status stream...');
+            await delay(1500);
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      return null;
+    }
+
     document.getElementById('dlp-requeue-all').addEventListener('click', async () => {
       const totalCount = Number(state.dlpPaging.total || 0);
       if (totalCount <= 0) return;
@@ -1225,12 +1299,20 @@
 
       const btn = document.getElementById('dlp-requeue-all');
       btn.disabled = true;
+      dlpRequeueAllState.running = true;
+      dlpRequeueAllState.activeJobId = null;
+      dlpRequeueAllState.lastUpdateSeq = 0;
       try {
         setDlpSummaryStatus(`Retrying all failed queue items (0/${totalCount})...`);
-        const result = await wsCall('dlq.requeueAll', {}, {
+        let result = await wsCall('dlq.requeueAll', {}, {
           onProgress: (message) => {
             const detail = message?.detail || {};
             if (!detail || typeof detail !== 'object') return;
+
+            if (detail.jobId) {
+              dlpRequeueAllState.activeJobId = String(detail.jobId);
+            }
+            dlpRequeueAllState.lastUpdateSeq += 1;
 
             const totalFiles = Number(detail.totalFiles || 0);
             const processedFiles = Number(detail.processedFiles || 0);
@@ -1262,6 +1344,11 @@
             }
           },
         });
+
+        if (result?.jobId) {
+          dlpRequeueAllState.activeJobId = String(result.jobId);
+        }
+
         await refreshDlp({ resetOffset: true });
         setDlpSummaryStatus(
           `Retry all finished · Requeued: ${result.requeuedCount || 0} · ` +
@@ -1274,9 +1361,39 @@
           `failed ${result.failedFileCount || 0} file(s).`,
         );
       } catch (error) {
-        setDlpSummaryStatus(`Retry all failed: ${formatRequestError(error)}`);
-        alert(`Requeue all failed: ${formatRequestError(error)}`);
+        if (dlpRequeueAllState.activeJobId && isWsDisconnectedError(error)) {
+          setDlpSummaryStatus('WebSocket disconnected; resuming Retry All status...');
+          try {
+            const snapshot = await resumeDlpRequeueAllUntilComplete(totalCount);
+            if (snapshot?.status === 'completed' && snapshot?.result) {
+              result = snapshot.result;
+              await refreshDlp({ resetOffset: true });
+              setDlpSummaryStatus(
+                `Retry all finished · Requeued: ${result.requeuedCount || 0} · ` +
+                `Failed: ${result.failedFileCount || 0} · ` +
+                `Deleted messages: ${result.deletedMessageCount || 0}`,
+              );
+              alert(
+                `Requeued ${result.requeuedCount || 0} file(s), ` +
+                `deleted ${result.deletedMessageCount || 0} message(s), ` +
+                `failed ${result.failedFileCount || 0} file(s).`,
+              );
+            } else if (snapshot?.status === 'failed') {
+              const msg = String(snapshot?.error || 'Unknown error');
+              setDlpSummaryStatus(`Retry all failed: ${msg}`);
+              alert(`Requeue all failed: ${msg}`);
+            }
+          } catch (resumeError) {
+            setDlpSummaryStatus(`Retry all failed: ${formatRequestError(resumeError)}`);
+            alert(`Requeue all failed: ${formatRequestError(resumeError)}`);
+          }
+        } else {
+          setDlpSummaryStatus(`Retry all failed: ${formatRequestError(error)}`);
+          alert(`Requeue all failed: ${formatRequestError(error)}`);
+        }
       } finally {
+        dlpRequeueAllState.running = false;
+        dlpRequeueAllState.activeJobId = null;
         btn.disabled = false;
       }
     });
@@ -1303,59 +1420,63 @@
     // -----------------------------------------------------------------------
 
     const queuePathsState = {
-      parsedPaths: [],
       file: null,
+      expectedPathCount: 0,
       running: false,
+      activeJobId: null,
+      lastUpdateSeq: 0,
     };
 
-    function parsePathsFile(text) {
-      return text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith('#'));
+    function applyQueuePathsJobSnapshot(snapshot, fallbackPathCount = 0) {
+      if (!snapshot || typeof snapshot !== 'object') return;
+
+      const totalPaths = Number(snapshot.totalPaths || fallbackPathCount || 0);
+      const processedPaths = Number(snapshot.processedPaths || 0);
+      const ok = Number(snapshot.succeededCount || 0);
+      const fail = Number(snapshot.failedCount || 0);
+
+      if (snapshot.status === 'completed') {
+        const kind = fail > 0 ? (ok > 0 ? 'warn' : 'error') : 'ok';
+        setQueuePathsStatus(`Done — Processed ${processedPaths}/${totalPaths} · Queued: ${ok} · Failed: ${fail}`, kind);
+        return;
+      }
+
+      if (snapshot.status === 'failed') {
+        const errorText = String(snapshot.error || 'Queue run failed');
+        setQueuePathsStatus(`Failed: ${errorText}`, 'error');
+        return;
+      }
+
+      const kind = fail > 0 ? 'warn' : 'info';
+      setQueuePathsStatus(`Processed ${processedPaths}/${totalPaths} · Queued: ${ok} · Failed: ${fail}`, kind);
     }
 
-    function renderQueuePathsList(results) {
-      const list = document.getElementById('queue-paths-list');
-      if (!list) return;
-      list.innerHTML = results.map((r, index) => {
-        const isOk = r.status === 'ok';
-        const isPending = r.status === 'pending';
-        const iconClass = isPending
-          ? 'fa-solid fa-clock queue-paths-icon-pending'
-          : isOk
-            ? 'fa-solid fa-circle-check queue-paths-icon-ok'
-            : 'fa-solid fa-circle-xmark queue-paths-icon-error';
-        const label = isPending ? 'pending' : isOk ? 'queued' : `error: ${escapeHtml(r.error || 'unknown')}`;
-        return `<div class="queue-paths-list-row" data-queue-path-index="${index}">
-          <i class="${iconClass} queue-paths-list-icon" aria-hidden="true"></i>
-          <span class="queue-paths-list-path" title="${escapeHtml(r.path)}">${escapeHtml(r.path)}</span>
-          <span class="queue-paths-list-status ${isPending ? 'muted' : isOk ? 'queue-paths-ok' : 'queue-paths-err'}">${label}</span>
-        </div>`;
-      }).join('');
-      list.style.display = results.length ? 'block' : 'none';
-    }
+    async function resumeQueuePathsJobUntilComplete(pathsCount) {
+      while (queuePathsState.running && queuePathsState.activeJobId) {
+        try {
+          const snapshot = await wsCall('dlq.queuePathsUploadStatus', {
+            jobId: queuePathsState.activeJobId,
+            afterSeq: queuePathsState.lastUpdateSeq,
+          });
 
-    function updateQueuePathsRows(updates) {
-      for (const update of updates || []) {
-        const row = document.querySelector(`[data-queue-path-index="${update.index}"]`);
-        if (!row) continue;
+          queuePathsState.lastUpdateSeq = Number(snapshot.nextUpdateSeq || queuePathsState.lastUpdateSeq || 0);
+          applyQueuePathsJobSnapshot(snapshot, pathsCount);
 
-        const icon = row.querySelector('.queue-paths-list-icon');
-        const status = row.querySelector('.queue-paths-list-status');
-        const isOk = update.status === 'ok';
+          if (snapshot.status === 'completed' || snapshot.status === 'failed') {
+            return snapshot;
+          }
 
-        if (icon) {
-          icon.className = isOk
-            ? 'fa-solid fa-circle-check queue-paths-icon-ok queue-paths-list-icon'
-            : 'fa-solid fa-circle-xmark queue-paths-icon-error queue-paths-list-icon';
-        }
-
-        if (status) {
-          status.className = `queue-paths-list-status ${isOk ? 'queue-paths-ok' : 'queue-paths-err'}`;
-          status.textContent = isOk ? 'queued' : `error: ${update.error || 'unknown'}`;
+          await delay(1500);
+        } catch (error) {
+          if (isWsDisconnectedError(error)) {
+            setQueuePathsStatus('WebSocket disconnected; waiting to resume queue status…', 'warn');
+            await delay(1500);
+            continue;
+          }
+          throw error;
         }
       }
+      return null;
     }
 
     function setQueuePathsStatus(text, kind = 'info') {
@@ -1370,42 +1491,25 @@
       const file = evt.target.files?.[0];
       const labelText = document.getElementById('queue-paths-file-label-text');
       const runBtn = document.getElementById('queue-paths-run');
-      const listEl = document.getElementById('queue-paths-list');
       if (!file) {
-        queuePathsState.parsedPaths = [];
         queuePathsState.file = null;
+        queuePathsState.expectedPathCount = 0;
         if (labelText) labelText.textContent = 'Choose a paths file…';
         if (runBtn) runBtn.disabled = true;
-        if (listEl) listEl.style.display = 'none';
         setQueuePathsStatus('');
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const paths = parsePathsFile(e.target.result || '');
-        queuePathsState.parsedPaths = paths;
-        queuePathsState.file = file;
-        if (labelText) labelText.textContent = `${file.name} (${paths.length} path${paths.length !== 1 ? 's' : ''})`;
-        if (runBtn) runBtn.disabled = paths.length === 0;
-        if (paths.length === 0) {
-          setQueuePathsStatus('No valid paths found in file.', 'error');
-          renderQueuePathsList([]);
-        } else {
-          setQueuePathsStatus(`Ready to queue ${paths.length} path${paths.length !== 1 ? 's' : ''}.`, 'info');
-          renderQueuePathsList(paths.map((p) => ({ path: p, status: 'pending' })));
-        }
-      };
-      reader.onerror = () => {
-        setQueuePathsStatus('Failed to read file.', 'error');
-      };
-      reader.readAsText(file);
+      queuePathsState.file = file;
+      queuePathsState.expectedPathCount = 0;
+      if (labelText) labelText.textContent = `${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB)`;
+      if (runBtn) runBtn.disabled = false;
+      setQueuePathsStatus('Ready to queue file. Path counts will appear when processing starts.', 'info');
     });
 
     document.getElementById('queue-paths-run').addEventListener('click', async () => {
-      const paths = queuePathsState.parsedPaths;
       const file = queuePathsState.file;
-      if (!paths.length || !file || queuePathsState.running) return;
+      if (!file || queuePathsState.running) return;
 
       const fileInput = document.getElementById('queue-paths-file');
       const runBtn = document.getElementById('queue-paths-run');
@@ -1413,22 +1517,29 @@
       runBtn.disabled = true;
       if (fileInput) fileInput.disabled = true;
       queuePathsState.running = true;
+      queuePathsState.activeJobId = null;
+      queuePathsState.lastUpdateSeq = 0;
+      queuePathsState.expectedPathCount = 0;
 
-      renderQueuePathsList(paths.map((p) => ({ path: p, status: 'pending' })));
-      setQueuePathsStatus(`Uploading file and queueing ${paths.length} path${paths.length !== 1 ? 's' : ''}…`, 'info');
+      setQueuePathsStatus(`Uploading ${file.name} and starting queue run...`, 'info');
 
       try {
         const fileBytes = new Uint8Array(await file.arrayBuffer());
-        const result = await wsCallBinary('dlq.queuePathsUpload', {
+        let result = await wsCallBinary('dlq.queuePathsUpload', {
           fileName: file.name,
           mimeType: file.type || 'text/plain',
         }, fileBytes, {
           onProgress: (message) => {
             const detail = message?.detail || {};
-            const totalPaths = Number(detail.totalPaths || paths.length || 0);
+            if (detail.jobId) {
+              queuePathsState.activeJobId = String(detail.jobId);
+            }
+            const totalPaths = Number(detail.totalPaths || queuePathsState.expectedPathCount || 0);
+            queuePathsState.expectedPathCount = totalPaths;
             const processedPaths = Number(detail.processedPaths || 0);
             const ok = Number(detail.succeededCount || 0);
             const fail = Number(detail.failedCount || 0);
+            queuePathsState.lastUpdateSeq += 1;
 
             if (detail.stage === 'started') {
               setQueuePathsStatus(`Uploaded ${file.name}; starting queue run for ${totalPaths} path${totalPaths !== 1 ? 's' : ''}…`, 'info');
@@ -1436,7 +1547,6 @@
             }
 
             if (detail.stage === 'item_batch') {
-              updateQueuePathsRows(detail.updates);
               const kind = fail > 0 ? 'warn' : 'info';
               setQueuePathsStatus(`Processed ${processedPaths}/${totalPaths} · Queued: ${ok} · Failed: ${fail}`, kind);
               return;
@@ -1449,35 +1559,56 @@
           },
         });
 
+        if (result?.jobId) {
+          queuePathsState.activeJobId = String(result.jobId);
+        }
+
         const ok = Number(result.succeededCount || 0);
         const fail = Number(result.failedCount || 0);
         const kind = fail > 0 ? (ok > 0 ? 'warn' : 'error') : 'ok';
         setQueuePathsStatus(`Done — Queued: ${ok}, Failed: ${fail}`, kind);
         if (clearBtn) clearBtn.style.display = '';
       } catch (error) {
-        setQueuePathsStatus(`Failed: ${formatRequestError(error)}`, 'error');
+        if (queuePathsState.activeJobId && isWsDisconnectedError(error)) {
+          setQueuePathsStatus('WebSocket disconnected; resuming queue status…', 'warn');
+          try {
+            const snapshot = await resumeQueuePathsJobUntilComplete(queuePathsState.expectedPathCount);
+            if (snapshot?.result) {
+              const ok = Number(snapshot.result.succeededCount || snapshot.succeededCount || 0);
+              const fail = Number(snapshot.result.failedCount || snapshot.failedCount || 0);
+              const kind = fail > 0 ? (ok > 0 ? 'warn' : 'error') : 'ok';
+              setQueuePathsStatus(`Done — Queued: ${ok}, Failed: ${fail}`, kind);
+              if (clearBtn) clearBtn.style.display = '';
+            }
+          } catch (resumeError) {
+            setQueuePathsStatus(`Failed: ${formatRequestError(resumeError)}`, 'error');
+          }
+        } else {
+          setQueuePathsStatus(`Failed: ${formatRequestError(error)}`, 'error');
+        }
       } finally {
         queuePathsState.running = false;
+        queuePathsState.activeJobId = null;
         runBtn.disabled = false;
         if (fileInput) fileInput.disabled = false;
       }
     });
 
     document.getElementById('queue-paths-clear').addEventListener('click', () => {
-      queuePathsState.parsedPaths = [];
       queuePathsState.file = null;
+      queuePathsState.expectedPathCount = 0;
       queuePathsState.running = false;
+      queuePathsState.activeJobId = null;
+      queuePathsState.lastUpdateSeq = 0;
       const fileInput = document.getElementById('queue-paths-file');
       const labelText = document.getElementById('queue-paths-file-label-text');
       const runBtn = document.getElementById('queue-paths-run');
       const clearBtn = document.getElementById('queue-paths-clear');
-      const listEl = document.getElementById('queue-paths-list');
       if (fileInput) fileInput.value = '';
       if (fileInput) fileInput.disabled = false;
       if (labelText) labelText.textContent = 'Choose a paths file…';
       if (runBtn) runBtn.disabled = true;
       if (clearBtn) clearBtn.style.display = 'none';
-      if (listEl) listEl.style.display = 'none';
       setQueuePathsStatus('');
     });
 

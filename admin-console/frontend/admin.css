@@ -346,36 +346,4 @@
     .queue-paths-status-ok { background: rgba(52,183,95,0.1); color: #4caf7d; border: 1px solid rgba(52,183,95,0.3); }
     .queue-paths-status-warn { background: rgba(230,175,50,0.1); color: #d4a017; border: 1px solid rgba(230,175,50,0.3); }
     .queue-paths-status-error { background: rgba(199,78,57,0.12); color: #e07060; border: 1px solid rgba(199,78,57,0.3); }
-    .queue-paths-list {
-      max-height: 340px;
-      overflow-y: auto;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px 0;
-    }
-    .queue-paths-list-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 5px 10px;
-      font-size: 12px;
-      border-bottom: 1px solid var(--border);
-    }
-    .queue-paths-list-row:last-child { border-bottom: none; }
-    .queue-paths-list-path {
-      flex: 1;
-      min-width: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      color: var(--text);
-      font-family: monospace;
-    }
-    .queue-paths-list-status { flex-shrink: 0; font-size: 11px; font-weight: 600; }
-    .queue-paths-icon-pending { color: var(--muted); }
-    .queue-paths-icon-ok { color: #4caf7d; }
-    .queue-paths-icon-error { color: var(--danger); }
-    .queue-paths-ok { color: #4caf7d; }
-    .queue-paths-err { color: var(--danger); }
   
