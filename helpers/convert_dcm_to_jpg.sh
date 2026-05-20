@@ -50,7 +50,7 @@ fi
 
 echo "Converting ${INPUT_FILE} to ${OUTPUT_JPG_FILE}..."
 
-ARGS=("${INPUT_FILE}" "${OUTPUT_JPG_FILE}" "--render-format" "jpeg" "--jpeg-quality" "90" "--scale-max-size" "512")
+ARGS=("${INPUT_FILE}" "${OUTPUT_JPG_FILE}" "--scale-max-size" "512")
 
 if [ -n "${FRAME_NUMBER}" ]; then
     ARGS+=("--render-frame" "${FRAME_NUMBER}")
