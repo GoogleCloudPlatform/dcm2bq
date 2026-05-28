@@ -43,7 +43,6 @@ tf/backend.tf
 
 # Misc
 .DS_Store
-package-lock.json
 
 # Local config file
 testconfig.json
