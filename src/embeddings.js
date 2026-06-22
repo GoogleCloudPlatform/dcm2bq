@@ -60,6 +60,7 @@ const SOP_CLASS_UIDS = {
     "1.2.840.10008.5.1.4.1.1.20", // NM Image Storage
     "1.2.840.10008.5.1.4.1.1.128", // PT Image Storage
     "1.2.840.10008.5.1.4.1.1.481.1", // RT Image Storage
+    "1.2.840.10008.5.1.4.1.1.77.1.6", // VL Whole Slide Microscopy Image Storage (WSI)
     // TODO: Add any known SOP classes that are missing
   ],
 };
