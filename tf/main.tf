@@ -80,6 +80,7 @@ resource "random_string" "bucket_suffix" {
 }
 
 locals {
+  name_suffix = var.instance_name != "" ? "-${var.instance_name}" : ""
   bucket_name = var.create_gcs_bucket ? google_storage_bucket.dicom_bucket[0].name : data.google_storage_bucket.existing_dicom_bucket[0].name
 
   # Build embedding configuration dynamically based on flags
@@ -234,8 +235,8 @@ resource "google_bigquery_table" "dead_letter_table" {
 }
 
 # Pub/Sub topics
-resource "google_pubsub_topic" "gcs_events" { name = "dcm2bq-gcs-events" }
-resource "google_pubsub_topic" "dead_letter_topic" { name = "dcm2bq-dead-letter-events" }
+resource "google_pubsub_topic" "gcs_events" { name = "dcm2bq-gcs-events${local.name_suffix}" }
+resource "google_pubsub_topic" "dead_letter_topic" { name = "dcm2bq-dead-letter-events${local.name_suffix}" }
 
 # Grant the GCS service account permission to publish to the Pub/Sub topic
 # This service account is automatically created when the Storage API is enabled
@@ -252,14 +253,14 @@ resource "google_pubsub_topic_iam_member" "gcs_events_publisher" {
 
 # Service account for Cloud Run
 resource "google_service_account" "cloudrun_sa" {
-  account_id   = "dcm2bq-cloudrun-sa"
+  account_id   = "dcm2bq-cloudrun-sa${local.name_suffix}"
   display_name = "dcm2bq Cloud Run Service Account"
 }
 
 resource "google_service_account" "admin_console_sa" {
   count = local.deploy_admin_console ? 1 : 0
 
-  account_id   = "dcm2bq-admin-console-sa"
+  account_id   = "dcm2bq-admin-console-sa${local.name_suffix}"
   display_name = "dcm2bq admin-console Cloud Run Service Account"
 }
 
@@ -512,7 +513,7 @@ resource "google_storage_notification" "bucket_notification" {
 
 # Subscription to push GCS events to Cloud Run
 resource "google_pubsub_subscription" "gcs_to_cloudrun" {
-  name                       = "dcm2bq-gcs-to-cloudrun-subscription"
+  name                       = "dcm2bq-gcs-to-cloudrun-subscription${local.name_suffix}"
   topic                      = google_pubsub_topic.gcs_events.name
   ack_deadline_seconds       = 600      # 10 minutes to process before retry
   message_retention_duration = "86400s" # 1 day
@@ -547,7 +548,7 @@ resource "google_pubsub_subscription" "gcs_to_cloudrun" {
 # Dead-letter subscription that writes to BigQuery (requires google-beta)
 resource "google_pubsub_subscription" "dead_letter_subscription" {
   provider = google-beta
-  name     = "dcm2bq-dead-letter-bq-subscription"
+  name     = "dcm2bq-dead-letter-bq-subscription${local.name_suffix}"
   topic    = google_pubsub_topic.dead_letter_topic.name
 
   expiration_policy {

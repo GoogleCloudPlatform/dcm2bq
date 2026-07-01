@@ -65,6 +65,21 @@ function install_terraform() {
   echo "Terraform installed successfully."
 }
 
+function show_help() {
+  echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
+  echo "Options:"
+  echo "  --instance <name>            Deploy a named parallel instance (separate state and resources)."
+  echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
+  echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
+  echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
+  echo "  --no-admin-console           Skip admin-console deployment (default is deploy)."
+  echo "  -h, --help                   Show this help message."
+  echo ""
+  echo "Commands:"
+  echo "  upload                       Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
+  echo "  destroy                      Destroy all previously created assets."
+}
+
 # --- Main Script ---
 
 # 1. Check prerequisites
@@ -93,21 +108,17 @@ DEBUG_MODE="false"
 CREATE_EMBEDDINGS="true"
 CREATE_EMBEDDING_INPUT="true"
 DEPLOY_ADMIN_CONSOLE="true"
+INSTANCE_NAME=""
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
     -h | --help )
-      echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
-      echo "Options:"
-      echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
-      echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
-      echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
-      echo "  --no-admin-console           Skip admin-console deployment (default is deploy)."
-      echo "  -h, --help                   Show this help message."
-      echo ""
-      echo "Commands:"
-      echo "  upload                       Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
-      echo "  destroy                      Destroy all previously created assets."
+      show_help
       exit 0
+      ;;
+    --instance )
+      shift
+      INSTANCE_NAME="$1"
+      echo "Instance name: ${INSTANCE_NAME}"
       ;;
     --debug )
       DEBUG_MODE="true"
@@ -141,7 +152,7 @@ else
 fi
 
 if [ -z "$1" ]; then
-  echo "Usage: $0 [destroy|upload] <gcp_project_id>"
+  show_help
   exit 1
 fi
 
@@ -159,11 +170,15 @@ else
 fi
 
 # 5. Create backend.tf file
+TF_STATE_PREFIX="terraform/state"
+if [ -n "$INSTANCE_NAME" ]; then
+  TF_STATE_PREFIX="terraform/state/${INSTANCE_NAME}"
+fi
 cat > "${TF_DIR}/backend.tf" << EOL
 terraform {
   backend "gcs" {
     bucket = "${TF_STATE_BUCKET}"
-    prefix = "terraform/state"
+    prefix = "${TF_STATE_PREFIX}"
   }
 }
 EOL
@@ -173,7 +188,7 @@ echo "Terraform backend configured."
 # 6. Deploy or Destroy Terraform
 cd "${TF_DIR}"
 echo "Initializing Terraform..."
-terraform init
+terraform init -reconfigure
 
 if [ "$MODE" == "destroy" ]; then
   echo "Destroying infrastructure..."
@@ -184,7 +199,8 @@ if [ "$MODE" == "destroy" ]; then
     -var="debug_mode=${DEBUG_MODE}" \
     -var="create_embedding_input=${CREATE_EMBEDDING_INPUT}" \
     -var="create_embeddings=${CREATE_EMBEDDINGS}" \
-    -var="deploy_admin_console=${DEPLOY_ADMIN_CONSOLE}"
+    -var="deploy_admin_console=${DEPLOY_ADMIN_CONSOLE}" \
+    -var="instance_name=${INSTANCE_NAME}"
   echo "Cleanup complete."
   exit 0
 fi
@@ -198,7 +214,8 @@ if [ "$MODE" == "deploy" ]; then
     -var="debug_mode=${DEBUG_MODE}" \
     -var="create_embedding_input=${CREATE_EMBEDDING_INPUT}" \
     -var="create_embeddings=${CREATE_EMBEDDINGS}" \
-    -var="deploy_admin_console=${DEPLOY_ADMIN_CONSOLE}"
+    -var="deploy_admin_console=${DEPLOY_ADMIN_CONSOLE}" \
+    -var="instance_name=${INSTANCE_NAME}"
 fi
 
 if [ "$MODE" == "upload" ]; then
