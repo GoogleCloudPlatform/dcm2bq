@@ -445,7 +445,7 @@
     }
 
     function inferContentKind(item) {
-      const input = item?.info?.embedding?.input || {};
+      const input = item?.embeddingInput || {};
       const mimeType = String(input.mimeType || '').trim().toLowerCase();
       const sourcePath = String(input.path || item?.path || '').trim().toLowerCase();
 
@@ -667,7 +667,7 @@
           const info = item.info || {};
           const sopInstanceUid = metadata.SOPInstanceUID || 'N/A';
 
-          const input = info?.embedding?.input;
+          const input = item?.embeddingInput;
           const hasContentInput = !!input?.path;
           const contentActionUi = getContentActionUi(item);
           const embCount = item.embeddingCount || 0;

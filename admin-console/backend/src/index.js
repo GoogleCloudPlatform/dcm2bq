@@ -312,7 +312,9 @@ app.get("/studies/:studyId/instances", async (req, res) => {
         timestamp,
         metadata,
         info,
-        embedding_count
+        embedding_count,
+        embedding_model,
+        embedding_input
       FROM ${viewTable}
       WHERE JSON_VALUE(metadata, '$.StudyInstanceUID') = @studyId
       ORDER BY timestamp DESC
@@ -336,6 +338,8 @@ app.get("/studies/:studyId/instances", async (req, res) => {
         info: parseJsonValue(row.info),
         hasEmbeddingVector: embeddingCount > 0,
         embeddingCount,
+        embeddingModel: row.embedding_model || null,
+        embeddingInput: parseJsonValue(row.embedding_input),
       };
     });
 
@@ -421,7 +425,9 @@ app.get("/api/instances/:id", async (req, res) => {
         timestamp,
         metadata,
         info,
-        embedding_count
+        embedding_count,
+        embedding_model,
+        embedding_input
       FROM ${instancesTable}
       WHERE id = @id
       LIMIT 1
@@ -451,6 +457,8 @@ app.get("/api/instances/:id", async (req, res) => {
       info,
       hasEmbeddingVector: embeddingCount > 0,
       embeddingCount,
+      embeddingModel: row.embedding_model || null,
+      embeddingInput: parseJsonValue(row.embedding_input),
     });
   } catch (error) {
     console.error("Get instance error:", error);
@@ -538,7 +546,7 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
     // Query to get instance info (which contains path to extracted asset)
     const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const query = `
-      SELECT id, info
+      SELECT id, embedding_input
       FROM ${instancesTable}
       WHERE JSON_VALUE(metadata, '$.StudyInstanceUID') = @studyUid
         AND JSON_VALUE(metadata, '$.SeriesInstanceUID') = @seriesUid
@@ -557,9 +565,9 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
     }
 
     const row = rows[0];
-    const info = parseJsonValue(row.info);
-    const filePath = info?.embedding?.input?.path;
-    const mimeType = info?.embedding?.input?.mimeType;
+    const embeddingInput = parseJsonValue(row.embedding_input);
+    const filePath = embeddingInput?.path;
+    const mimeType = embeddingInput?.mimeType;
 
     if (!filePath || !mimeType) {
       return res.status(404).json({ error: "No extracted asset for this instance" });

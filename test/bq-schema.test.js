@@ -35,18 +35,7 @@ function validateRow(row) {
   assert.strictEqual(typeof row.info, "object", "info must be an object");
   assert.strictEqual(typeof row.info.event, "string", "info.event must be a string");
   assert.strictEqual(typeof row.info.input, "object", "info.input must be an object");
-  if (row.info.embedding != null) {
-    assert.strictEqual(typeof row.info.embedding, "object", "info.embedding must be an object");
-    if (row.info.embedding.model != null) {
-      assert.strictEqual(typeof row.info.embedding.model, "string", "info.embedding.model must be a string when present");
-    }
-    if (row.info.embedding.input != null) {
-      assert.strictEqual(typeof row.info.embedding.input, "object", "info.embedding.input must be an object when present");
-      if (row.info.embedding.input.path != null) assert.strictEqual(typeof row.info.embedding.input.path, "string", "embedding.input.path must be a string");
-      if (row.info.embedding.input.size != null) assert.strictEqual(typeof row.info.embedding.input.size, "number", "embedding.input.size must be a number");
-      if (row.info.embedding.input.mimeType != null) assert.strictEqual(typeof row.info.embedding.input.mimeType, "string", "embedding.input.mimeType must be a string");
-    }
-  }
+  assert.strictEqual(row.info.embedding, undefined, "info.embedding should not be present on instances rows");
 
   // metadata JSON string or null
   assert.ok(row.metadata === null || typeof row.metadata === "string", "metadata must be a JSON string or null");
@@ -278,18 +267,11 @@ describe("BigQuery insert payload matches schema", () => {
 
     await eventhandlers.handleGcsPubSubUnwrap(ctx, perfCtx);
 
-    // Instances row should NOT have embeddingVector
+    // Instances row should NOT have embeddingVector or info.embedding
     assert.ok(insertStub.calledOnce, "Insert should be called when embeddings enabled");
     const row = insertStub.firstCall.args[0];
-    assert.strictEqual(row.info.embedding.model, "multimodalembedding@001", "embedding model should be set in row info");
     assert.ok(stub.called, "createVectorEmbedding should be called when vector model configured");
     validateRow(row);
-
-    // Embedding info metadata should be on the instances row
-    assert.ok(row.info.embedding.input);
-    assert.strictEqual(row.info.embedding.input.path, "gs://bkt/obj.jpg");
-    assert.strictEqual(row.info.embedding.input.size, 123);
-    assert.strictEqual(row.info.embedding.input.mimeType, "image/jpeg");
 
     // Embeddings should be written to the separate embeddings table
     assert.ok(insertEmbeddingsStub.calledOnce, "insertEmbeddings should be called");

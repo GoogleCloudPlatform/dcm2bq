@@ -220,10 +220,11 @@ resource "google_bigquery_table" "instances_view" {
         FROM
           active_not_deleted
       ),
-      embedding_counts AS (
+      embedding_info AS (
         SELECT
           instanceId,
-          COUNT(*) AS embedding_count
+          COUNT(*) AS embedding_count,
+          ARRAY_AGG(info ORDER BY COALESCE(frameNumber, 0) ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_embedding_info
         FROM
           `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}`
         GROUP BY
@@ -231,13 +232,15 @@ resource "google_bigquery_table" "instances_view" {
       )
       SELECT
         l.* EXCEPT(_row_id),
-        COALESCE(ec.embedding_count, 0) AS embedding_count
+        COALESCE(ei.embedding_count, 0) AS embedding_count,
+        ei.first_embedding_info.model AS embedding_model,
+        ei.first_embedding_info.input AS embedding_input
       FROM
         latest_by_id l
       LEFT JOIN
-        embedding_counts ec
+        embedding_info ei
       ON
-        l.id = ec.instanceId
+        l.id = ei.instanceId
       WHERE
         l._row_id = 1
     EOT

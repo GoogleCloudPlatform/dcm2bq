@@ -54,21 +54,9 @@ async function processAndPersistDicom(version, timestamp, dicomFilePath, uriPath
 
   const { metadata, embeddings } = await processDicom(dicomFilePath, uriPath);
 
-  // Use the first embedding's input metadata for the instances info record
-  const firstEmbedding = Array.isArray(embeddings) && embeddings.length > 0 ? embeddings[0] : null;
-  const objectMetadata = firstEmbedding && (firstEmbedding.objectPath || firstEmbedding.objectSize || firstEmbedding.objectMimeType)
-    ? { path: firstEmbedding.objectPath, size: firstEmbedding.objectSize, mimeType: firstEmbedding.objectMimeType }
-    : null;
-
-  const embeddingVectorModel = embeddingInputConfig?.vector?.model;
-
   const infoObj = {
     event: eventType,
     input: { size: resolvedFileSize, type: storageType, storageClass: storageClass || null },
-    embedding: {
-      model: embeddingVectorModel || null,
-      input: objectMetadata,
-    },
   };
 
   const writeObj = {

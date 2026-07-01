@@ -18,24 +18,6 @@
           { "name": "type", "type": "STRING", "mode": "NULLABLE" },
           { "name": "storageClass", "type": "STRING", "mode": "NULLABLE" }
         ]
-      },
-      {
-        "name": "embedding",
-        "type": "RECORD",
-        "mode": "NULLABLE",
-        "fields": [
-          { "name": "model", "type": "STRING", "mode": "NULLABLE" },
-          {
-            "name": "input",
-            "type": "RECORD",
-            "mode": "NULLABLE",
-            "fields": [
-              { "name": "path", "type": "STRING", "mode": "NULLABLE" },
-              { "name": "size", "type": "INT64", "mode": "NULLABLE" },
-              { "name": "mimeType", "type": "STRING", "mode": "NULLABLE" }
-            ]
-          }
-        ]
       }
     ]
   },
