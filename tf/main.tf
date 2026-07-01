@@ -80,7 +80,8 @@ resource "random_string" "bucket_suffix" {
 }
 
 locals {
-  name_suffix = var.instance_name != "" ? "-${var.instance_name}" : ""
+  name_suffix     = var.instance_name != "" ? "-${var.instance_name}" : ""
+  resource_suffix = var.instance_name != "" ? var.instance_name : random_string.bucket_suffix.result
   bucket_name = var.create_gcs_bucket ? google_storage_bucket.dicom_bucket[0].name : data.google_storage_bucket.existing_dicom_bucket[0].name
 
   # Build embedding configuration dynamically based on flags
@@ -136,7 +137,7 @@ locals {
 # GCS bucket (optional create)
 resource "google_storage_bucket" "dicom_bucket" {
   count                       = var.create_gcs_bucket ? 1 : 0
-  name                        = var.gcs_bucket_name != "" ? var.gcs_bucket_name : "dcm2bq-dicom-bucket-${random_string.bucket_suffix.result}"
+  name                        = var.gcs_bucket_name != "" ? var.gcs_bucket_name : "dcm2bq-dicom-bucket-${local.resource_suffix}"
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -149,7 +150,7 @@ resource "google_storage_bucket" "dicom_bucket" {
 # GCS bucket for processed data (images and text extracted from DICOM)
 # This must be separate from the DICOM bucket to avoid triggering events when processed files are created
 resource "google_storage_bucket" "processed_data_bucket" {
-  name                        = "dcm2bq-processed-data-${random_string.bucket_suffix.result}"
+  name                        = "dcm2bq-processed-data-${local.resource_suffix}"
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -157,7 +158,7 @@ resource "google_storage_bucket" "processed_data_bucket" {
 
 # BigQuery dataset and tables
 resource "google_bigquery_dataset" "dicom_dataset" {
-  dataset_id = var.bq_dataset_id != "" ? var.bq_dataset_id : "dicom_${random_string.bucket_suffix.result}"
+  dataset_id = var.bq_dataset_id != "" ? var.bq_dataset_id : "dicom_${local.resource_suffix}"
   # BigQuery dataset location (use bq_location variable, default US)
   location = var.bq_location
 }
@@ -387,7 +388,7 @@ resource "google_pubsub_subscription_iam_member" "dead_letter_subscriber" {
 # Cloud Run service
 resource "google_cloud_run_v2_service" "dcm2bq_service" {
   deletion_protection = false
-  name                = "dcm2bq-service-${random_string.bucket_suffix.result}"
+  name                = "dcm2bq-service-${local.resource_suffix}"
   location            = var.region
 
   depends_on = [google_project_service.cloudrun_api]
@@ -431,7 +432,7 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
   count = local.deploy_admin_console ? 1 : 0
 
   deletion_protection = false
-  name                = "${var.admin_console_service_name}-${random_string.bucket_suffix.result}"
+  name                = "${var.admin_console_service_name}-${local.resource_suffix}"
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   launch_stage        = "BETA"
