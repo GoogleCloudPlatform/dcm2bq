@@ -220,13 +220,26 @@ resource "google_bigquery_table" "instances_view" {
         FROM
           active_not_deleted
       ),
+      latest_embeddings AS (
+        SELECT
+          * EXCEPT(_emb_row_id)
+        FROM (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (PARTITION BY id ORDER BY timestamp DESC) AS _emb_row_id
+          FROM
+            `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}`
+        )
+        WHERE
+          _emb_row_id = 1
+      ),
       embedding_info AS (
         SELECT
           instanceId,
           COUNT(*) AS embedding_count,
           ARRAY_AGG(info ORDER BY COALESCE(frameNumber, 0) ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_embedding_info
         FROM
-          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}`
+          latest_embeddings
         GROUP BY
           instanceId
       )
