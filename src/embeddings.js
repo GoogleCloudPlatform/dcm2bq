@@ -18,7 +18,7 @@ const { Storage } = require("@google-cloud/storage");
 const fs = require("fs/promises");
 const { gcpConfig, jsonOutput } = require("./config").get();
 const { DEBUG_MODE, isRetryableError, createNonRetryableError } = require("./utils");
-const { processImage, renderDicomImage, getFrameIndicesToProcess } = require("./processors/image");
+const { processImage, renderDicomImage, renderAllDicomFrames, getFrameIndicesToProcess } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
 
@@ -154,7 +154,7 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
 
 /**
  * Creates embedding inputs from DICOM metadata and DICOM input.
- * For multi-frame images, processes each frame sequentially to limit memory usage.
+ * For multi-frame images, renders all frames in a single dcmnorm invocation, then uploads to GCS.
  * Returns an array of embedding inputs (one per frame for images, one for SR/PDF).
  * @param {Object} metadata - DICOM metadata JSON
  * @param {Buffer|string} dicomInput - Raw DICOM file buffer or local DICOM file path
@@ -185,11 +185,16 @@ async function createEmbeddingInput(metadata, dicomInput) {
     const frameIndices = getFrameIndicesToProcess(frameCount, maxFrames);
     const results = [];
 
-    // Process frames sequentially to limit memory usage on Cloud Run
-    for (const frameIndex of frameIndices) {
-      const imageBuffer = await renderDicomImage(metadata, dicomInput, frameCount > 1 ? frameIndex : null);
-      if (!imageBuffer) continue;
+    let rendered;
+    if (frameCount > 1) {
+      // Render all frames in a single dcmnorm invocation
+      rendered = await renderAllDicomFrames(metadata, dicomInput, frameIndices);
+    } else {
+      const buffer = await renderDicomImage(metadata, dicomInput, null);
+      rendered = buffer ? [{ frameIndex: 0, buffer }] : [];
+    }
 
+    for (const { frameIndex, buffer: imageBuffer } of rendered) {
       const instance = { image: { bytesBase64Encoded: imageBuffer.toString("base64") } };
       const frameSuffix = frameCount > 1 ? `_frame${frameIndex}` : "";
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}${frameSuffix}.jpg`;
@@ -241,8 +246,53 @@ async function createEmbeddingInput(metadata, dicomInput) {
 }
 
 /**
+ * Processes a single embedding request with error classification.
+ */
+async function processEmbeddingRequest(inputResult) {
+  const { instance, objectPath, objectSize, objectMimeType, frameNumber } = inputResult;
+
+  const response = await doRequest({ instances: [instance] });
+  if (response.predictions && response.predictions.length > 0) {
+    const vectorEmbedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
+    return { embedding: vectorEmbedding, objectPath, objectSize, objectMimeType, frameNumber };
+  } else {
+    throw new Error("Failed to get embedding from the model response - no predictions returned.");
+  }
+}
+
+/**
+ * Runs tasks through a concurrency-limited pool.
+ * Executes up to maxConcurrent tasks at a time; rejects on first error.
+ */
+async function runPool(items, fn, maxConcurrent) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  let firstError = null;
+
+  async function worker() {
+    while (nextIndex < items.length && !firstError) {
+      const i = nextIndex++;
+      try {
+        results[i] = await fn(items[i]);
+      } catch (e) {
+        firstError = e;
+        throw e;
+      }
+    }
+  }
+
+  const workers = [];
+  for (let w = 0; w < Math.min(maxConcurrent, items.length); w++) {
+    workers.push(worker());
+  }
+
+  await Promise.all(workers);
+  return results;
+}
+
+/**
  * Creates vector embeddings for a DICOM file.
- * For multi-frame images, generates one embedding per frame (sequentially).
+ * For multi-frame images, generates embeddings using a pool of concurrent requests.
  * @returns {Promise<Array<{embedding, objectPath, objectSize, objectMimeType, frameNumber}>|null>}
  */
 async function createVectorEmbedding(metadata, dicomInput) {
@@ -259,51 +309,39 @@ async function createVectorEmbedding(metadata, dicomInput) {
     return null;
   }
 
-  const embeddings = [];
+  const maxParallel = gcpConfig.embedding?.input?.maxParallelEmbeddings || 5;
 
-  // Process each input sequentially to limit memory usage
-  for (const inputResult of inputResults) {
-    const { instance, objectPath, objectSize, objectMimeType, frameNumber } = inputResult;
+  try {
+    const embeddings = await runPool(inputResults, processEmbeddingRequest, maxParallel);
+    return embeddings.length > 0 ? embeddings : null;
+  } catch (e) {
+    const errorMessage = e.message || '';
 
-    try {
-      const response = await doRequest({ instances: [instance] });
-      if (response.predictions && response.predictions.length > 0) {
-        const vectorEmbedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
-        embeddings.push({ embedding: vectorEmbedding, objectPath, objectSize, objectMimeType, frameNumber });
+    if (isRetryableError(e)) {
+      console.error("Transient error generating vector embedding (will be retried):", errorMessage);
+      throw e;
+    } else {
+      if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
+        throw createNonRetryableError(
+          `The Vertex AI API is not enabled for project '${gcpConfig.projectId}'. ` +
+          `Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`
+        );
+      } else if (errorMessage.includes('401') || errorMessage.includes('permission denied') || errorMessage.includes('Unauthenticated')) {
+        throw createNonRetryableError(
+          `Authentication failed for project '${gcpConfig.projectId}'. ` +
+          `Please check your Google Cloud credentials and ensure you have the required permissions.`
+        );
+      } else if (errorMessage.includes('403') || errorMessage.includes('Permission denied')) {
+        throw createNonRetryableError(
+          `Access denied for project '${gcpConfig.projectId}'. ` +
+          `Please check that you have the required IAM roles (e.g., roles/aiplatform.user).`
+        );
       } else {
-        throw new Error("Failed to get embedding from the model response - no predictions returned.");
-      }
-    } catch (e) {
-      const errorMessage = e.message || '';
-
-      if (isRetryableError(e)) {
-        console.error("Transient error generating vector embedding (will be retried):", errorMessage);
+        console.error("Unknown error generating vector embedding (will be retried):", errorMessage);
         throw e;
-      } else {
-        if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
-          throw createNonRetryableError(
-            `The Vertex AI API is not enabled for project '${gcpConfig.projectId}'. ` +
-            `Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`
-          );
-        } else if (errorMessage.includes('401') || errorMessage.includes('permission denied') || errorMessage.includes('Unauthenticated')) {
-          throw createNonRetryableError(
-            `Authentication failed for project '${gcpConfig.projectId}'. ` +
-            `Please check your Google Cloud credentials and ensure you have the required permissions.`
-          );
-        } else if (errorMessage.includes('403') || errorMessage.includes('Permission denied')) {
-          throw createNonRetryableError(
-            `Access denied for project '${gcpConfig.projectId}'. ` +
-            `Please check that you have the required IAM roles (e.g., roles/aiplatform.user).`
-          );
-        } else {
-          console.error("Unknown error generating vector embedding (will be retried):", errorMessage);
-          throw e;
-        }
       }
     }
   }
-
-  return embeddings.length > 0 ? embeddings : null;
 }
 
 module.exports = { createVectorEmbedding, createEmbeddingInput, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS };

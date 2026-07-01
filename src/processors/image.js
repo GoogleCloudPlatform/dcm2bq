@@ -15,7 +15,7 @@
  */
 
 const { execFile } = require("child_process");
-const { mkdtemp, writeFile, readFile, rm } = require("fs/promises");
+const { mkdtemp, writeFile, readFile, readdir, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
 
@@ -137,6 +137,81 @@ async function renderDicomImage(metadata, dicomInput, frameIndex) {
   }
 }
 
+/**
+ * Renders all frames of a multi-frame DICOM file in a single dcmnorm invocation.
+ * Returns an array of {frameIndex, buffer} sorted by frame index.
+ * Only the frames in frameIndices are returned (others are discarded).
+ */
+async function renderAllDicomFrames(metadata, dicomInput, frameIndices) {
+  const transferSyntax = metadata && metadata.TransferSyntaxUID;
+  if (!transferSyntax || !SUPPORTED_TRANSFER_SYNTAXES.has(transferSyntax)) {
+    console.error(`Unsupported transfer syntax: ${transferSyntax || 'unknown'}`);
+    return [];
+  }
+
+  let tempDir;
+  try {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-all-"));
+    const dicomPath = typeof dicomInput === "string" ? dicomInput : path.join(tempDir, "input.dcm");
+    const jpgPath = path.join(tempDir, "output.jpg");
+    const scriptPath = path.resolve(__dirname, "..", "..", "helpers", "convert_dcm_to_jpg.sh");
+
+    if (Buffer.isBuffer(dicomInput)) {
+      await writeFile(dicomPath, dicomInput);
+    } else if (typeof dicomInput !== "string") {
+      throw new Error("Expected dicom input to be a file path or Buffer");
+    }
+
+    await new Promise((resolve, reject) => {
+      execFile(scriptPath, [dicomPath, jpgPath, "--all-frames"], (error, stdout, stderr) => {
+        if (error) {
+          console.error(JSON.stringify({
+            message: "convert_dcm_to_jpg.sh --all-frames execution failed",
+            stderr,
+          }));
+          const enhancedError = new Error(error.message);
+          enhancedError.cause = error;
+          enhancedError.stderr = stderr;
+          return reject(enhancedError);
+        }
+        resolve(stdout);
+      });
+    });
+
+    // dcmnorm produces files like output_000001.jpg, output_000002.jpg, ... (1-based)
+    const wantedSet = new Set(frameIndices);
+    const files = await readdir(tempDir);
+    const frameFiles = files
+      .filter(f => f.startsWith("output_") && f.endsWith(".jpg"))
+      .sort();
+
+    const results = [];
+    for (const file of frameFiles) {
+      const match = file.match(/^output_(\d+)\.jpg$/);
+      if (!match) continue;
+      const frameIndex = parseInt(match[1], 10) - 1; // dcmnorm is 1-based, we use 0-based
+      if (!wantedSet.has(frameIndex)) continue;
+      const buffer = await readFile(path.join(tempDir, file));
+      results.push({ frameIndex, buffer });
+    }
+
+    return results;
+  } catch (error) {
+    console.error(JSON.stringify({
+      message: "Could not render all DICOM frames using dcmnorm renderer",
+      error: error?.message || String(error),
+      stderr: error?.stderr || null,
+    }));
+    return [];
+  } finally {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true }).catch((cleanupError) =>
+        console.error(`Failed to clean up temporary directory ${tempDir}: ${cleanupError?.message || String(cleanupError)}`)
+      );
+    }
+  }
+}
+
 async function processImage(metadata, dicomInput) {
   const imageBuffer = await renderDicomImage(metadata, dicomInput);
   if (imageBuffer) {
@@ -147,4 +222,4 @@ async function processImage(metadata, dicomInput) {
   return null;
 }
 
-module.exports = { processImage, renderDicomImage, getFrameIndicesToProcess };
+module.exports = { processImage, renderDicomImage, renderAllDicomFrames, getFrameIndicesToProcess };

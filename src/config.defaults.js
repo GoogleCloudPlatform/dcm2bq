@@ -36,6 +36,7 @@ module.exports = {
       input: {
         gcsBucketPath: process.env.GCS_BUCKET_PATH || "", // GCS path to save processed images and text (e.g., 'gs://my-bucket/extract')
         maxFrames: null, // Max frames to embed for multi-frame DICOM images (null = all frames)
+        maxParallelEmbeddings: 5, // Max concurrent embedding API requests for multi-frame images
         // Configuration for text summarization before processing
         // If this section exists, long text fields will be summarized
         summarizeText: {
