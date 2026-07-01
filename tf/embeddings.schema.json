@@ -1,0 +1,25 @@
+[
+  { "name": "id", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "instanceId", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "timestamp", "type": "TIMESTAMP", "mode": "REQUIRED" },
+  { "name": "frameNumber", "type": "INT64", "mode": "NULLABLE" },
+  {
+    "name": "info",
+    "type": "RECORD",
+    "mode": "NULLABLE",
+    "fields": [
+      { "name": "model", "type": "STRING", "mode": "NULLABLE" },
+      {
+        "name": "input",
+        "type": "RECORD",
+        "mode": "NULLABLE",
+        "fields": [
+          { "name": "path", "type": "STRING", "mode": "NULLABLE" },
+          { "name": "size", "type": "INT64", "mode": "NULLABLE" },
+          { "name": "mimeType", "type": "STRING", "mode": "NULLABLE" }
+        ]
+      }
+    ]
+  },
+  { "name": "embeddingVector", "type": "FLOAT", "mode": "REPEATED" }
+]

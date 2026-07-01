@@ -33,9 +33,11 @@ Traditional imaging systems like PACS and VNAs offer limited query capabilities 
 
 ## BigQuery schema
 
-The project stores DICOM metadata and vector embeddings in a single consolidated BigQuery table with the following columns:
+The project uses two BigQuery tables: an **instances** table for DICOM metadata and a separate **embeddings** table for per-frame vector embeddings.
 
-- `id`: STRING (REQUIRED) - Deterministic SHA256 hash of `path|version`
+### Instances table (`instances`)
+
+- `id`: STRING (REQUIRED) - Deterministic SHA256 hash of DICOM UIDs
 - `timestamp`: TIMESTAMP (REQUIRED) - When the record was written
 - `path`: STRING (REQUIRED) - Full path to the DICOM file
 - `version`: STRING (NULLABLE) - Object version identifier
@@ -46,9 +48,23 @@ The project stores DICOM metadata and vector embeddings in a single consolidated
     - `model`: STRING - Model used for embedding
     - `input`: RECORD - Object used for embedding (path, size, mimeType)
 - `metadata`: JSON (NULLABLE) - Complete DICOM JSON metadata
-- `embeddingVector`: FLOAT ARRAY (NULLABLE) - Vector embedding for semantic search
 
-The Cloud Run service is configured with the table ID via the `gcpConfig.bigQuery.instancesTableId` setting (see `config.defaults.js`). Use the `embeddingVector` column when running vector searches or creating vector indexes and models.
+### Embeddings table (`embeddings`)
+
+Stores one row per embedding (one per frame for multi-frame DICOM images, one for SR/PDF):
+
+- `id`: STRING (REQUIRED) - Deterministic SHA256 hash of `instanceId|frameNumber`
+- `instanceId`: STRING (REQUIRED) - Foreign key to the instances table
+- `timestamp`: TIMESTAMP (REQUIRED) - When the embedding was generated
+- `frameNumber`: INT64 (NULLABLE) - 0-based frame index (null for non-image content)
+- `info`: RECORD (NULLABLE) - Embedding metadata (model, input path/size/mimeType)
+- `embeddingVector`: FLOAT ARRAY - The vector embedding
+
+### Instances view (`instancesView`)
+
+A BigQuery view that joins the instances table with a count of embeddings per instance, exposing an `embedding_count` column.
+
+The Cloud Run service is configured with table IDs via `gcpConfig.bigQuery.instancesTableId` and `gcpConfig.bigQuery.embeddingsTableId` settings (see `config.defaults.js`). Use the `embeddingVector` column on the **embeddings** table when running vector searches or creating vector indexes.
 
 Note: the project includes sample DDL and queries — see `src/bq-samples.sql`.
 
@@ -56,9 +72,9 @@ Note: the project includes sample DDL and queries — see `src/bq-samples.sql`.
 
 You can find example queries and DDL for creating the embedding model and vector index in `src/bq-samples.sql`. The file includes:
 
-- example SELECTs against the consolidated metadata table,
+- example SELECTs against the instances and embeddings tables,
 - sample aggregation queries for vector search,
-- and DDL samples to create an embedding model and a vector index on the `embeddingVector` column.
+- and DDL samples to create an embedding model and a vector index on the `embeddings.embeddingVector` column.
 
 Before running vector searches, ensure you have created the embedding model and vector index (the samples show how to do this with `bq query`).
 
@@ -127,8 +143,8 @@ The workflow is as follows:
     -   It validates the message schema and checks for a DICOM-like file extension (e.g., `.dcm`) or supported archive (`.zip`, `.tar.gz`, `.tgz`).
     -   For new objects, it reads the file from GCS and parses the DICOM metadata.
     -   For archive files, it extracts all `.dcm` files and processes each one individually.
-    -   If embeddings are enabled, it generates a vector embedding from the DICOM data (for supported types like images, SRs, and PDFs) by calling the Vertex AI Embeddings API.
-    -   It inserts a JSON representation of the metadata and the embedding into BigQuery.
+    -   If embeddings are enabled, it generates vector embeddings from the DICOM data (for supported types like images, SRs, and PDFs) by calling the Vertex AI Embeddings API. For multi-frame images (e.g., WSI), it generates one embedding per frame.
+    -   It inserts DICOM metadata into the instances table and embeddings into the separate embeddings table in BigQuery.
     -   For deleted objects, it records the deletion event in BigQuery.
 5.  If an error occurs, the message is NACK'd for retry. After maximum retries, it's sent to a dead-letter topic for analysis.
 

@@ -27,6 +27,7 @@ module.exports = {
     bigQuery: {
       datasetId: "dicom",
       instancesTableId: "instances",
+      embeddingsTableId: "embeddings",
     },
     embedding: {
       input: {

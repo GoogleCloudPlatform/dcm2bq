@@ -18,7 +18,7 @@ const { Storage } = require("@google-cloud/storage");
 const fs = require("fs/promises");
 const { gcpConfig, jsonOutput } = require("./config").get();
 const { DEBUG_MODE, isRetryableError, createNonRetryableError } = require("./utils");
-const { processImage } = require("./processors/image");
+const { processImage, renderDicomImage, getFrameIndicesToProcess } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
 
@@ -153,11 +153,12 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
 }
 
 /**
- * Creates embedding input from DICOM metadata and DICOM input.
- * Extracts text or images and saves them to GCS.
+ * Creates embedding inputs from DICOM metadata and DICOM input.
+ * For multi-frame images, processes each frame sequentially to limit memory usage.
+ * Returns an array of embedding inputs (one per frame for images, one for SR/PDF).
  * @param {Object} metadata - DICOM metadata JSON
  * @param {Buffer|string} dicomInput - Raw DICOM file buffer or local DICOM file path
- * @returns {Promise<{instance: Object, objectPath: string, objectSize: number, objectMimeType: string}|null>}
+ * @returns {Promise<Array<{instance: Object, objectPath: string, objectSize: number, objectMimeType: string, frameNumber: number|null}>|null>}
  * @throws {Error} If embedding input cannot be created or saved to GCS
  */
 async function createEmbeddingInput(metadata, dicomInput) {
@@ -172,59 +173,79 @@ async function createEmbeddingInput(metadata, dicomInput) {
   }
   const sopClassUid = metadata.SOPClassUID;
   const requireEmbeddingCompatible = shouldRequireEmbeddingCompatibleText(gcpConfig);
+  const maxFrames = gcpConfig.embedding?.input?.maxFrames || null;
 
-  let instance;
-  let objectPath = null;
-  let objectSize = null;
-  let objectMimeType = null;
   const studyUid = metadata.StudyInstanceUID || "unknown";
   const seriesUid = metadata.SeriesInstanceUID || "unknown";
   const instanceUid = metadata.SOPInstanceUID || "unknown";
 
   if (isImage(sopClassUid)) {
-    instance = await processImage(metadata, dicomInput);
-    if (instance?.image?.bytesBase64Encoded) {
-      const imageBuffer = Buffer.from(instance.image.bytesBase64Encoded, 'base64');
-      const fileName = `${studyUid}/${seriesUid}/${instanceUid}.jpg`;
-      objectPath = await saveToGCS(imageBuffer, fileName, 'image/jpeg', '');
-      objectSize = imageBuffer.length;
-      objectMimeType = 'image/jpeg';
+    const numFrames = parseInt(metadata?.NumberOfFrames, 10);
+    const frameCount = (!isNaN(numFrames) && numFrames > 1) ? numFrames : 1;
+    const frameIndices = getFrameIndicesToProcess(frameCount, maxFrames);
+    const results = [];
+
+    // Process frames sequentially to limit memory usage on Cloud Run
+    for (const frameIndex of frameIndices) {
+      const imageBuffer = await renderDicomImage(metadata, dicomInput, frameCount > 1 ? frameIndex : null);
+      if (!imageBuffer) continue;
+
+      const instance = { image: { bytesBase64Encoded: imageBuffer.toString("base64") } };
+      const frameSuffix = frameCount > 1 ? `_frame${frameIndex}` : "";
+      const fileName = `${studyUid}/${seriesUid}/${instanceUid}${frameSuffix}.jpg`;
+      const objectPath = await saveToGCS(imageBuffer, fileName, 'image/jpeg', '');
+
+      results.push({
+        instance,
+        objectPath,
+        objectSize: imageBuffer.length,
+        objectMimeType: 'image/jpeg',
+        frameNumber: frameCount > 1 ? frameIndex : null,
+      });
     }
+
+    if (results.length === 0) {
+      throw createNonRetryableError(`Failed to create embedding input: unable to render any frames for SOP Class UID ${sopClassUid}.`);
+    }
+
+    if (DEBUG_MODE && frameCount > 1) {
+      console.log(`Processed ${results.length} of ${frameCount} frames for ${instanceUid}`);
+    }
+
+    return results;
   } else if (isPdf(sopClassUid)) {
     const dicomBuffer = Buffer.isBuffer(dicomInput) ? dicomInput : await fs.readFile(dicomInput);
-    instance = await processPdf(metadata, dicomBuffer, requireEmbeddingCompatible);
-    if (instance?.text) {
-      const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
-      const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
-      objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
-      objectSize = textBuffer.length;
-      objectMimeType = 'text/plain';
+    const instance = await processPdf(metadata, dicomBuffer, requireEmbeddingCompatible);
+    if (!instance?.text) {
+      throw createNonRetryableError(`Failed to create embedding input: unable to process DICOM content for SOP Class UID ${sopClassUid}.`);
     }
+    const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
+    const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
+    const objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
+    return [{ instance, objectPath, objectSize: textBuffer.length, objectMimeType: 'text/plain', frameNumber: null }];
   } else if (isStructuredReport(sopClassUid)) {
-    instance = await processSR(metadata, requireEmbeddingCompatible);
-    if (instance?.text) {
-      const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
-      const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
-      objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
-      objectSize = textBuffer.length;
-      objectMimeType = 'text/plain';
+    const instance = await processSR(metadata, requireEmbeddingCompatible);
+    if (!instance?.text) {
+      throw createNonRetryableError(`Failed to create embedding input: unable to process DICOM content for SOP Class UID ${sopClassUid}.`);
     }
+    const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
+    const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
+    const objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
+    return [{ instance, objectPath, objectSize: textBuffer.length, objectMimeType: 'text/plain', frameNumber: null }];
   } else {
     if (DEBUG_MODE) {
       console.log(`Skipping embedding generation for unsupported SOP Class UID ${sopClassUid}.`);
     }
     return null;
   }
-
-  if (!instance) {
-    throw createNonRetryableError(`Failed to create embedding input: unable to process DICOM content for SOP Class UID ${sopClassUid}.`);
-  }
-
-  return { instance, objectPath, objectSize, objectMimeType };
 }
 
+/**
+ * Creates vector embeddings for a DICOM file.
+ * For multi-frame images, generates one embedding per frame (sequentially).
+ * @returns {Promise<Array<{embedding, objectPath, objectSize, objectMimeType, frameNumber}>|null>}
+ */
 async function createVectorEmbedding(metadata, dicomInput) {
-  // Validate GCP configuration - these are permanent errors
   if (!gcpConfig.embedding?.input?.vector?.model) {
     throw createNonRetryableError("Vector embedding is not configured. Please set gcpConfig.embedding.input.vector.model in your configuration.");
   }
@@ -233,56 +254,56 @@ async function createVectorEmbedding(metadata, dicomInput) {
     throw createNonRetryableError("GCP project ID is not configured. Please set the GCP_PROJECT environment variable or configure gcpConfig.projectId in your configuration file. Example: export GCP_PROJECT=your-actual-gcp-project");
   }
 
-  const inputResult = await createEmbeddingInput(metadata, dicomInput);
-  if (!inputResult) {
+  const inputResults = await createEmbeddingInput(metadata, dicomInput);
+  if (!inputResults) {
     return null;
   }
 
-  const { instance, objectPath, objectSize, objectMimeType } = inputResult;
+  const embeddings = [];
 
-  try {
-    const response = await doRequest({ instances: [instance] });
-    if (response.predictions && response.predictions.length > 0) {
-      const vectorEmbedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
-      return { embedding: vectorEmbedding, objectPath, objectSize, objectMimeType };
-    } else {
-      throw new Error("Failed to get embedding from the model response - no predictions returned.");
-    }
-  } catch (e) {
-    const errorMessage = e.message || '';
-    
-    // Classify error as retryable or permanent for tracking/logging
-    // Note: Both types will be retried by Pub/Sub, but this helps with error analysis
-    if (isRetryableError(e)) {
-      // Retryable errors (quota exceeded, rate limit, transient failures)
-      // Return 500 - Pub/Sub will retry with exponential backoff
-      console.error("Transient error generating vector embedding (will be retried):", errorMessage);
-      throw e;
-    } else {
-      // Permanent errors (config issues, auth errors, etc)
-      // Return 422 - Pub/Sub will still retry, but error indicates permanent issue
-      if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
-        throw createNonRetryableError(
-          `The Vertex AI API is not enabled for project '${gcpConfig.projectId}'. ` +
-          `Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`
-        );
-      } else if (errorMessage.includes('401') || errorMessage.includes('permission denied') || errorMessage.includes('Unauthenticated')) {
-        throw createNonRetryableError(
-          `Authentication failed for project '${gcpConfig.projectId}'. ` +
-          `Please check your Google Cloud credentials and ensure you have the required permissions.`
-        );
-      } else if (errorMessage.includes('403') || errorMessage.includes('Permission denied')) {
-        throw createNonRetryableError(
-          `Access denied for project '${gcpConfig.projectId}'. ` +
-          `Please check that you have the required IAM roles (e.g., roles/aiplatform.user).`
-        );
+  // Process each input sequentially to limit memory usage
+  for (const inputResult of inputResults) {
+    const { instance, objectPath, objectSize, objectMimeType, frameNumber } = inputResult;
+
+    try {
+      const response = await doRequest({ instances: [instance] });
+      if (response.predictions && response.predictions.length > 0) {
+        const vectorEmbedding = response.predictions[0].imageEmbedding || response.predictions[0].textEmbedding;
+        embeddings.push({ embedding: vectorEmbedding, objectPath, objectSize, objectMimeType, frameNumber });
       } else {
-        // Unknown error - default to retryable since we can't be sure
-        console.error("Unknown error generating vector embedding (will be retried):", errorMessage);
+        throw new Error("Failed to get embedding from the model response - no predictions returned.");
+      }
+    } catch (e) {
+      const errorMessage = e.message || '';
+
+      if (isRetryableError(e)) {
+        console.error("Transient error generating vector embedding (will be retried):", errorMessage);
         throw e;
+      } else {
+        if (errorMessage.includes('not been used in project') || errorMessage.includes('API has not been enabled')) {
+          throw createNonRetryableError(
+            `The Vertex AI API is not enabled for project '${gcpConfig.projectId}'. ` +
+            `Please enable it at: https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/overview?project=${gcpConfig.projectId}`
+          );
+        } else if (errorMessage.includes('401') || errorMessage.includes('permission denied') || errorMessage.includes('Unauthenticated')) {
+          throw createNonRetryableError(
+            `Authentication failed for project '${gcpConfig.projectId}'. ` +
+            `Please check your Google Cloud credentials and ensure you have the required permissions.`
+          );
+        } else if (errorMessage.includes('403') || errorMessage.includes('Permission denied')) {
+          throw createNonRetryableError(
+            `Access denied for project '${gcpConfig.projectId}'. ` +
+            `Please check that you have the required IAM roles (e.g., roles/aiplatform.user).`
+          );
+        } else {
+          console.error("Unknown error generating vector embedding (will be retried):", errorMessage);
+          throw e;
+        }
       }
     }
   }
+
+  return embeddings.length > 0 ? embeddings : null;
 }
 
 module.exports = { createVectorEmbedding, createEmbeddingInput, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS };

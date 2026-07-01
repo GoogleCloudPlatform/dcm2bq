@@ -670,9 +670,10 @@
           const input = info?.embedding?.input;
           const hasContentInput = !!input?.path;
           const contentActionUi = getContentActionUi(item);
-          const emb = item.hasEmbeddingVector
-            ? `Vector: ${item.embeddingVectorLength} dims`
-            : 'Vector: none';
+          const embCount = item.embeddingCount || 0;
+          const emb = embCount > 0
+            ? `Embeddings: ${embCount}`
+            : 'Embeddings: none';
 
           const rowNode = rowTemplate.content.cloneNode(true);
           const cells = rowNode.querySelectorAll('td');

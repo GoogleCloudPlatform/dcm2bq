@@ -38,7 +38,8 @@ addSchema(
             required: ["datasetId", "instancesTableId"],
             properties: {
               datasetId: { type: "string" },
-              instancesTableId: { type: "string" }
+              instancesTableId: { type: "string" },
+              embeddingsTableId: { type: "string" }
             }
           },
           embedding: {
@@ -48,6 +49,7 @@ addSchema(
                 type: "object",
                 properties: {
                   gcsBucketPath: { type: "string" },
+                  maxFrames: { type: ["integer", "null"] },
                   summarizeText: {
                     type: "object",
                     properties: {

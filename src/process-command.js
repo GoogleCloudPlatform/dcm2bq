@@ -411,13 +411,11 @@ function formatResultRow(row) {
       lines.push(`  Input: Not available`);
     }
     
-    // Display embedding vector status - check both direct embeddingVector and nested
-    const embeddingVectorExists = row.embeddingVector || (embedding && embedding.embeddingVector);
-    if (embeddingVectorExists) {
-      const vector = row.embeddingVector || embedding.embeddingVector;
-      lines.push(`  Embedding Vector: Present (${Array.isArray(vector) ? vector.length : "object"} values)`);
+    const embeddingCount = Number(row.embedding_count || 0);
+    if (embeddingCount > 0) {
+      lines.push(`  Embeddings: ${embeddingCount}`);
     } else {
-      lines.push(`  Embedding Vector: Not available`);
+      lines.push(`  Embeddings: None`);
     }
   }
   

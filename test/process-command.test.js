@@ -354,10 +354,10 @@ describe("process-command", () => {
       assert(formatted.includes("Path: gs://bucket/extracted.jpg"));
       assert(formatted.includes("Size: 48.83 KB"));
       assert(formatted.includes("Mime Type: image/jpeg"));
-      assert(formatted.includes("Embedding Vector: Not available"));
+      assert(formatted.includes("Embeddings: None"));
     });
 
-    it("should display embedding vector status when present", () => {
+    it("should display embedding count when present", () => {
       const row = {
         path: "gs://bucket/file.dcm",
         timestamp: "2024-01-12T15:40:00Z",
@@ -370,13 +370,13 @@ describe("process-command", () => {
             mimeType: "image/jpeg"
           }
         },
-        embeddingVector: [0.1, 0.2, 0.3, 0.4, 0.5]
+        embedding_count: 5
       };
-      
+
       const formatted = processCommand.formatResultRow(row);
       assert(formatted.includes("Embedding:"));
       assert(formatted.includes("Model: multimodalembedding@001"));
-      assert(formatted.includes("Embedding Vector: Present (5 values)"));
+      assert(formatted.includes("Embeddings: 5"));
     });
 
     it("should display embedding info from info.embedding when no direct embedding", () => {
@@ -417,7 +417,7 @@ describe("process-command", () => {
       assert(formatted.includes("Embedding:"));
       assert(formatted.includes("Model: multimodalembedding@001"));
       assert(formatted.includes("Input: Not available"));
-      assert(formatted.includes("Embedding Vector: Not available"));
+      assert(formatted.includes("Embeddings: None"));
     });
   });
 

@@ -21,13 +21,28 @@ const bigquery = new BigQuery();
 const cfg = config.get().gcpConfig.bigQuery || {};
 const datasetId = cfg.datasetId;
 const instancesTable = cfg.instancesTableId;
+const embeddingsTable = cfg.embeddingsTableId;
+
+function formatInsertError(error, label) {
+  let errorDetails = 'Unknown error';
+  if (error.errors && Array.isArray(error.errors) && error.errors.length > 0) {
+    errorDetails = error.errors.map(e => {
+      const reason = e.reason || 'unknown';
+      const message = e.message || 'no message';
+      const location = e.location ? ` (${e.location})` : '';
+      return `${reason}: ${message}${location}`;
+    }).join('; ');
+  } else if (error.message) {
+    errorDetails = error.message;
+  }
+  return `Failed to insert ${label}: ${errorDetails}`;
+}
 
 async function insert(obj) {
   if (!datasetId || !instancesTable) throw new Error('BigQuery instances table not configured');
   try {
     await bigquery.dataset(datasetId).table(instancesTable).insert(obj);
   } catch (error) {
-    // Enhanced error logging
     console.error('BigQuery insert error:', JSON.stringify({
       message: error.message,
       errors: error.errors,
@@ -35,24 +50,31 @@ async function insert(obj) {
       code: error.code
     }));
     console.error('Row data being inserted:', JSON.stringify(obj));
-    
-    let errorDetails = 'Unknown error';
-    if (error.errors && Array.isArray(error.errors) && error.errors.length > 0) {
-      errorDetails = error.errors.map(e => {
-        const reason = e.reason || 'unknown';
-        const message = e.message || 'no message';
-        const location = e.location ? ` (${e.location})` : '';
-        return `${reason}: ${message}${location}`;
-      }).join('; ');
-    } else if (error.message) {
-      errorDetails = error.message;
-    }
-    
-    const err = new Error(`Failed to insert DICOM record: ${errorDetails}`);
+
+    const err = new Error(formatInsertError(error, 'DICOM record'));
     err.originalError = error;
     err.rowData = obj;
     throw err;
   }
 }
 
-module.exports = { insert };
+async function insertEmbeddings(rows) {
+  if (!datasetId || !embeddingsTable) throw new Error('BigQuery embeddings table not configured');
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  try {
+    await bigquery.dataset(datasetId).table(embeddingsTable).insert(rows);
+  } catch (error) {
+    console.error('BigQuery embeddings insert error:', JSON.stringify({
+      message: error.message,
+      errors: error.errors,
+      name: error.name,
+      code: error.code
+    }));
+
+    const err = new Error(formatInsertError(error, 'embedding records'));
+    err.originalError = error;
+    throw err;
+  }
+}
+
+module.exports = { insert, insertEmbeddings };

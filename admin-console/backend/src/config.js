@@ -67,6 +67,7 @@ function extractBigQueryConfig(config) {
       instancesViewId,
       instancesTableId,
       deadLetterTableId: config.admin.deadLetterTableId || "dead_letter",
+      embeddingsTableId: config.admin.embeddingsTableId || "embeddings",
       bqLocation: config.admin.bqLocation || "US",
       requeueTopic: config.admin.requeueTopic || process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
     };
@@ -82,20 +83,20 @@ function extractBigQueryConfig(config) {
     const instancesTableId =
       config.gcpConfig.bigQuery.instancesTableId ||
       "instances";
-    
+
     // Parse deadLetterTableId - it might be just tableName or dataset.tableName
     let deadLetterTableId = config.deadLetterTableId || "dead_letter";
     if (deadLetterTableId.includes(".")) {
-      // If it's dataset.table format, keep just the table name (dataset from main config)
       deadLetterTableId = deadLetterTableId.split(".").pop();
     }
-    
+
     return {
       projectId,
       datasetId,
       instancesViewId,
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
+      embeddingsTableId: config.gcpConfig.bigQuery.embeddingsTableId || "embeddings",
       bqLocation: config.bqLocation || config.gcpConfig?.bigQuery?.location || "US",
       requeueTopic: config.requeueTopic || process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
     };
@@ -107,20 +108,19 @@ function extractBigQueryConfig(config) {
     const datasetId = config.datasetId;
     const instancesViewId = config.instancesViewId || "instancesView";
     const instancesTableId = config.instancesTableId || "instances";
-    
-    // Parse deadLetterTableId - it might be just tableName or dataset.tableName
+
     let deadLetterTableId = config.deadLetterTableId || "dead_letter";
     if (deadLetterTableId.includes(".")) {
-      // If it's dataset.table format, keep just the table name (dataset from main config)
       deadLetterTableId = deadLetterTableId.split(".").pop();
     }
-    
+
     return {
       projectId,
       datasetId,
       instancesViewId,
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
+      embeddingsTableId: config.embeddingsTableId || "embeddings",
       bqLocation: config.bqLocation || config.admin?.bqLocation || "US",
       requeueTopic: config.requeueTopic || process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
     };
@@ -199,6 +199,20 @@ function getConfig(options = {}) {
       }
     }
     
+    if (process.env.BQ_EMBEDDINGS_TABLE_ID) {
+      const parts = process.env.BQ_EMBEDDINGS_TABLE_ID.split(".");
+      if (parts.length === 3) {
+        adminCfg.projectId = parts[0];
+        adminCfg.datasetId = parts[1];
+        adminCfg.embeddingsTableId = parts[2];
+      } else if (parts.length === 2) {
+        adminCfg.datasetId = parts[0];
+        adminCfg.embeddingsTableId = parts[1];
+      } else {
+        adminCfg.embeddingsTableId = process.env.BQ_EMBEDDINGS_TABLE_ID;
+      }
+    }
+
     if (process.env.BQ_LOCATION) {
       adminCfg.bqLocation = process.env.BQ_LOCATION;
     }

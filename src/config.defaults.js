@@ -27,6 +27,7 @@ module.exports = {
       // Location to use in BigQuery
       datasetId: "dicom",
       instancesTableId: "instances",
+      embeddingsTableId: "embeddings",
     },
     // Configuration for embeddings: input extraction, summarization, and vector generation
     embedding: {
@@ -34,6 +35,7 @@ module.exports = {
       // If this section exists with gcsBucketPath, embedding inputs will be saved to GCS
       input: {
         gcsBucketPath: process.env.GCS_BUCKET_PATH || "", // GCS path to save processed images and text (e.g., 'gs://my-bucket/extract')
+        maxFrames: null, // Max frames to embed for multi-frame DICOM images (null = all frames)
         // Configuration for text summarization before processing
         // If this section exists, long text fields will be summarized
         summarizeText: {

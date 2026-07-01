@@ -39,6 +39,5 @@
       }
     ]
   },
-  { "name": "metadata", "type": "JSON", "mode": "NULLABLE" },
-  { "name": "embeddingVector", "type": "FLOAT", "mode": "REPEATED" }
+  { "name": "metadata", "type": "JSON", "mode": "NULLABLE" }
 ]

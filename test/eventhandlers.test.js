@@ -27,6 +27,7 @@ const { createNonRetryableError } = require("../src/utils");
 
 describe("eventhandlers", () => {
   let bqInsertStub;
+  let bqInsertEmbeddingsStub;
   let doRequestStub;
   let storageStub;
   let createVectorEmbeddingStub;
@@ -46,8 +47,9 @@ describe("eventhandlers", () => {
     delete require.cache[httpRetryPath];
     delete require.cache[embeddingsPath];
     
-    // Stub BigQuery insert method to avoid actual database operations
+    // Stub BigQuery insert methods to avoid actual database operations
     bqInsertStub = sinon.stub(bq, "insert").resolves();
+    bqInsertEmbeddingsStub = sinon.stub(bq, "insertEmbeddings").resolves();
     
     // Stub http-retry's doRequest to prevent real API calls to Vertex AI embeddings
     const mockVec = Array.from({ length: 1408 }, (_, i) => Math.sin(i) * 0.001);
@@ -81,15 +83,20 @@ describe("eventhandlers", () => {
     require("../src/gcs");
     const embeddingsModule = require("../src/embeddings");
     // Stub the createVectorEmbedding function directly to ensure embeddings don't make real API calls
-    createVectorEmbeddingStub = sinon.stub(embeddingsModule, "createVectorEmbedding").resolves({
+    createVectorEmbeddingStub = sinon.stub(embeddingsModule, "createVectorEmbedding").resolves([{
       embedding: Array.from({ length: 1408 }, (_, i) => Math.sin(i) * 0.001),
-    });
+      objectPath: "gs://mock-bucket/path/to/file.jpg",
+      objectSize: 1024,
+      objectMimeType: "image/jpeg",
+      frameNumber: null,
+    }]);
     eventhandlers = require("../src/eventhandlers");
   });
 
   after(() => {
     // Restore stubs
     bqInsertStub.restore();
+    bqInsertEmbeddingsStub.restore();
     doRequestStub.restore();
     storageStub.restore();
     createVectorEmbeddingStub.restore();
@@ -98,11 +105,16 @@ describe("eventhandlers", () => {
   beforeEach(() => {
     // Reset call history before each test
     bqInsertStub.resetHistory();
+    bqInsertEmbeddingsStub.resetHistory();
     createVectorEmbeddingStub.resetHistory();
     createVectorEmbeddingStub.resetBehavior();
-    createVectorEmbeddingStub.resolves({
+    createVectorEmbeddingStub.resolves([{
       embedding: Array.from({ length: 1408 }, (_, i) => Math.sin(i) * 0.001),
-    });
+      objectPath: "gs://mock-bucket/path/to/file.jpg",
+      objectSize: 1024,
+      objectMimeType: "image/jpeg",
+      frameNumber: null,
+    }]);
   });
 
   afterEach(() => {

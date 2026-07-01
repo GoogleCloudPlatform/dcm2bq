@@ -32,7 +32,7 @@ const program = new Command();
 program.name(package.name).description(package.description).version(package.version);
 
 
-const { processImage } = require("./processors/image");
+const { processImage, renderDicomImage, getFrameIndicesToProcess } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
 
@@ -44,10 +44,12 @@ program
   .argument("<inputFile>", "file to parse")
   .option("-o, --output <output>", "output file (for image: .jpg, for text: .txt)")
   .option("--summary", "summarize SR or PDF text with Gemini", false)
+  .option("--frame <number>", "render a specific frame (0-based index)")
+  .option("--all-frames", "render all frames (multi-frame DICOM images)", false)
+  .option("--max-frames <number>", "maximum number of frames to render when using --all-frames")
   .action(async (fileName, options) => {
     const requireEmbeddingCompatible = false;
     const { jsonOutput, gcpConfig } = config.get();
-    // Set summarization config based on CLI
     if (options.summary) {
       if (!gcpConfig.embedding) gcpConfig.embedding = {};
       if (!gcpConfig.embedding.input) gcpConfig.embedding.input = {};
@@ -62,9 +64,38 @@ program
     const sopClassUid = metadata?.SOPClassUID;
 
     if (isImage(sopClassUid)) {
-      const result = await processImage(metadata, fileName);
-      if (result && result.image && result.image.bytesBase64Encoded) {
-        const jpgBuffer = Buffer.from(result.image.bytesBase64Encoded, "base64");
+      if (options.allFrames) {
+        const numFrames = parseInt(metadata?.NumberOfFrames, 10);
+        const frameCount = (!isNaN(numFrames) && numFrames > 1) ? numFrames : 1;
+        const maxFrames = options.maxFrames ? parseInt(options.maxFrames, 10) : null;
+        const frameIndices = getFrameIndicesToProcess(frameCount, maxFrames);
+        let rendered = 0;
+        for (const frameIndex of frameIndices) {
+          const imageBuffer = await renderDicomImage(metadata, fileName, frameCount > 1 ? frameIndex : null);
+          if (imageBuffer) {
+            const frameSuffix = frameCount > 1 ? `_frame${frameIndex}` : "";
+            const frameOutFile = outFile || fileName.replace(/\.[^.]+$/, `${frameSuffix}.jpg`);
+            fs.writeFileSync(frameOutFile, imageBuffer);
+            console.log(`Rendered frame ${frameIndex} saved to ${frameOutFile}`);
+            rendered++;
+          }
+        }
+        if (rendered === 0) {
+          console.error("Could not render any frames from the DICOM file.");
+          process.exit(1);
+        }
+        console.log(`Rendered ${rendered} of ${frameIndices.length} frames`);
+        return;
+      }
+
+      const frameIndex = options.frame != null ? parseInt(options.frame, 10) : undefined;
+      const result = frameIndex != null
+        ? await renderDicomImage(metadata, fileName, frameIndex)
+        : await processImage(metadata, fileName);
+      const jpgBuffer = frameIndex != null
+        ? result
+        : (result?.image?.bytesBase64Encoded ? Buffer.from(result.image.bytesBase64Encoded, "base64") : null);
+      if (jpgBuffer) {
         if (!outFile) outFile = fileName.replace(/\.[^.]+$/, ".jpg");
         fs.writeFileSync(outFile, jpgBuffer);
         console.log(`Rendered image saved to ${outFile}`);
@@ -113,15 +144,21 @@ program
 
 program
   .command("embed")
-  .description("dump embedding to JSON")
+  .description("dump embedding(s) to JSON (one per frame for multi-frame images)")
   .argument("<inputFile>", "file to parse")
-  .action(async (fileName) => {
-    const { jsonOutput } = config.get();
+  .option("--max-frames <number>", "maximum number of frames to embed for multi-frame images")
+  .action(async (fileName, options) => {
+    const { jsonOutput, gcpConfig } = config.get();
+    if (options.maxFrames) {
+      if (!gcpConfig.embedding) gcpConfig.embedding = {};
+      if (!gcpConfig.embedding.input) gcpConfig.embedding.input = {};
+      gcpConfig.embedding.input.maxFrames = parseInt(options.maxFrames, 10);
+    }
     const fileUrl = url.pathToFileURL(fileName);
     const reader = new DicomFile(fileUrl);
     const json = reader.toJson(jsonOutput);
-    const embedding = await createVectorEmbedding(json, fileName);
-    console.log(JSON.stringify(embedding));
+    const embeddings = await createVectorEmbedding(json, fileName);
+    console.log(JSON.stringify(embeddings));
   });
 
 program

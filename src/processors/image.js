@@ -40,10 +40,35 @@ const SUPPORTED_TRANSFER_SYNTAXES = new Set([
   "1.2.840.10008.1.2.4.91"       // JPEG 2000 Image Compression
 ]);
 
-// Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
-// This requires dcmnorm to be installed in the execution environment.
-async function renderDicomImage(metadata, dicomInput) {
-  // Check for supported transfer syntaxes
+/**
+ * Returns an array of 0-based frame indices to process.
+ * If maxFrames is null or numFrames <= maxFrames, returns all indices.
+ * Otherwise evenly samples maxFrames indices across the range.
+ */
+function getFrameIndicesToProcess(numFrames, maxFrames) {
+  if (!numFrames || numFrames <= 1) return [0];
+  if (maxFrames != null && maxFrames <= 1 && maxFrames > 0) return [0];
+  const indices = [];
+  if (maxFrames != null && numFrames > maxFrames && maxFrames > 1) {
+    for (let i = 0; i < maxFrames; i++) {
+      indices.push(Math.round(i * (numFrames - 1) / (maxFrames - 1)));
+    }
+  } else {
+    for (let i = 0; i < numFrames; i++) {
+      indices.push(i);
+    }
+  }
+  return indices;
+}
+
+/**
+ * Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
+ * This requires dcmnorm to be installed in the execution environment.
+ * @param {Object} metadata - DICOM metadata JSON
+ * @param {Buffer|string} dicomInput - Raw DICOM file buffer or local DICOM file path
+ * @param {number|null} frameIndex - 0-based frame index to render (null = auto-select middle frame)
+ */
+async function renderDicomImage(metadata, dicomInput, frameIndex) {
   const transferSyntax = metadata && metadata.TransferSyntaxUID;
   if (!transferSyntax || !SUPPORTED_TRANSFER_SYNTAXES.has(transferSyntax)) {
     console.error(`Unsupported transfer syntax: ${transferSyntax || 'unknown'}`);
@@ -52,35 +77,32 @@ async function renderDicomImage(metadata, dicomInput) {
 
   let tempDir;
   try {
-    // Create a temporary directory to avoid file collisions
     tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-"));
     const dicomPath = typeof dicomInput === "string" ? dicomInput : path.join(tempDir, "input.dcm");
     const jpgPath = path.join(tempDir, "output.jpg");
     const scriptPath = path.resolve(__dirname, "..", "..", "helpers", "convert_dcm_to_jpg.sh");
 
     if (Buffer.isBuffer(dicomInput)) {
-      // Backward compatibility for callers that still provide a Buffer.
       await writeFile(dicomPath, dicomInput);
     } else if (typeof dicomInput !== "string") {
       throw new Error("Expected dicom input to be a file path or Buffer");
     }
 
-    // Multi-frame support: select the middle frame if present
     let frameArg = null;
-    const numFrames = parseInt(metadata?.NumberOfFrames, 10);
-    if (!isNaN(numFrames) && numFrames > 1) {
-      // dcmnorm expects zero-based frame indices.
-      // Keep the previous "lower middle" behavior for even frame counts.
-      frameArg = Math.floor((numFrames - 1) / 2);
+    if (frameIndex != null) {
+      frameArg = frameIndex;
+    } else {
+      const numFrames = parseInt(metadata?.NumberOfFrames, 10);
+      if (!isNaN(numFrames) && numFrames > 1) {
+        frameArg = Math.floor((numFrames - 1) / 2);
+      }
     }
 
-    // Build arguments for the script
     const args = [dicomPath, jpgPath];
     if (frameArg !== null) {
       args.push(frameArg.toString());
     }
 
-    // Execute convert_dcm_to_jpg.sh (dcmnorm wrapper) to convert the DICOM to a JPG.
     await new Promise((resolve, reject) => {
       execFile(scriptPath, args, (error, stdout, stderr) => {
         if (error) {
@@ -97,7 +119,6 @@ async function renderDicomImage(metadata, dicomInput) {
       });
     });
 
-    // Read the resulting JPG file into a buffer
     const jpgBuffer = await readFile(jpgPath);
     return jpgBuffer;
   } catch (error) {
@@ -126,4 +147,4 @@ async function processImage(metadata, dicomInput) {
   return null;
 }
 
-module.exports = { processImage, renderDicomImage };
+module.exports = { processImage, renderDicomImage, getFrameIndicesToProcess };

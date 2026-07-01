@@ -106,8 +106,9 @@ locals {
       projectId = var.project_id
       location  = var.region
       bigQuery = {
-        datasetId        = google_bigquery_dataset.dicom_dataset.dataset_id
-        instancesTableId = google_bigquery_table.instances_table.table_id
+        datasetId         = google_bigquery_dataset.dicom_dataset.dataset_id
+        instancesTableId  = google_bigquery_table.instances_table.table_id
+        embeddingsTableId = google_bigquery_table.embeddings_table.table_id
       }
       embedding = local.embedding_config
     }
@@ -128,6 +129,7 @@ locals {
   admin_console_instances_view_id = var.admin_console_bq_instances_view_id != "" ? var.admin_console_bq_instances_view_id : "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_view.table_id}"
   admin_console_instances_table_id = "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}"
   admin_console_dead_letter_table_id = var.admin_console_bq_dead_letter_table_id != "" ? var.admin_console_bq_dead_letter_table_id : "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.dead_letter_table.table_id}"
+  admin_console_embeddings_table_id = "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}"
 }
 
 # GCS bucket (optional create)
@@ -164,6 +166,13 @@ resource "google_bigquery_table" "instances_table" {
   dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
   table_id            = var.bq_instances_table_id != "" ? var.bq_instances_table_id : "instances"
   schema              = file("${path.module}/init.schema.json")
+}
+
+resource "google_bigquery_table" "embeddings_table" {
+  deletion_protection = false
+  dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
+  table_id            = var.bq_embeddings_table_id != "" ? var.bq_embeddings_table_id : "embeddings"
+  schema              = file("${path.module}/embeddings.schema.json")
 }
 
 // Fixes issue https://github.com/GoogleCloudPlatform/dcm2bq/issues/23
@@ -208,11 +217,25 @@ resource "google_bigquery_table" "instances_view" {
           *
         FROM
           active_not_deleted
+      ),
+      embedding_counts AS (
+        SELECT
+          instanceId,
+          COUNT(*) AS embedding_count
+        FROM
+          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}`
+        GROUP BY
+          instanceId
       )
       SELECT
-        l.* EXCEPT(_row_id)
+        l.* EXCEPT(_row_id),
+        COALESCE(ec.embedding_count, 0) AS embedding_count
       FROM
         latest_by_id l
+      LEFT JOIN
+        embedding_counts ec
+      ON
+        l.id = ec.instanceId
       WHERE
         l._row_id = 1
     EOT
@@ -443,6 +466,11 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
       env {
         name  = "BQ_DEAD_LETTER_TABLE_ID"
         value = local.admin_console_dead_letter_table_id
+      }
+
+      env {
+        name  = "BQ_EMBEDDINGS_TABLE_ID"
+        value = local.admin_console_embeddings_table_id
       }
 
       env {

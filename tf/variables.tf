@@ -53,6 +53,12 @@ variable "bq_dead_letter_table_id" {
   default     = ""
 }
 
+variable "bq_embeddings_table_id" {
+  description = "BigQuery table id for DICOM embeddings (per-frame)"
+  type        = string
+  default     = ""
+}
+
 variable "dcm2bq_image" {
   description = "The Docker image for the dcm2bq service. Must be provided via deploy.sh or -var flag with version from dcm2bq package.json."
   type        = string

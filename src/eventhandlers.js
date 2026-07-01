@@ -17,7 +17,7 @@
 const consts = require("./consts");
 const config = require("./config");
 const { DicomFile } = require("./dicomtojson");
-const { insert } = require("./bigquery");
+const { insert, insertEmbeddings } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
 const { createVectorEmbedding, createEmbeddingInput } = require("./embeddings");
@@ -51,16 +51,17 @@ async function processAndPersistDicom(version, timestamp, dicomFilePath, uriPath
   if (DEBUG_MODE) {
     console.log(`Processing DICOM: ${uriPath} (size: ${resolvedFileSize} bytes)`);
   }
-  
+
   const { metadata, embeddings } = await processDicom(dicomFilePath, uriPath);
-  
-  const objectMetadata = embeddings && (embeddings.objectPath || embeddings.objectSize || embeddings.objectMimeType)
-    ? { path: embeddings.objectPath, size: embeddings.objectSize, mimeType: embeddings.objectMimeType }
+
+  // Use the first embedding's input metadata for the instances info record
+  const firstEmbedding = Array.isArray(embeddings) && embeddings.length > 0 ? embeddings[0] : null;
+  const objectMetadata = firstEmbedding && (firstEmbedding.objectPath || firstEmbedding.objectSize || firstEmbedding.objectMimeType)
+    ? { path: firstEmbedding.objectPath, size: firstEmbedding.objectSize, mimeType: firstEmbedding.objectMimeType }
     : null;
-  
+
   const embeddingVectorModel = embeddingInputConfig?.vector?.model;
-  
-  // Fixes issue https://github.com/GoogleCloudPlatform/dcm2bq/issues/22
+
   const infoObj = {
     event: eventType,
     input: { size: resolvedFileSize, type: storageType, storageClass: storageClass || null },
@@ -69,17 +70,18 @@ async function processAndPersistDicom(version, timestamp, dicomFilePath, uriPath
       input: objectMetadata,
     },
   };
-  
+
   const writeObj = {
     timestamp,
     path: uriPath,
     version,
   };
-  
+
   if (DEBUG_MODE) {
-    console.log(`Persisting DICOM: ${uriPath}, embedding: ${embeddings ? 'yes' : 'no'}`);
+    const embeddingCount = Array.isArray(embeddings) ? embeddings.length : 0;
+    console.log(`Persisting DICOM: ${uriPath}, embeddings: ${embeddingCount}`);
   }
-  
+
   await persistRow(writeObj, infoObj, metadata, embeddings);
 }
 
@@ -157,14 +159,14 @@ async function processDicom(dicomFilePath, uriPath) {
 }
 
 /**
- * Persist metadata and embeddings in a single row.
+ * Persist metadata and embeddings.
+ * Metadata goes to the instances table, embeddings go to the embeddings table.
  * writeBase should contain timestamp, path, version.
  * infoObj is a structured object with event, input, and embedding info.
  * metadata is the JSON string (or null).
- * embeddingsData is an object with { embedding: array } (or null).
+ * embeddingsData is an array of { embedding, objectPath, objectSize, objectMimeType, frameNumber } (or null).
  */
 async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
-  // Parse metadata if it's a JSON string
   let metadataObj = metadata;
   if (typeof metadata === 'string') {
     try {
@@ -173,38 +175,58 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
       metadataObj = null;
     }
   }
-  
-  // Compute deterministic id from DICOM UIDs (globally unique identifiers)
-  // Use SOPInstanceUID as primary unique identifier, with Study/Series for context
+
   const sopInstanceUid = metadataObj?.SOPInstanceUID || '';
   const seriesInstanceUid = metadataObj?.SeriesInstanceUID || '';
   const studyInstanceUid = metadataObj?.StudyInstanceUID || '';
-  
-  // Prefer DICOM UID-based identity; fallback to path/version for rows without DICOM metadata
+
   const hasDicomIds = Boolean(studyInstanceUid || seriesInstanceUid || sopInstanceUid);
   const idSource = hasDicomIds
     ? `${studyInstanceUid}|${seriesInstanceUid}|${sopInstanceUid}`
     : `${writeBase.path || ''}|${writeBase.version || ''}`;
-  // Use truncated SHA256 (16 hex chars, 64 bits) - Input is already globally unique, so no collision risk
   const id = crypto.createHash("sha256").update(idSource).digest("hex").substring(0, 16);
 
-  // Ensure info object is never null (required by BigQuery schema)
   const info = infoObj || { event: null, input: null, embedding: null };
 
   const row = Object.assign({}, writeBase, {
     id,
     info,
     metadata: metadata || null,
-    // Ensure schema type compatibility
     version: String(writeBase.version),
   });
 
-  // Only add embeddingVector if it has data (REPEATED fields cannot be null)
-  if (embeddingsData && embeddingsData.embedding && Array.isArray(embeddingsData.embedding) && embeddingsData.embedding.length > 0) {
-    row.embeddingVector = embeddingsData.embedding;
-  }
-
   await insert(row);
+
+  // Write embeddings to separate table
+  if (Array.isArray(embeddingsData) && embeddingsData.length > 0) {
+    const embeddingVectorModel = embeddingInputConfig?.vector?.model || null;
+    const embeddingRows = embeddingsData
+      .filter(e => e.embedding && Array.isArray(e.embedding) && e.embedding.length > 0)
+      .map(e => {
+        const frameStr = e.frameNumber != null ? String(e.frameNumber) : '';
+        const embeddingId = crypto.createHash("sha256").update(`${id}|${frameStr}`).digest("hex").substring(0, 16);
+        const embeddingRow = {
+          id: embeddingId,
+          instanceId: id,
+          timestamp: writeBase.timestamp,
+          embeddingVector: e.embedding,
+          info: {
+            model: embeddingVectorModel,
+            input: (e.objectPath || e.objectSize || e.objectMimeType)
+              ? { path: e.objectPath || null, size: e.objectSize || null, mimeType: e.objectMimeType || null }
+              : null,
+          },
+        };
+        if (e.frameNumber != null) {
+          embeddingRow.frameNumber = e.frameNumber;
+        }
+        return embeddingRow;
+      });
+
+    if (embeddingRows.length > 0) {
+      await insertEmbeddings(embeddingRows);
+    }
+  }
 }
 
 /**

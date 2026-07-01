@@ -55,11 +55,8 @@ function validateRow(row) {
     JSON.parse(row.metadata);
   }
 
-  // embeddingVector array of numbers or null
-  if (row.embeddingVector != null) {
-    assert.ok(Array.isArray(row.embeddingVector), "embeddingVector must be an array when present");
-    assert.ok(row.embeddingVector.every((v) => typeof v === "number"), "embeddingVector values must be numbers");
-  }
+  // embeddingVector should no longer be present on instances rows (moved to embeddings table)
+  assert.strictEqual(row.embeddingVector, undefined, "embeddingVector should not be present on instances rows");
 }
 
 describe("BigQuery insert payload matches schema", () => {
@@ -96,7 +93,7 @@ describe("BigQuery insert payload matches schema", () => {
       return Promise.resolve();
     });
     require.cache[bigqueryPath] = {
-      exports: { insert: insertStub },
+      exports: { insert: insertStub, insertEmbeddings: sinon.stub().resolves() },
     };
 
     const dicomToJsonPath = require.resolve("../src/dicomtojson");
@@ -219,13 +216,13 @@ describe("BigQuery insert payload matches schema", () => {
     }
   });
 
-  it("inserts payload with populated embeddingVector when vector model is configured", async () => {
+  it("inserts instance row and embeddings to separate table when vector model is configured", async () => {
     // Update config to enable embeddings
     process.env.DCM2BQ_CONFIG = JSON.stringify({
       gcpConfig: {
         projectId: "test-project",
         location: "us-central1",
-        bigQuery: { datasetId: "dicom", instancesTableId: "instances" },
+        bigQuery: { datasetId: "dicom", instancesTableId: "instances", embeddingsTableId: "embeddings" },
         embedding: { input: { vector: { model: "multimodalembedding@001" } } },
       },
       jsonOutput: { explicitBulkDataRoot: false },
@@ -235,15 +232,26 @@ describe("BigQuery insert payload matches schema", () => {
     // Refresh config and eventhandlers with current config
     delete require.cache[require.resolve("../src/config")];
     delete require.cache[require.resolve("../src/eventhandlers")];
+
+    // Re-create bigquery stub with insertEmbeddings tracking
+    const bigqueryPath = require.resolve("../src/bigquery");
+    delete require.cache[bigqueryPath];
+    const insertEmbeddingsStub = sinon.stub().resolves();
+    insertStub.resetHistory();
+    require.cache[bigqueryPath] = {
+      exports: { insert: insertStub, insertEmbeddings: insertEmbeddingsStub },
+    };
+
     // Stub embeddings BEFORE requiring eventhandlers so it binds to the stubbed function
     const embeddingsModule = require("../src/embeddings");
-    const vec = Array.from({ length: 16 }, (_, i) => i * 0.01); // small vector for test
-    const stub = sinon.stub(embeddingsModule, "createVectorEmbedding").resolves({
+    const vec = Array.from({ length: 16 }, (_, i) => i * 0.01);
+    const stub = sinon.stub(embeddingsModule, "createVectorEmbedding").resolves([{
       embedding: vec,
       objectPath: "gs://bkt/obj.jpg",
       objectSize: 123,
       objectMimeType: "image/jpeg",
-    });
+      frameNumber: null,
+    }]);
     const eventhandlers = require("../src/eventhandlers");
 
     // Stub GCS
@@ -268,26 +276,29 @@ describe("BigQuery insert payload matches schema", () => {
     };
     const perfCtx = { addRef: () => {} };
 
-    insertStub.resetHistory();
     await eventhandlers.handleGcsPubSubUnwrap(ctx, perfCtx);
 
+    // Instances row should NOT have embeddingVector
     assert.ok(insertStub.calledOnce, "Insert should be called when embeddings enabled");
     const row = insertStub.firstCall.args[0];
-    // Ensure model propagated into info
     assert.strictEqual(row.info.embedding.model, "multimodalembedding@001", "embedding model should be set in row info");
-    // Verify embedding was attempted
     assert.ok(stub.called, "createVectorEmbedding should be called when vector model configured");
     validateRow(row);
-    assert.ok(Array.isArray(row.embeddingVector), "embeddingVector should be an array");
-    assert.strictEqual(row.embeddingVector.length, vec.length, "embeddingVector length should match stubbed vector");
-    assert.ok(row.embeddingVector.every((v) => typeof v === "number"), "embeddingVector should contain numbers");
 
-    // Check embedding info object metadata presence
-    assert.strictEqual(row.info.embedding.model, "multimodalembedding@001");
+    // Embedding info metadata should be on the instances row
     assert.ok(row.info.embedding.input);
     assert.strictEqual(row.info.embedding.input.path, "gs://bkt/obj.jpg");
     assert.strictEqual(row.info.embedding.input.size, 123);
     assert.strictEqual(row.info.embedding.input.mimeType, "image/jpeg");
+
+    // Embeddings should be written to the separate embeddings table
+    assert.ok(insertEmbeddingsStub.calledOnce, "insertEmbeddings should be called");
+    const embeddingRows = insertEmbeddingsStub.firstCall.args[0];
+    assert.ok(Array.isArray(embeddingRows), "embedding rows should be an array");
+    assert.strictEqual(embeddingRows.length, 1, "should have one embedding row");
+    assert.ok(Array.isArray(embeddingRows[0].embeddingVector), "embedding row should have embeddingVector array");
+    assert.strictEqual(embeddingRows[0].embeddingVector.length, vec.length, "embedding vector length should match");
+    assert.strictEqual(embeddingRows[0].instanceId, row.id, "embedding row instanceId should match instances row id");
 
     // Restore stub
     stub.restore();

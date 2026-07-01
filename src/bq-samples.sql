@@ -90,26 +90,40 @@ ORDER BY
 LIMIT
      10;
 
--- If doing a vector search on the instances table, make sure to create an embeddings model connection and a vector index first.
+-- If doing a vector search on the embeddings table, make sure to create an embeddings model connection and a vector index first.
 CREATE
 OR REPLACE MODEL `dicom.embedding_model` REMOTE
 WITH
      CONNECTION DEFAULT OPTIONS (ENDPOINT = 'multimodalembedding@001');
 
 CREATE
-OR REPLACE VECTOR INDEX `dicom.embedding_index` ON `dicom.instances` (embeddingVector) OPTIONS (index_type = 'IVF', distance_type = 'COSINE');
+OR REPLACE VECTOR INDEX `dicom.embedding_index` ON `dicom.embeddings` (embeddingVector) OPTIONS (index_type = 'IVF', distance_type = 'COSINE');
 
--- Show instances with embeddings
+-- Show instances with embeddings (using the view which joins instances and embedding counts)
 SELECT
      *
 FROM
-     `dicom.instances`
+     `dicom.instancesView`
 WHERE
-     embeddingVector IS NOT NULL
+     embedding_count > 0
 ORDER BY
      timestamp DESC
 LIMIT
      10;
+
+-- Show per-frame embeddings for a specific instance
+SELECT
+     e.id,
+     e.instanceId,
+     e.frameNumber,
+     e.info,
+     e.timestamp
+FROM
+     `dicom.embeddings` AS e
+WHERE
+     e.instanceId = 'your-instance-id'
+ORDER BY
+     e.frameNumber;
 
 -- And finally, how about combining a metadata and semantic search
 SELECT
@@ -134,7 +148,7 @@ SELECT
 FROM
      `dicom.instancesView` AS meta
      LEFT JOIN VECTOR_SEARCH (
-          TABLE `dicom.instances`,
+          TABLE `dicom.embeddings`,
           'embeddingVector',
           (
                SELECT
@@ -151,7 +165,7 @@ FROM
           ),
           top_k = > 1000,
           options = > '{"fraction_lists_to_search": 0.01}'
-     ) AS vectorSearch ON meta.id = vectorSearch.base.id
+     ) AS vectorSearch ON meta.id = vectorSearch.base.instanceId
 WHERE
      JSON_VALUE (meta.metadata, '$.PatientSex') = 'F'
      AND SAFE_CAST (

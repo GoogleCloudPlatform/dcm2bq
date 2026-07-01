@@ -312,7 +312,7 @@ app.get("/studies/:studyId/instances", async (req, res) => {
         timestamp,
         metadata,
         info,
-        embeddingVector
+        embedding_count
       FROM ${viewTable}
       WHERE JSON_VALUE(metadata, '$.StudyInstanceUID') = @studyId
       ORDER BY timestamp DESC
@@ -325,9 +325,8 @@ app.get("/studies/:studyId/instances", async (req, res) => {
       params: { studyId },
     });
 
-    // Parse metadata from JSON strings
     const items = (rows || []).map(row => {
-      const embeddingVector = row.embeddingVector || [];
+      const embeddingCount = Number(row.embedding_count || 0);
       return {
         id: row.id,
         path: row.path,
@@ -335,8 +334,8 @@ app.get("/studies/:studyId/instances", async (req, res) => {
         timestamp: row.timestamp,
         metadata: parseJsonValue(row.metadata),
         info: parseJsonValue(row.info),
-        hasEmbeddingVector: embeddingVector.length > 0,
-        embeddingVectorLength: embeddingVector.length,
+        hasEmbeddingVector: embeddingCount > 0,
+        embeddingCount,
       };
     });
 
@@ -422,7 +421,7 @@ app.get("/api/instances/:id", async (req, res) => {
         timestamp,
         metadata,
         info,
-        embeddingVector
+        embedding_count
       FROM ${instancesTable}
       WHERE id = @id
       LIMIT 1
@@ -441,8 +440,8 @@ app.get("/api/instances/:id", async (req, res) => {
     const row = rows[0];
     const metadata = parseJsonValue(row.metadata);
     const info = parseJsonValue(row.info);
-    const embeddingVector = row.embeddingVector || [];
-    
+    const embeddingCount = Number(row.embedding_count || 0);
+
     return res.json({
       id: row.id,
       path: row.path,
@@ -450,8 +449,8 @@ app.get("/api/instances/:id", async (req, res) => {
       timestamp: row.timestamp,
       metadata,
       info,
-      hasEmbeddingVector: embeddingVector.length > 0,
-      embeddingVectorLength: embeddingVector.length,
+      hasEmbeddingVector: embeddingCount > 0,
+      embeddingCount,
     });
   } catch (error) {
     console.error("Get instance error:", error);

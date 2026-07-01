@@ -213,23 +213,26 @@ describe("embeddings", () => {
   describe("createVectorEmbedding", () => {
     it("should generate vector embeddings for all DICOM images", async function () {
       for (const { buffer, metadata, file } of imageTestData) {
-        const result = await createVectorEmbedding(metadata, buffer);
-        assert.ok(result, `Result should not be null for ${file}`);
-        const embedding = result.embedding;
-        assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
-        assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
-        assert.ok(
-          embedding.every((v) => typeof v === "number"),
-          `All values in embedding should be numbers for ${file}`
-        );
+        const results = await createVectorEmbedding(metadata, buffer);
+        assert.ok(Array.isArray(results), `Result should be an array for ${file}`);
+        assert.ok(results.length > 0, `Result should have at least one embedding for ${file}`);
+        for (const result of results) {
+          assert.ok(Array.isArray(result.embedding), `Embedding should be an array for ${file}`);
+          assert.strictEqual(result.embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
+          assert.ok(
+            result.embedding.every((v) => typeof v === "number"),
+            `All values in embedding should be numbers for ${file}`
+          );
+        }
       }
     }).timeout(30000);
 
     it("should generate vector embeddings for all DICOM SRs", async function () {
       for (const { buffer, metadata, file } of srTestData) {
-        const result = await createVectorEmbedding(metadata, buffer);
-        assert.ok(result, `Result should not be null for ${file}`);
-        const embedding = result.embedding;
+        const results = await createVectorEmbedding(metadata, buffer);
+        assert.ok(Array.isArray(results), `Result should be an array for ${file}`);
+        assert.ok(results.length > 0, `Result should have at least one embedding for ${file}`);
+        const embedding = results[0].embedding;
         assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
         assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
         assert.ok(
@@ -241,9 +244,10 @@ describe("embeddings", () => {
 
     it("should generate vector embeddings for all DICOM PDFs", async function () {
       for (const { buffer, metadata, file } of pdfTestData) {
-        const result = await createVectorEmbedding(metadata, buffer);
-        assert.ok(result, `Result should not be null for ${file}`);
-        const embedding = result.embedding;
+        const results = await createVectorEmbedding(metadata, buffer);
+        assert.ok(Array.isArray(results), `Result should be an array for ${file}`);
+        assert.ok(results.length > 0, `Result should have at least one embedding for ${file}`);
+        const embedding = results[0].embedding;
         assert.ok(Array.isArray(embedding), `Embedding should be an array for ${file}`);
         assert.strictEqual(embedding.length, 1408, `Embedding should have 1408 dimensions for ${file}`);
         assert.ok(
@@ -280,6 +284,38 @@ describe("embeddings", () => {
 
       const result = await createEmbeddingInput(unsupportedMetadata, Buffer.alloc(0));
       assert.strictEqual(result, null, "Unsupported SOP classes should not generate embedding input");
+    });
+  });
+
+  describe("getFrameIndicesToProcess", () => {
+    const { getFrameIndicesToProcess } = require("../src/processors/image");
+
+    it("should return [0] for single frame", () => {
+      assert.deepStrictEqual(getFrameIndicesToProcess(1, null), [0]);
+    });
+
+    it("should return all frame indices when maxFrames is null", () => {
+      assert.deepStrictEqual(getFrameIndicesToProcess(5, null), [0, 1, 2, 3, 4]);
+    });
+
+    it("should return all frame indices when maxFrames >= numFrames", () => {
+      assert.deepStrictEqual(getFrameIndicesToProcess(3, 5), [0, 1, 2]);
+    });
+
+    it("should evenly sample when maxFrames < numFrames", () => {
+      const result = getFrameIndicesToProcess(10, 3);
+      assert.strictEqual(result.length, 3);
+      assert.strictEqual(result[0], 0, "first frame should be 0");
+      assert.strictEqual(result[result.length - 1], 9, "last frame should be numFrames-1");
+    });
+
+    it("should handle maxFrames = 1", () => {
+      const result = getFrameIndicesToProcess(100, 1);
+      assert.deepStrictEqual(result, [0]);
+    });
+
+    it("should return [0] for zero or negative numFrames", () => {
+      assert.deepStrictEqual(getFrameIndicesToProcess(0, null), [0]);
     });
   });
 
