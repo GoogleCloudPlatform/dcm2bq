@@ -21,20 +21,25 @@ if ! command -v dcmnorm &> /dev/null; then
     exit 1
 fi
 
-# Usage: convert_dcm_to_jpg.sh <input_dicom_file> <output_jpg_file> [frame_number]
+# Usage: convert_dcm_to_jpg.sh <input_dicom_file> <output_jpg_file> [frame_number | --all-frames]
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-    echo "Usage: $0 <input_dicom_file> <output_jpg_file> [frame_number]"
+    echo "Usage: $0 <input_dicom_file> <output_jpg_file> [frame_number | --all-frames]"
     exit 1
 fi
 
 INPUT_FILE="$1"
 OUTPUT_JPG_FILE="$2"
 FRAME_NUMBER=""
+ALL_FRAMES=false
 if [ "$#" -eq 3 ]; then
-    FRAME_NUMBER="$3"
-    if ! [[ "${FRAME_NUMBER}" =~ ^[0-9]+$ ]]; then
-        echo "Error: frame_number must be a non-negative integer (0-based)." >&2
-        exit 1
+    if [ "$3" = "--all-frames" ]; then
+        ALL_FRAMES=true
+    else
+        FRAME_NUMBER="$3"
+        if ! [[ "${FRAME_NUMBER}" =~ ^[0-9]+$ ]]; then
+            echo "Error: frame_number must be a non-negative integer (0-based)." >&2
+            exit 1
+        fi
     fi
 fi
 
@@ -52,7 +57,9 @@ echo "Converting ${INPUT_FILE} to ${OUTPUT_JPG_FILE}..."
 
 ARGS=("${INPUT_FILE}" "${OUTPUT_JPG_FILE}" "--scale-max-size" "512")
 
-if [ -n "${FRAME_NUMBER}" ]; then
+if [ "${ALL_FRAMES}" = true ]; then
+    ARGS+=("--render-all-frames")
+elif [ -n "${FRAME_NUMBER}" ]; then
     ARGS+=("--render-frame" "${FRAME_NUMBER}")
 fi
 
