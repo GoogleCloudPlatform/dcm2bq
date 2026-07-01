@@ -43,6 +43,7 @@ tf/backend.tf
 
 # Misc
 .DS_Store
+CLAUDE.md
 
 # Local config file
 testconfig.json
