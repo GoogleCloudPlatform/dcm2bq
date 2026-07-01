@@ -67,28 +67,28 @@ function install_terraform() {
 
 # --- Main Script ---
 
-# 1. Check prerequisites
-check_command "gcloud"
-check_command "gsutil"
-check_command "unzip"
-check_command "curl"
-check_command "jq"
-check_command "node"
+function show_help() {
+  echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
+  echo ""
+  echo "Options:"
+  echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
+  echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
+  echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
+  echo "  --no-admin-console           Skip admin-console deployment (default is deploy)."
+  echo "  -h, --help                   Show this help message."
+  echo ""
+  echo "Commands:"
+  echo "  upload                       Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
+  echo "  destroy                      Destroy all previously created assets."
+}
 
-# 2. Install Terraform
-install_terraform
+# Show help if no arguments provided
+if [ $# -eq 0 ]; then
+  show_help
+  exit 1
+fi
 
-# 3. Validate input and mode
-
-# Extract version from package.json using jq (already required as a dependency)
-DCM2BQ_VERSION=$(jq -r '.version' "$(dirname "$0")/../package.json")
-DCM2BQ_IMAGE="jasonklotzer/dcm2bq:${DCM2BQ_VERSION}"
-ADMIN_CONSOLE_VERSION=$(jq -r '.version' "$(dirname "$0")/../admin-console/package.json")
-ADMIN_CONSOLE_IMAGE="jasonklotzer/dcm2bq-admin-console:${ADMIN_CONSOLE_VERSION}"
-echo "Using dcm2bq image: ${DCM2BQ_IMAGE}"
-echo "Using admin-console image: ${ADMIN_CONSOLE_IMAGE}"
-
-# Parse options
+# Parse options (before prerequisites so --help is fast)
 DEBUG_MODE="false"
 CREATE_EMBEDDINGS="true"
 CREATE_EMBEDDING_INPUT="true"
@@ -96,17 +96,7 @@ DEPLOY_ADMIN_CONSOLE="true"
 while [[ "$1" =~ ^- && ! "$1" == "--" ]]; do
   case $1 in
     -h | --help )
-      echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
-      echo "Options:"
-      echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
-      echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
-      echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
-      echo "  --no-admin-console           Skip admin-console deployment (default is deploy)."
-      echo "  -h, --help                   Show this help message."
-      echo ""
-      echo "Commands:"
-      echo "  upload                       Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
-      echo "  destroy                      Destroy all previously created assets."
+      show_help
       exit 0
       ;;
     --debug )
@@ -141,9 +131,30 @@ else
 fi
 
 if [ -z "$1" ]; then
-  echo "Usage: $0 [destroy|upload] <gcp_project_id>"
+  show_help
   exit 1
 fi
+
+# 1. Check prerequisites
+check_command "gcloud"
+check_command "gsutil"
+check_command "unzip"
+check_command "curl"
+check_command "jq"
+check_command "node"
+
+# 2. Install Terraform
+install_terraform
+
+# 3. Validate input and mode
+
+# Extract version from package.json using jq (already required as a dependency)
+DCM2BQ_VERSION=$(jq -r '.version' "$(dirname "$0")/../package.json")
+DCM2BQ_IMAGE="jasonklotzer/dcm2bq:${DCM2BQ_VERSION}"
+ADMIN_CONSOLE_VERSION=$(jq -r '.version' "$(dirname "$0")/../admin-console/package.json")
+ADMIN_CONSOLE_IMAGE="jasonklotzer/dcm2bq-admin-console:${ADMIN_CONSOLE_VERSION}"
+echo "Using dcm2bq image: ${DCM2BQ_IMAGE}"
+echo "Using admin-console image: ${ADMIN_CONSOLE_IMAGE}"
 
 PROJECT_ID="$1"
 
