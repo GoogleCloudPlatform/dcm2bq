@@ -17,6 +17,12 @@ variable "project_id" {
   type        = string
 }
 
+variable "instance_name" {
+  description = "Optional instance name for parallel deployments. When set, resource names include this as a suffix to avoid collisions."
+  type        = string
+  default     = ""
+}
+
 variable "region" {
   description = "The GCP region for deployment."
   type        = string
