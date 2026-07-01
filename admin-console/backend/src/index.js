@@ -618,6 +618,135 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
   }
 });
 
+// List frames for a multiframe DICOM instance
+app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/frames", async (req, res) => {
+  try {
+    const studyUid = String(req.params.studyUid || "").trim();
+    const seriesUid = String(req.params.seriesUid || "").trim();
+    const sopInstanceUid = String(req.params.sopInstanceUid || "").trim();
+
+    if (!studyUid || !seriesUid || !sopInstanceUid) {
+      return res.status(400).json({ error: "Missing required DICOM UIDs" });
+    }
+
+    const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
+    const idQuery = `
+      SELECT id
+      FROM ${instancesTable}
+      WHERE JSON_VALUE(metadata, '$.StudyInstanceUID') = @studyUid
+        AND JSON_VALUE(metadata, '$.SeriesInstanceUID') = @seriesUid
+        AND JSON_VALUE(metadata, '$.SOPInstanceUID') = @sopInstanceUid
+      LIMIT 1
+    `;
+
+    const [idRows] = await bigquery.query({
+      query: idQuery,
+      location: BQ_LOCATION,
+      params: { studyUid, seriesUid, sopInstanceUid },
+    });
+
+    if (!idRows || idRows.length === 0) {
+      return res.status(404).json({ error: "Instance not found" });
+    }
+
+    const instanceId = idRows[0].id;
+    const embeddingsTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsTableId}\``;
+    const framesQuery = `
+      SELECT id, frameNumber, info
+      FROM ${embeddingsTable}
+      WHERE instanceId = @instanceId
+      ORDER BY COALESCE(frameNumber, 0) ASC
+    `;
+
+    const [frameRows] = await bigquery.query({
+      query: framesQuery,
+      location: BQ_LOCATION,
+      params: { instanceId },
+    });
+
+    const frames = (frameRows || []).map(row => {
+      const info = parseJsonValue(row.info);
+      return {
+        id: row.id,
+        frameNumber: row.frameNumber != null ? Number(row.frameNumber) : null,
+        mimeType: info?.input?.mimeType || null,
+      };
+    });
+
+    return res.json({ instanceId, frames });
+  } catch (error) {
+    console.error("List frames error:", error);
+    return res.status(500).json({ error: error?.message || "Internal error" });
+  }
+});
+
+// Render a specific frame by embedding ID
+app.get("/api/embeddings/:embeddingId/render", async (req, res) => {
+  try {
+    const embeddingId = String(req.params.embeddingId || "").trim();
+    if (!embeddingId) {
+      return res.status(400).json({ error: "Missing embeddingId" });
+    }
+
+    const embeddingsTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsTableId}\``;
+    const query = `
+      SELECT info
+      FROM ${embeddingsTable}
+      WHERE id = @embeddingId
+      LIMIT 1
+    `;
+
+    const [rows] = await bigquery.query({
+      query,
+      location: BQ_LOCATION,
+      params: { embeddingId },
+    });
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Embedding not found" });
+    }
+
+    const info = parseJsonValue(rows[0].info);
+    const filePath = info?.input?.path;
+    const mimeType = info?.input?.mimeType;
+
+    if (!filePath || !mimeType) {
+      return res.status(404).json({ error: "No asset for this embedding" });
+    }
+
+    const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (!gsMatch) {
+      return res.status(400).json({ error: `Invalid GCS path: ${filePath}` });
+    }
+
+    const bucket = gsMatch[1];
+    const object = gsMatch[2];
+
+    try {
+      const [buffer] = await storage.bucket(bucket).file(object).download();
+
+      if (mimeType.startsWith("image/")) {
+        return res.json({
+          contentType: "image",
+          mimeType,
+          dataBase64: buffer.toString("base64"),
+        });
+      }
+
+      return res.json({
+        contentType: "binary",
+        mimeType,
+        dataBase64: buffer.toString("base64"),
+      });
+    } catch (error) {
+      return res.status(500).json({ error: `Failed to download content: ${error?.message}` });
+    }
+  } catch (error) {
+    console.error("Render embedding error:", error);
+    return res.status(500).json({ error: error?.message || "Internal error" });
+  }
+});
+
 // DLQ items endpoint
 app.get("/api/dlq/items", async (req, res) => {
   try {
@@ -1829,6 +1958,14 @@ wss.on("connection", (socket, request) => {
         "instances.content": {
           method: "GET",
           path: `/studies/${encodeURIComponent(String(payload?.studyUid || ""))}/series/${encodeURIComponent(String(payload?.seriesUid || ""))}/instances/${encodeURIComponent(String(payload?.sopInstanceUid || ""))}/render`,
+        },
+        "instances.frames": {
+          method: "GET",
+          path: `/studies/${encodeURIComponent(String(payload?.studyUid || ""))}/series/${encodeURIComponent(String(payload?.seriesUid || ""))}/instances/${encodeURIComponent(String(payload?.sopInstanceUid || ""))}/frames`,
+        },
+        "instances.frameContent": {
+          method: "GET",
+          path: `/api/embeddings/${encodeURIComponent(String(payload?.embeddingId || ""))}/render`,
         },
         "dlq.items": {
           method: "GET",

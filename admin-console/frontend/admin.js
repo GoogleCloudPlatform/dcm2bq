@@ -284,6 +284,95 @@
       }
     }
 
+    function openMultiframeViewer(frames) {
+      const frameCache = new Map();
+      let currentIndex = 0;
+      let loading = false;
+
+      const totalFrames = frames.length;
+      const html = `
+        <div class="multiframe-viewer">
+          <div class="multiframe-image-container">
+            <div class="multiframe-spinner" id="mf-spinner"><i class="fa-solid fa-spinner fa-spin"></i></div>
+            <img class="preview" id="mf-image" alt="Frame" />
+          </div>
+          <div class="multiframe-controls">
+            <button class="icon-btn" id="mf-prev" title="Previous frame" aria-label="Previous frame"><i class="fa-solid fa-chevron-left"></i></button>
+            <input type="range" id="mf-slider" min="0" max="${totalFrames - 1}" value="0" />
+            <button class="icon-btn" id="mf-next" title="Next frame" aria-label="Next frame"><i class="fa-solid fa-chevron-right"></i></button>
+          </div>
+          <div class="multiframe-info" id="mf-info">Frame 1 / ${totalFrames}</div>
+        </div>
+      `;
+
+      openModal('Multiframe Image', html, 'image-fit');
+
+      const imgEl = document.getElementById('mf-image');
+      const slider = document.getElementById('mf-slider');
+      const info = document.getElementById('mf-info');
+      const spinner = document.getElementById('mf-spinner');
+      const prevBtn = document.getElementById('mf-prev');
+      const nextBtn = document.getElementById('mf-next');
+
+      function updateControls() {
+        const frameLabel = frames[currentIndex].frameNumber != null
+          ? `Frame ${frames[currentIndex].frameNumber}`
+          : `Frame ${currentIndex + 1}`;
+        info.textContent = `${frameLabel} / ${totalFrames}`;
+        slider.value = currentIndex;
+        prevBtn.disabled = currentIndex === 0;
+        nextBtn.disabled = currentIndex === totalFrames - 1;
+      }
+
+      async function loadFrame(index) {
+        if (loading) return;
+        if (index < 0 || index >= totalFrames) return;
+        currentIndex = index;
+        updateControls();
+
+        if (frameCache.has(index)) {
+          imgEl.src = frameCache.get(index);
+          return;
+        }
+
+        loading = true;
+        spinner.style.display = 'flex';
+        imgEl.style.opacity = '0.3';
+        try {
+          const frame = frames[index];
+          const content = await wsCall('instances.frameContent', { embeddingId: frame.id });
+          const dataUrl = `data:${content.mimeType};base64,${content.dataBase64}`;
+          frameCache.set(index, dataUrl);
+          if (currentIndex === index) {
+            imgEl.src = dataUrl;
+          }
+        } catch (err) {
+          if (currentIndex === index) {
+            info.textContent = `Error loading frame`;
+          }
+        } finally {
+          loading = false;
+          spinner.style.display = 'none';
+          imgEl.style.opacity = '1';
+        }
+      }
+
+      slider.addEventListener('input', () => loadFrame(Number(slider.value)));
+      prevBtn.addEventListener('click', () => loadFrame(currentIndex - 1));
+      nextBtn.addEventListener('click', () => loadFrame(currentIndex + 1));
+
+      document.addEventListener('keydown', function mfKeyHandler(e) {
+        if (!document.getElementById('modal').classList.contains('open')) {
+          document.removeEventListener('keydown', mfKeyHandler);
+          return;
+        }
+        if (e.key === 'ArrowLeft') loadFrame(currentIndex - 1);
+        else if (e.key === 'ArrowRight') loadFrame(currentIndex + 1);
+      });
+
+      loadFrame(0);
+    }
+
     function updatePaginationControls() {
       const { totalStudies } = state.lastTotals;
       const { studyLimit, studyOffset } = state.lastSearchParams;
@@ -922,16 +1011,31 @@
             sopInstanceUid: item.metadata?.SOPInstanceUID,
           };
           const hasAllUIDs = dicomUIDs.studyUid && dicomUIDs.seriesUid && dicomUIDs.sopInstanceUid;
-          const content = await wsCall('instances.content', hasAllUIDs ? dicomUIDs : { id });
-          if (content.contentType === 'image') {
-            const imageUrl = content.imageUrl
-              ? content.imageUrl
-              : `data:${content.mimeType};base64,${content.dataBase64}`;
-            const objectUrl = content.imageUrl ? content.imageUrl : null;
-            openModal('Image Content', `<div><img class="preview" src="${imageUrl}" /></div>`, 'image-fit', null, objectUrl);
+          const contentKind = inferContentKind(item);
+          const isMultiframe = contentKind === 'image' && hasAllUIDs && (item.embeddingCount || 0) > 1;
+
+          if (isMultiframe) {
+            const framesResult = await wsCall('instances.frames', dicomUIDs);
+            const frames = framesResult.frames || [];
+            if (frames.length > 1) {
+              openMultiframeViewer(frames);
+            } else {
+              const content = await wsCall('instances.content', dicomUIDs);
+              const imageUrl = `data:${content.mimeType};base64,${content.dataBase64}`;
+              openModal('Image Content', `<div><img class="preview" src="${imageUrl}" /></div>`, 'image-fit');
+            }
           } else {
-            const formattedText = formatTextContentForDisplay(content.text, content.mimeType);
-            openModal('Text Content', `<div class="content-text" title="${escapeHtml(content.mimeType || 'text/plain')}">${formattedText}</div>`, 'content-fit');
+            const content = await wsCall('instances.content', hasAllUIDs ? dicomUIDs : { id });
+            if (content.contentType === 'image') {
+              const imageUrl = content.imageUrl
+                ? content.imageUrl
+                : `data:${content.mimeType};base64,${content.dataBase64}`;
+              const objectUrl = content.imageUrl ? content.imageUrl : null;
+              openModal('Image Content', `<div><img class="preview" src="${imageUrl}" /></div>`, 'image-fit', null, objectUrl);
+            } else {
+              const formattedText = formatTextContentForDisplay(content.text, content.mimeType);
+              openModal('Text Content', `<div class="content-text" title="${escapeHtml(content.mimeType || 'text/plain')}">${formattedText}</div>`, 'content-fit');
+            }
           }
         }
       } catch (error) {

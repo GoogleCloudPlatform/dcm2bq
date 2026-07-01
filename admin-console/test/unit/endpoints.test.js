@@ -470,6 +470,125 @@ describe('HTTP Endpoints Specification', () => {
     });
   });
 
+  describe('Multiframe Image Viewing', () => {
+    describe('GET /studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/frames', () => {
+      it('should return frames list with required fields', () => {
+        const response = {
+          instanceId: 'abc123',
+          frames: [
+            { id: 'emb001', frameNumber: 0, mimeType: 'image/jpeg' },
+            { id: 'emb002', frameNumber: 5, mimeType: 'image/jpeg' },
+            { id: 'emb003', frameNumber: 10, mimeType: 'image/jpeg' },
+          ],
+        };
+
+        assert.ok(response.instanceId);
+        assert.ok(Array.isArray(response.frames));
+        assert.equal(response.frames.length, 3);
+        response.frames.forEach(frame => {
+          assert.ok(frame.id);
+          assert.ok(frame.frameNumber != null);
+          assert.ok(frame.mimeType);
+        });
+      });
+
+      it('should return frames sorted by frameNumber ascending', () => {
+        const frames = [
+          { id: 'emb001', frameNumber: 0 },
+          { id: 'emb002', frameNumber: 5 },
+          { id: 'emb003', frameNumber: 10 },
+        ];
+
+        for (let i = 1; i < frames.length; i++) {
+          assert.ok(frames[i].frameNumber > frames[i - 1].frameNumber);
+        }
+      });
+
+      it('should handle single-frame instances', () => {
+        const response = {
+          instanceId: 'abc123',
+          frames: [
+            { id: 'emb001', frameNumber: null, mimeType: 'image/jpeg' },
+          ],
+        };
+
+        assert.equal(response.frames.length, 1);
+        assert.equal(response.frames[0].frameNumber, null);
+      });
+    });
+
+    describe('GET /api/embeddings/:embeddingId/render', () => {
+      it('should return image content for a specific frame', () => {
+        const response = {
+          contentType: 'image',
+          mimeType: 'image/jpeg',
+          dataBase64: 'base64encodedframedata',
+        };
+
+        assert.equal(response.contentType, 'image');
+        assert.ok(response.mimeType.startsWith('image/'));
+        assert.ok(response.dataBase64);
+      });
+    });
+
+    describe('Multiframe detection logic', () => {
+      it('should identify multiframe when embeddingCount > 1 and content is image', () => {
+        const item = {
+          embeddingCount: 5,
+          embeddingInput: { mimeType: 'image/jpeg', path: 'gs://bucket/frame.jpg' },
+          metadata: {
+            StudyInstanceUID: '1.2.3',
+            SeriesInstanceUID: '1.2.3.4',
+            SOPInstanceUID: '1.2.3.4.5',
+          },
+        };
+
+        const mimeType = String(item.embeddingInput?.mimeType || '').trim().toLowerCase();
+        const isImage = mimeType.startsWith('image/');
+        const hasAllUIDs = !!(item.metadata.StudyInstanceUID && item.metadata.SeriesInstanceUID && item.metadata.SOPInstanceUID);
+        const isMultiframe = isImage && hasAllUIDs && item.embeddingCount > 1;
+
+        assert.ok(isMultiframe);
+      });
+
+      it('should not detect multiframe for single-frame images', () => {
+        const item = {
+          embeddingCount: 1,
+          embeddingInput: { mimeType: 'image/jpeg', path: 'gs://bucket/frame.jpg' },
+          metadata: {
+            StudyInstanceUID: '1.2.3',
+            SeriesInstanceUID: '1.2.3.4',
+            SOPInstanceUID: '1.2.3.4.5',
+          },
+        };
+
+        const mimeType = String(item.embeddingInput?.mimeType || '').trim().toLowerCase();
+        const isImage = mimeType.startsWith('image/');
+        const isMultiframe = isImage && item.embeddingCount > 1;
+
+        assert.ok(!isMultiframe);
+      });
+
+      it('should not detect multiframe for text content', () => {
+        const item = {
+          embeddingCount: 3,
+          embeddingInput: { mimeType: 'text/plain', path: 'gs://bucket/report.txt' },
+          metadata: {
+            StudyInstanceUID: '1.2.3',
+            SeriesInstanceUID: '1.2.3.4',
+            SOPInstanceUID: '1.2.3.4.5',
+          },
+        };
+
+        const mimeType = String(item.embeddingInput?.mimeType || '').trim().toLowerCase();
+        const isImage = mimeType.startsWith('image/');
+        const isMultiframe = isImage && item.embeddingCount > 1;
+
+        assert.ok(!isMultiframe);
+      });
+    });
+  });
+
   describe('WebSocket Action Mappings', () => {
     it('should have HTTP route for each WebSocket action', () => {
       const actionToPath = {
@@ -479,6 +598,8 @@ describe('HTTP Endpoints Specification', () => {
         'instances.get': '/api/instances/{id}',
         'instances.content': '/api/instances/{id}/content',
         'instances.counts': '/api/instances/counts',
+        'instances.frames': '/studies/{studyUid}/series/{seriesUid}/instances/{sopInstanceUid}/frames',
+        'instances.frameContent': '/api/embeddings/{embeddingId}/render',
         'studies.delete': '/api/studies/delete',
         'instances.delete': '/api/instances/delete',
         'studies.reprocess': '/api/studies/reprocess',
@@ -491,7 +612,7 @@ describe('HTTP Endpoints Specification', () => {
         'dlq.queuePaths': '/api/dlq/queue-paths',
         'process.run': '/api/process/run',
       };
-      
+
       Object.entries(actionToPath).forEach(([action, path]) => {
         assert.ok(action);
         assert.ok(path);

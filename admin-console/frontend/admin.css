@@ -131,6 +131,12 @@
     .modal-close-x:hover { color: var(--text); }
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     img.preview { width: auto; height: auto; max-width: min(512px, 90vw); max-height: 80vh; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-alt); display: block; }
+    .multiframe-viewer { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .multiframe-image-container { position: relative; display: flex; align-items: center; justify-content: center; min-height: 100px; }
+    .multiframe-spinner { display: none; position: absolute; font-size: 28px; color: var(--muted); align-items: center; justify-content: center; z-index: 1; }
+    .multiframe-controls { display: flex; align-items: center; gap: 8px; width: 100%; }
+    .multiframe-controls input[type="range"] { flex: 1; cursor: pointer; accent-color: #3b82f6; }
+    .multiframe-info { font-size: 13px; color: var(--muted); user-select: none; }
     .ws-status { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 999px; border: 1px solid #334155; color: #94a3b8; background: rgba(15, 23, 42, 0.35); }
     .ws-status i { font-size: 12px; }
     .ws-status.connecting { color: #f59e0b; border-color: #f59e0b; }
