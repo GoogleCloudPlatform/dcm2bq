@@ -283,7 +283,7 @@ resource "google_service_account" "cloudrun_sa" {
 resource "google_service_account" "admin_console_sa" {
   count = local.deploy_admin_console ? 1 : 0
 
-  account_id   = "dcm2bq-admin-console-sa${local.name_suffix}"
+  account_id   = "dcm2bq-admin-sa${local.name_suffix}"
   display_name = "dcm2bq admin-console Cloud Run Service Account"
 }
 
