@@ -82,21 +82,6 @@ function show_help() {
 
 # --- Main Script ---
 
-function show_help() {
-  echo "Usage: $0 [OPTIONS] [destroy|upload] <gcp_project_id>"
-  echo ""
-  echo "Options:"
-  echo "  --debug                      Enable debug mode in Cloud Run service (verbose logging)."
-  echo "  --no-embeddings              Do not create vector embeddings (but still create input files)."
-  echo "  --no-embedding-input         Do not create embedding input files (implicitly disables embeddings)."
-  echo "  --no-admin-console           Skip admin-console deployment (default is deploy)."
-  echo "  -h, --help                   Show this help message."
-  echo ""
-  echo "Commands:"
-  echo "  upload                       Upload test/files/dcm/*.dcm to the GCS bucket (separate from deploy)."
-  echo "  destroy                      Destroy all previously created assets."
-}
-
 # Show help if no arguments provided
 if [ $# -eq 0 ]; then
   show_help
