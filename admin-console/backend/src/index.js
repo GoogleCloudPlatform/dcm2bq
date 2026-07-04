@@ -38,6 +38,7 @@ const { buildNormalizedStudyMetadata, parseJsonValue } = require("./study-metada
 const { extractDlqFileInfo } = require("./dlq-utils");
 const { requeueDlqMessages, requeueAllDlqMessages } = require("./dlq-requeue");
 const { parseQueuePathsText, queuePathsForProcessing } = require("./queue-paths");
+const { buildReprocessGeneration } = require("./reprocess-generation");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -134,7 +135,7 @@ function parseWsBinaryPayload(payloadBuffer) {
   return { meta, dataBuffer };
 }
 
-async function publishGcsRequeueMessage(topic, bucket, object, source, generation = null) {
+async function publishGcsRequeueMessage(topic, bucket, object, source, generation = null, originalGeneration = null) {
   const nowIso = new Date().toISOString();
   const payload = {
     bucket,
@@ -152,6 +153,7 @@ async function publishGcsRequeueMessage(topic, bucket, object, source, generatio
       bucketId: bucket,
       objectId: object,
       ...(generation ? { objectGeneration: String(generation) } : {}),
+      ...(originalGeneration ? { dcm2bqOriginalGeneration: String(originalGeneration) } : {}),
       dcm2bqRequeueSource: source,
       dcm2bqRequeueAt: nowIso,
     },
@@ -940,15 +942,17 @@ app.post("/api/studies/reprocess", async (req, res) => {
     const errors = [];
 
     // Trigger reprocessing by publishing schema-compliant Pub/Sub messages.
-    // TODO: Reprocess currently does not include object storage class metadata,
-    // and version metadata may be missing depending on source rows.
-    // Include storage class and stable object version metadata for reprocess publishes.
-    for (const entry of uniqueObjects) {
+    // TODO: Reprocess currently does not include object storage class metadata.
+    // Include storage class metadata for reprocess publishes.
+    const reprocessBatchStamp = Date.now();
+
+    for (let i = 0; i < uniqueObjects.length; i++) {
+      const entry = uniqueObjects[i];
       try {
         const filePath = entry.basePath;
         // Parse normalized GCS path (gs://bucket/object/path)
         const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
-        
+
         if (!gsMatch) {
           errors.push(`Invalid GCS path: ${filePath}`);
           failed++;
@@ -958,7 +962,20 @@ app.post("/api/studies/reprocess", async (req, res) => {
         const bucket = gsMatch[1];
         const object = gsMatch[2];
 
-        await publishGcsRequeueMessage(REQUEUE_TOPIC, bucket, object, "admin-console", entry.generation);
+        // Synthesize a fresh generation for this reprocess request instead of
+        // forwarding the original GCS generation, so a deliberate reprocess can't
+        // be mistaken for Pub/Sub redelivering the original finalize event. The
+        // original generation is still preserved as a separate attribute below.
+        const syntheticGeneration = buildReprocessGeneration(reprocessBatchStamp, i);
+
+        await publishGcsRequeueMessage(
+          REQUEUE_TOPIC,
+          bucket,
+          object,
+          "admin-console",
+          syntheticGeneration,
+          entry.generation,
+        );
 
         succeeded++;
         console.log(`Reprocessing triggered: gs://${bucket}/${object}`);

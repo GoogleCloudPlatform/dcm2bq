@@ -20,6 +20,8 @@
  */
 const assert = require('assert');
 
+const { buildReprocessGeneration } = require('../../backend/src/reprocess-generation');
+
 describe('HTTP Endpoints Specification', () => {
   describe('Response Structures', () => {
     describe('POST /api/studies/search', () => {
@@ -198,6 +200,27 @@ describe('HTTP Endpoints Specification', () => {
         assert.ok(typeof response.reprocessedFileCount === 'number');
         assert.ok(Array.isArray(response.failures));
         assert.ok(Array.isArray(response.missingStudyIds));
+      });
+
+      it('publishes a synthetic generation per file, distinct from the original recorded version', () => {
+        // Mirrors what the handler does for each unique object in a reprocess batch:
+        // the original `version`/generation from BigQuery must never be forwarded
+        // as-is, since that would make a deliberate reprocess indistinguishable
+        // from Pub/Sub redelivering the original finalize event.
+        const batchStamp = Date.now();
+        const originalGenerations = ['1700000000000111', '1700000000000222', '1700000000000333'];
+
+        const published = originalGenerations.map((originalGeneration, i) => ({
+          generation: buildReprocessGeneration(batchStamp, i),
+          originalGeneration,
+        }));
+
+        published.forEach(({ generation, originalGeneration }) => {
+          assert.notEqual(generation, originalGeneration);
+        });
+
+        const publishedGenerations = published.map((entry) => entry.generation);
+        assert.equal(new Set(publishedGenerations).size, publishedGenerations.length);
       });
     });
 
