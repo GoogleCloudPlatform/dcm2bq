@@ -36,9 +36,12 @@ module.exports = {
     // BigQuery dead letter table ID
     deadLetterTableId: process.env.BQ_DEAD_LETTER_TABLE_ID || "dead_letter",
 
-    // BigQuery embeddings table ID (per-frame embeddings)
+    // BigQuery embeddings table ID (per-frame embeddings, writable)
     embeddingsTableId: process.env.BQ_EMBEDDINGS_TABLE_ID || "embeddings",
-    
+
+    // BigQuery deduplicated embeddings view ID (read path; one row per frame even after reprocessing)
+    embeddingsViewId: process.env.BQ_EMBEDDINGS_VIEW_ID || "embeddingsView",
+
     // BigQuery location (must match dataset location)
     bqLocation: process.env.BQ_LOCATION || "US",
 

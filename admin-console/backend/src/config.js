@@ -68,6 +68,7 @@ function extractBigQueryConfig(config) {
       instancesTableId,
       deadLetterTableId: config.admin.deadLetterTableId || "dead_letter",
       embeddingsTableId: config.admin.embeddingsTableId || "embeddings",
+      embeddingsViewId: config.admin.embeddingsViewId || "embeddingsView",
       bqLocation: config.admin.bqLocation || "US",
       requeueTopic: config.admin.requeueTopic || process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
     };
@@ -97,6 +98,7 @@ function extractBigQueryConfig(config) {
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
       embeddingsTableId: config.gcpConfig.bigQuery.embeddingsTableId || "embeddings",
+      embeddingsViewId: config.gcpConfig.bigQuery.embeddingsViewId || "embeddingsView",
       bqLocation: config.bqLocation || config.gcpConfig?.bigQuery?.location || "US",
       requeueTopic: config.requeueTopic || process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
     };
@@ -121,6 +123,7 @@ function extractBigQueryConfig(config) {
       instancesTableId,
       deadLetterTableId: deadLetterTableId || "dead_letter",
       embeddingsTableId: config.embeddingsTableId || "embeddings",
+      embeddingsViewId: config.embeddingsViewId || "embeddingsView",
       bqLocation: config.bqLocation || config.admin?.bqLocation || "US",
       requeueTopic: config.requeueTopic || process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
     };
@@ -210,6 +213,20 @@ function getConfig(options = {}) {
         adminCfg.embeddingsTableId = parts[1];
       } else {
         adminCfg.embeddingsTableId = process.env.BQ_EMBEDDINGS_TABLE_ID;
+      }
+    }
+
+    if (process.env.BQ_EMBEDDINGS_VIEW_ID) {
+      const parts = process.env.BQ_EMBEDDINGS_VIEW_ID.split(".");
+      if (parts.length === 3) {
+        adminCfg.projectId = parts[0];
+        adminCfg.datasetId = parts[1];
+        adminCfg.embeddingsViewId = parts[2];
+      } else if (parts.length === 2) {
+        adminCfg.datasetId = parts[0];
+        adminCfg.embeddingsViewId = parts[1];
+      } else {
+        adminCfg.embeddingsViewId = process.env.BQ_EMBEDDINGS_VIEW_ID;
       }
     }
 

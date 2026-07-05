@@ -146,3 +146,9 @@ variable "admin_console_bq_dead_letter_table_id" {
   type        = string
   default     = ""
 }
+
+variable "admin_console_bq_embeddings_view_id" {
+  description = "BigQuery deduplicated embeddings view for admin-console (format: projectId.dataset.table)"
+  type        = string
+  default     = ""
+}

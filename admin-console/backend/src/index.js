@@ -174,6 +174,7 @@ app.get("/healthz", (_, res) => {
       datasetId: CONFIG.datasetId,
       instancesViewId: CONFIG.instancesViewId,
       instancesTableId: CONFIG.instancesTableId,
+      embeddingsViewId: CONFIG.embeddingsViewId,
       deadLetterTableId: CONFIG.deadLetterTableId,
       bqLocation: BQ_LOCATION,
       uploadBucketName,
@@ -652,10 +653,13 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/frames",
     }
 
     const instanceId = idRows[0].id;
-    const embeddingsTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsTableId}\``;
+    // Read from the deduplicated view, not the raw embeddings table: reprocessing a
+    // DICOM file appends new embedding rows rather than replacing old ones, and only
+    // the view guarantees a single row per frame.
+    const embeddingsView = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsViewId}\``;
     const framesQuery = `
       SELECT id, frameNumber, info
-      FROM ${embeddingsTable}
+      FROM ${embeddingsView}
       WHERE instanceId = @instanceId
       ORDER BY COALESCE(frameNumber, 0) ASC
     `;
@@ -690,10 +694,10 @@ app.get("/api/embeddings/:embeddingId/render", async (req, res) => {
       return res.status(400).json({ error: "Missing embeddingId" });
     }
 
-    const embeddingsTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsTableId}\``;
+    const embeddingsView = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsViewId}\``;
     const query = `
       SELECT info
-      FROM ${embeddingsTable}
+      FROM ${embeddingsView}
       WHERE id = @embeddingId
       LIMIT 1
     `;
@@ -2057,6 +2061,7 @@ server.listen(PORT, () => {
       datasetId: CONFIG.datasetId,
       instancesViewId: CONFIG.instancesViewId,
       instancesTableId: CONFIG.instancesTableId,
+      embeddingsViewId: CONFIG.embeddingsViewId,
       deadLetterTableId: CONFIG.deadLetterTableId,
       uploadBucketName,
     },

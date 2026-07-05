@@ -38,10 +38,23 @@ function formatInsertError(error, label) {
   return `Failed to insert ${label}: ${errorDetails}`;
 }
 
-async function insert(obj) {
+/**
+ * Inserts a single row into the instances table.
+ * @param {Object} obj The row to insert.
+ * @param {string} [insertId] Optional BigQuery streaming insertId. When provided, lets
+ *   BigQuery best-effort dedupe retried deliveries of the same event (e.g. a Pub/Sub
+ *   redelivery) that land within its short in-memory dedup window. This is not a
+ *   substitute for the query-time versioning in instancesView -- it only helps with
+ *   near-immediate retries, not deliberate reprocessing.
+ */
+async function insert(obj, insertId) {
   if (!datasetId || !instancesTable) throw new Error('BigQuery instances table not configured');
   try {
-    await bigquery.dataset(datasetId).table(instancesTable).insert(obj);
+    if (insertId) {
+      await bigquery.dataset(datasetId).table(instancesTable).insert([{ insertId, json: obj }], { raw: true });
+    } else {
+      await bigquery.dataset(datasetId).table(instancesTable).insert(obj);
+    }
   } catch (error) {
     console.error('BigQuery insert error:', JSON.stringify({
       message: error.message,
@@ -58,11 +71,22 @@ async function insert(obj) {
   }
 }
 
-async function insertEmbeddings(rows) {
+/**
+ * Inserts rows into the embeddings table.
+ * @param {Object[]} rows The rows to insert.
+ * @param {string[]} [insertIds] Optional per-row BigQuery streaming insertIds, parallel
+ *   to `rows`. See `insert()` for why this is best-effort only.
+ */
+async function insertEmbeddings(rows, insertIds) {
   if (!datasetId || !embeddingsTable) throw new Error('BigQuery embeddings table not configured');
   if (!Array.isArray(rows) || rows.length === 0) return;
   try {
-    await bigquery.dataset(datasetId).table(embeddingsTable).insert(rows);
+    if (Array.isArray(insertIds) && insertIds.length === rows.length) {
+      const rawRows = rows.map((row, i) => ({ insertId: insertIds[i], json: row }));
+      await bigquery.dataset(datasetId).table(embeddingsTable).insert(rawRows, { raw: true });
+    } else {
+      await bigquery.dataset(datasetId).table(embeddingsTable).insert(rows);
+    }
   } catch (error) {
     console.error('BigQuery embeddings insert error:', JSON.stringify({
       message: error.message,

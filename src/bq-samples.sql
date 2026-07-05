@@ -91,6 +91,8 @@ LIMIT
      10;
 
 -- If doing a vector search on the embeddings table, make sure to create an embeddings model connection and a vector index first.
+-- Note: VECTOR_SEARCH requires a vector index, and indexes can only be built on the base table, not on `dicom.embeddingsView`,
+-- so a reprocessed file's stale embedding rows can still surface as extra (duplicate) hits here.
 CREATE
 OR REPLACE MODEL `dicom.embedding_model` REMOTE
 WITH
@@ -111,7 +113,11 @@ ORDER BY
 LIMIT
      10;
 
--- Show per-frame embeddings for a specific instance
+-- Show per-frame embeddings for a specific instance.
+-- Reprocessing a DICOM file leaves the older embedding rows in `dicom.embeddings`
+-- (it's append-only, like `dicom.instances`), so always read through
+-- `dicom.embeddingsView` instead of the raw table -- it keeps only the latest
+-- row per embedding id, guaranteeing one row per frame.
 SELECT
      e.id,
      e.instanceId,
@@ -119,7 +125,7 @@ SELECT
      e.info,
      e.timestamp
 FROM
-     `dicom.embeddings` AS e
+     `dicom.embeddingsView` AS e
 WHERE
      e.instanceId = 'your-instance-id'
 ORDER BY

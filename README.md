@@ -43,17 +43,14 @@ The project uses two BigQuery tables: an **instances** table for DICOM metadata 
 - `version`: STRING (NULLABLE) - Object version identifier
 - `info`: RECORD (REQUIRED) - Processing metadata with structured fields:
   - `event`: STRING - Event type (e.g., OBJECT_FINALIZE)
-  - `input`: RECORD - DICOM file metadata (size, type)
-  - `embedding`: RECORD - Embedding generation details
-    - `model`: STRING - Model used for embedding
-    - `input`: RECORD - Object used for embedding (path, size, mimeType)
+  - `input`: RECORD - DICOM file metadata (size, type, storageClass)
 - `metadata`: JSON (NULLABLE) - Complete DICOM JSON metadata
 
 ### Embeddings table (`embeddings`)
 
 Stores one row per embedding (one per frame for multi-frame DICOM images, one for SR/PDF):
 
-- `id`: STRING (REQUIRED) - Deterministic SHA256 hash of `instanceId|frameNumber`
+- `id`: STRING (REQUIRED) - Composite key `<instanceId>_<frameNumber>` (frame 0 for single-frame/text content), deterministic per frame
 - `instanceId`: STRING (REQUIRED) - Foreign key to the instances table
 - `timestamp`: TIMESTAMP (REQUIRED) - When the embedding was generated
 - `frameNumber`: INT64 (NULLABLE) - 0-based frame index (null for non-image content)
@@ -62,7 +59,11 @@ Stores one row per embedding (one per frame for multi-frame DICOM images, one fo
 
 ### Instances view (`instancesView`)
 
-A BigQuery view that joins the instances table with a count of embeddings per instance, exposing an `embedding_count` column.
+A BigQuery view that resolves the latest row per instance (both tables are append-only, so reprocessing a file adds rows rather than replacing them) and joins in a count of embeddings per instance, exposing an `embedding_count` column.
+
+### Embeddings view (`embeddingsView`)
+
+A BigQuery view over the embeddings table that keeps only the latest row per embedding `id`, guaranteeing a single embedding per frame even after a file has been processed multiple times. Consumers should read per-frame embeddings through this view rather than the raw table.
 
 The Cloud Run service is configured with table IDs via `gcpConfig.bigQuery.instancesTableId` and `gcpConfig.bigQuery.embeddingsTableId` settings (see `config.defaults.js`). Use the `embeddingVector` column on the **embeddings** table when running vector searches or creating vector indexes.
 

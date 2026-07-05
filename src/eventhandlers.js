@@ -153,6 +153,12 @@ async function processDicom(dicomFilePath, uriPath) {
  * infoObj is a structured object with event, input, and embedding info.
  * metadata is the JSON string (or null).
  * embeddingsData is an array of { embedding, objectPath, objectSize, objectMimeType, frameNumber } (or null).
+ *
+ * BigQuery streaming insertIds are derived from the row identity plus the event's version
+ * (the GCS object generation, or its HCAPI equivalent). The version is fixed inside the
+ * Pub/Sub message payload, so a redelivery of the same message produces the same insertId
+ * and gets absorbed by BigQuery's best-effort streaming dedup, while a deliberate reprocess
+ * or a genuine new upload arrives with a distinct version and always lands as a new row.
  */
 async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
   let metadataObj = metadata;
@@ -183,7 +189,13 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
     version: String(writeBase.version),
   });
 
-  await insert(row);
+  // `id` already distinguishes the files inside a single archive message (each has its
+  // own DICOM UIDs), so id|version is unique per row even when one message fans out
+  // into many rows.
+  const version = String(writeBase.version);
+  const instanceInsertId = `${id}|${version}`;
+
+  await insert(row, instanceInsertId);
 
   // Write embeddings to separate table
   if (Array.isArray(embeddingsData) && embeddingsData.length > 0) {
@@ -191,8 +203,11 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
     const embeddingRows = embeddingsData
       .filter(e => e.embedding && Array.isArray(e.embedding) && e.embedding.length > 0)
       .map(e => {
-        const frameStr = e.frameNumber != null ? String(e.frameNumber) : '';
-        const embeddingId = crypto.createHash("sha256").update(`${id}|${frameStr}`).digest("hex").substring(0, 16);
+        // Readable composite key: the instance id plus the frame number (0 for
+        // single-frame/text embeddings, matching the COALESCE(frameNumber, 0)
+        // convention used in the views). Deterministic per (instance, frame), so
+        // reprocessing overwrites logically rather than accumulating new ids.
+        const embeddingId = `${id}_${e.frameNumber != null ? e.frameNumber : 0}`;
         const embeddingRow = {
           id: embeddingId,
           instanceId: id,
@@ -212,7 +227,8 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
       });
 
     if (embeddingRows.length > 0) {
-      await insertEmbeddings(embeddingRows);
+      const embeddingInsertIds = embeddingRows.map(r => `${r.id}|${version}`);
+      await insertEmbeddings(embeddingRows, embeddingInsertIds);
     }
   }
 }
@@ -478,7 +494,11 @@ async function handleHcapiPubSubUnwrap(ctx, perfCtx) {
     perfCtx.addRef("afterHcapiDownloadToFile");
 
     const timestamp = new Date();
-    const version = ctx.message.attributes?.versionId || Date.now();
+    // Fall back to the Pub/Sub messageId rather than Date.now(): the messageId is
+    // stable across redeliveries of the same message, so the derived insertId still
+    // dedupes retries. Nothing reads content back by version, so any opaque
+    // per-event value works here.
+    const version = ctx.message.attributes?.versionId || ctx.message.messageId || Date.now();
     const storageClass = ctx.message.attributes?.storageClass || null;
     const fileSize = (await fs.stat(localFilePath)).size;
 

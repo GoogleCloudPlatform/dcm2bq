@@ -132,6 +132,7 @@ locals {
   admin_console_instances_table_id = "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.instances_table.table_id}"
   admin_console_dead_letter_table_id = var.admin_console_bq_dead_letter_table_id != "" ? var.admin_console_bq_dead_letter_table_id : "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.dead_letter_table.table_id}"
   admin_console_embeddings_table_id = "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}"
+  admin_console_embeddings_view_id = var.admin_console_bq_embeddings_view_id != "" ? var.admin_console_bq_embeddings_view_id : "${var.project_id}.${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_view.table_id}"
 }
 
 # GCS bucket (optional create)
@@ -177,6 +178,34 @@ resource "google_bigquery_table" "embeddings_table" {
   schema              = file("${path.module}/embeddings.schema.json")
 }
 
+// Deduplicated view over the (append-only, reprocess-friendly) embeddings table.
+// Embedding row `id` is deterministic per (instanceId, frameNumber), so the same
+// frame can end up with multiple physical rows across reprocessing; this view
+// always keeps only the most recent row per `id`, guaranteeing one embedding per
+// frame to every consumer that reads from it instead of the raw table.
+resource "google_bigquery_table" "embeddings_view" {
+  deletion_protection = false
+  dataset_id          = google_bigquery_dataset.dicom_dataset.dataset_id
+  table_id            = "embeddingsView"
+
+  view {
+    query          = <<-EOT
+      SELECT
+        * EXCEPT(_emb_row_id)
+      FROM (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY timestamp DESC) AS _emb_row_id
+        FROM
+          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}`
+      )
+      WHERE
+        _emb_row_id = 1
+    EOT
+    use_legacy_sql = false
+  }
+}
+
 // Fixes issue https://github.com/GoogleCloudPlatform/dcm2bq/issues/23
 resource "google_bigquery_table" "instances_view" {
   deletion_protection = false
@@ -220,26 +249,13 @@ resource "google_bigquery_table" "instances_view" {
         FROM
           active_not_deleted
       ),
-      latest_embeddings AS (
-        SELECT
-          * EXCEPT(_emb_row_id)
-        FROM (
-          SELECT
-            *,
-            ROW_NUMBER() OVER (PARTITION BY id ORDER BY timestamp DESC) AS _emb_row_id
-          FROM
-            `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_table.table_id}`
-        )
-        WHERE
-          _emb_row_id = 1
-      ),
       embedding_info AS (
         SELECT
           instanceId,
           COUNT(*) AS embedding_count,
           ARRAY_AGG(info ORDER BY COALESCE(frameNumber, 0) ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_embedding_info
         FROM
-          latest_embeddings
+          `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_view.table_id}`
         GROUP BY
           instanceId
       )
@@ -489,6 +505,11 @@ resource "google_cloud_run_v2_service" "admin_console_service" {
       env {
         name  = "BQ_EMBEDDINGS_TABLE_ID"
         value = local.admin_console_embeddings_table_id
+      }
+
+      env {
+        name  = "BQ_EMBEDDINGS_VIEW_ID"
+        value = local.admin_console_embeddings_view_id
       }
 
       env {
