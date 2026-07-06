@@ -39,7 +39,7 @@ const { extractDlqFileInfo } = require("./dlq-utils");
 const { requeueDlqMessages, requeueAllDlqMessages } = require("./dlq-requeue");
 const { parseQueuePathsText, queuePathsForProcessing } = require("./queue-paths");
 const { buildReprocessGeneration } = require("./reprocess-generation");
-const { isFileUri, readLocalAsset, postLocalReprocess } = require("./local-files");
+const { isFileUri, readLocalAsset, deleteLocalAsset, postLocalReprocess } = require("./local-files");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -175,6 +175,55 @@ async function fetchAssetBuffer(filePath) {
   }
   const [buffer] = await storage.bucket(gsMatch[1]).file(gsMatch[2]).download();
   return buffer;
+}
+
+// Delete an extracted asset by URI (counterpart to fetchAssetBuffer). A missing
+// asset is not an error: the goal is "make sure it's gone", not "prove it was there".
+async function deleteAsset(filePath) {
+  if (isFileUri(filePath)) {
+    return deleteLocalAsset(CONFIG.localRootPath, filePath);
+  }
+  const gsMatch = String(filePath || "").match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!gsMatch) {
+    throw new Error(`Invalid asset path: ${filePath}`);
+  }
+  await storage.bucket(gsMatch[1]).file(gsMatch[2]).delete({ ignoreNotFound: true });
+}
+
+// Deletes generated per-frame assets (GCS/local files) and their embeddings rows for
+// the given instance ids. Run this before deleting the instances rows themselves: if
+// something fails partway, the result is an instance row with no embeddings (which
+// reprocessing can regenerate), not embeddings/assets pointing at nothing.
+async function deleteEmbeddingAssetsAndRows(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return;
+
+  const embeddingsTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsTableId}\``;
+
+  const [pathRows] = await bigquery.query({
+    query: `
+      SELECT DISTINCT info.input.path AS path
+      FROM ${embeddingsTable}
+      WHERE instanceId IN UNNEST(@ids) AND info.input.path IS NOT NULL
+    `,
+    location: BQ_LOCATION,
+    params: { ids },
+  });
+
+  await Promise.all(
+    (pathRows || []).map(async (row) => {
+      try {
+        await deleteAsset(row.path);
+      } catch (error) {
+        console.error(`Failed to delete asset '${row.path}':`, error?.message || error);
+      }
+    })
+  );
+
+  await bigquery.query({
+    query: `DELETE FROM ${embeddingsTable} WHERE instanceId IN UNNEST(@ids)`,
+    location: BQ_LOCATION,
+    params: { ids },
+  });
 }
 
 // ============================================================================
@@ -845,7 +894,21 @@ app.post("/api/studies/delete", async (req, res) => {
     }
 
     const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
-    
+
+    // Resolve instance ids so we can clean up their embeddings rows and generated assets
+    const [idRows] = await bigquery.query({
+      query: `
+        SELECT id
+        FROM ${instancesTable}
+        WHERE JSON_VALUE(metadata, '$.StudyInstanceUID') IN UNNEST(@studyIds)
+      `,
+      location: BQ_LOCATION,
+      params: { studyIds },
+    });
+    const instanceIds = (idRows || []).map((row) => row.id);
+
+    await deleteEmbeddingAssetsAndRows(instanceIds);
+
     // Delete instances for these studies
     const query = `
       DELETE FROM ${instancesTable}
@@ -874,7 +937,9 @@ app.post("/api/instances/delete", async (req, res) => {
     }
 
     const instancesTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesTableId}\``;
-    
+
+    await deleteEmbeddingAssetsAndRows(ids);
+
     // Delete specific instances
     const query = `
       DELETE FROM ${instancesTable}

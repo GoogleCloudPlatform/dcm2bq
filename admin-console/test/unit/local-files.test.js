@@ -20,7 +20,7 @@ const os = require("os");
 const path = require("path");
 const url = require("url");
 
-const { isFileUri, readLocalAsset, buildLocalReprocessEnvelope } = require("../../backend/src/local-files");
+const { isFileUri, readLocalAsset, deleteLocalAsset, buildLocalReprocessEnvelope } = require("../../backend/src/local-files");
 
 describe("local-files", () => {
   let rootDir;
@@ -68,6 +68,27 @@ describe("local-files", () => {
         readLocalAsset(rootDir, url.pathToFileURL(path.join(rootDir, "missing.jpg")).href),
         (e) => e.statusCode === 404
       );
+    });
+  });
+
+  describe("deleteLocalAsset", () => {
+    it("deletes an asset under the configured root", async () => {
+      const assetPath = path.join(rootDir, "to-delete.jpg");
+      fs.writeFileSync(assetPath, "jpeg-bytes");
+      await deleteLocalAsset(rootDir, url.pathToFileURL(assetPath).href);
+      assert.ok(!fs.existsSync(assetPath));
+    });
+
+    it("is a no-op when the file does not already exist", async () => {
+      await deleteLocalAsset(rootDir, url.pathToFileURL(path.join(rootDir, "already-gone.jpg")).href);
+    });
+
+    it("rejects with 403 when the path escapes the root, without deleting it", async () => {
+      await assert.rejects(
+        deleteLocalAsset(rootDir, url.pathToFileURL("/etc/hostname").href),
+        (e) => e.statusCode === 403
+      );
+      assert.ok(fs.existsSync("/etc/hostname"));
     });
   });
 

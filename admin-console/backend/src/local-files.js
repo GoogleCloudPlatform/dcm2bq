@@ -55,6 +55,36 @@ async function readLocalAsset(rootPath, fileUri) {
 }
 
 /**
+ * Delete a file:// asset, enforcing the same root containment as readLocalAsset.
+ * A missing file is treated as already-deleted, not an error.
+ * @param {string} rootPath Optional local root (DCM2BQ_LOCAL_ROOT / admin.localRootPath)
+ * @param {string} fileUri file:// URI from a BigQuery row
+ * @returns {Promise<void>}
+ */
+async function deleteLocalAsset(rootPath, fileUri) {
+  let resolvedFile;
+  try {
+    resolvedFile = await fs.realpath(url.fileURLToPath(fileUri));
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    throw e;
+  }
+  if (rootPath) {
+    const resolvedRoot = await fs.realpath(path.resolve(rootPath));
+    if (resolvedFile !== resolvedRoot && !resolvedFile.startsWith(resolvedRoot + path.sep)) {
+      const err = new Error(`Local file path escapes the configured root: ${fileUri}`);
+      err.statusCode = 403;
+      throw err;
+    }
+  }
+  try {
+    await fs.unlink(resolvedFile);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+}
+
+/**
  * Build the synthetic LOCAL_FINALIZE push envelope for reprocessing a local file
  * (the same envelope shape `dcm2bq index` produces). Size is intentionally
  * omitted: the service stats the file itself and must not reject reprocessing
@@ -104,4 +134,4 @@ async function postLocalReprocess(serviceUrl, fileUri, generation) {
   }
 }
 
-module.exports = { isFileUri, readLocalAsset, buildLocalReprocessEnvelope, postLocalReprocess };
+module.exports = { isFileUri, readLocalAsset, deleteLocalAsset, buildLocalReprocessEnvelope, postLocalReprocess };
