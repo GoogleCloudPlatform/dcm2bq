@@ -54,6 +54,12 @@ module.exports = {
   },
   // Legacy parser options key retained for backward-compatible config validation.
   dicomParser: {},
+  // Configuration for local file ingest (see `dcm2bq index`).
+  localConfig: {
+    // Root directory the service is allowed to read local DICOM files from.
+    // Local (file://) events are rejected unless their path resolves under this root.
+    rootPath: process.env.DCM2BQ_LOCAL_ROOT || "",
+  },
   // Passed to JSON formatter
   jsonOutput: {
     useArrayWithSingleValue: false, // Use array, even when there's only a single value

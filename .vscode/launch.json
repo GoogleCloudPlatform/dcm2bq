@@ -22,6 +22,43 @@
     {
       "type": "node",
       "request": "launch",
+      "name": "Launch Service (Local Mode)",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/src/index.js",
+      "args": ["service"],
+      "env": {
+        "DEBUG": "true",
+        "DCM2BQ_CONFIG_FILE": "test/testconfig.json",
+        "DCM2BQ_LOCAL_ROOT": "${workspaceFolder}/test/files"
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Admin Console (Local Mode)",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/admin-console/backend/src/index.js",
+      "env": {
+        "NODE_ENV": "test",
+        "PORT": "8081",
+        "DCM2BQ_LOCAL_ROOT": "${workspaceFolder}/test/files",
+        "DCM2BQ_SERVICE_URL": "http://localhost:8080"
+      },
+      "cwd": "${workspaceFolder}/admin-console"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch CLI:Index (test files)",
+      "skipFiles": ["<node_internals>/**"],
+      "program": "${workspaceFolder}/src/index.js",
+      "args": ["index", "${workspaceFolder}/test/files/dcm"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "node",
+      "request": "launch",
       "name": "Launch CLI:Dump",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/src/index.js",
@@ -40,6 +77,7 @@
         "test/embeddings.test.js",
         "test/eventhandlers.test.js",
         "test/http-retry.test.js",
+        "test/local-mode.test.js",
         "test/perf.test.js",
         "test/schemas.test.js",
         "test/text-processor.test.js",
@@ -75,6 +113,13 @@
         "GOOGLE_API_KEY": ""
       },
       "cwd": "${workspaceFolder}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Local Mode: Service + Admin Console",
+      "configurations": ["Launch Service (Local Mode)", "Launch Admin Console (Local Mode)"],
+      "stopAll": true
     }
   ]
 }

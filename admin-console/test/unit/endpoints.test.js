@@ -555,59 +555,51 @@ describe('HTTP Endpoints Specification', () => {
     });
 
     describe('Multiframe detection logic', () => {
-      it('should identify multiframe when embeddingCount > 1 and content is image', () => {
-        const item = {
-          embeddingCount: 5,
-          embeddingInput: { mimeType: 'image/jpeg', path: 'gs://bucket/frame.jpg' },
-          metadata: {
-            StudyInstanceUID: '1.2.3',
-            SeriesInstanceUID: '1.2.3.4',
-            SOPInstanceUID: '1.2.3.4.5',
-          },
-        };
-
+      function detectMultiframe(item) {
         const mimeType = String(item.embeddingInput?.mimeType || '').trim().toLowerCase();
         const isImage = mimeType.startsWith('image/');
-        const hasAllUIDs = !!(item.metadata.StudyInstanceUID && item.metadata.SeriesInstanceUID && item.metadata.SOPInstanceUID);
-        const isMultiframe = isImage && hasAllUIDs && item.embeddingCount > 1;
+        const hasAllUIDs = !!(item.metadata?.StudyInstanceUID && item.metadata?.SeriesInstanceUID && item.metadata?.SOPInstanceUID);
+        return isImage && hasAllUIDs && (item.frameCount || item.embeddingCount || 0) > 1;
+      }
 
-        assert.ok(isMultiframe);
+      it('should identify multiframe when frameCount > 1', () => {
+        const item = {
+          frameCount: 5,
+          embeddingCount: 5,
+          embeddingInput: { mimeType: 'image/jpeg', path: 'gs://bucket/frame.jpg' },
+          metadata: { StudyInstanceUID: '1.2.3', SeriesInstanceUID: '1.2.3.4', SOPInstanceUID: '1.2.3.4.5' },
+        };
+        assert.ok(detectMultiframe(item));
+      });
+
+      it('should identify multiframe using frameCount when embeddingCount is 0 (input-only, no vectors)', () => {
+        const item = {
+          frameCount: 5,
+          embeddingCount: 0,
+          embeddingInput: { mimeType: 'image/jpeg', path: 'gs://bucket/frame.jpg' },
+          metadata: { StudyInstanceUID: '1.2.3', SeriesInstanceUID: '1.2.3.4', SOPInstanceUID: '1.2.3.4.5' },
+        };
+        assert.ok(detectMultiframe(item));
       });
 
       it('should not detect multiframe for single-frame images', () => {
         const item = {
+          frameCount: 1,
           embeddingCount: 1,
           embeddingInput: { mimeType: 'image/jpeg', path: 'gs://bucket/frame.jpg' },
-          metadata: {
-            StudyInstanceUID: '1.2.3',
-            SeriesInstanceUID: '1.2.3.4',
-            SOPInstanceUID: '1.2.3.4.5',
-          },
+          metadata: { StudyInstanceUID: '1.2.3', SeriesInstanceUID: '1.2.3.4', SOPInstanceUID: '1.2.3.4.5' },
         };
-
-        const mimeType = String(item.embeddingInput?.mimeType || '').trim().toLowerCase();
-        const isImage = mimeType.startsWith('image/');
-        const isMultiframe = isImage && item.embeddingCount > 1;
-
-        assert.ok(!isMultiframe);
+        assert.ok(!detectMultiframe(item));
       });
 
       it('should not detect multiframe for text content', () => {
         const item = {
+          frameCount: 3,
           embeddingCount: 3,
           embeddingInput: { mimeType: 'text/plain', path: 'gs://bucket/report.txt' },
-          metadata: {
-            StudyInstanceUID: '1.2.3',
-            SeriesInstanceUID: '1.2.3.4',
-            SOPInstanceUID: '1.2.3.4.5',
-          },
+          metadata: { StudyInstanceUID: '1.2.3', SeriesInstanceUID: '1.2.3.4', SOPInstanceUID: '1.2.3.4.5' },
         };
-
-        const mimeType = String(item.embeddingInput?.mimeType || '').trim().toLowerCase();
-        const isImage = mimeType.startsWith('image/');
-        const isMultiframe = isImage && item.embeddingCount > 1;
-
-        assert.ok(!isMultiframe);
+        assert.ok(!detectMultiframe(item));
       });
     });
   });

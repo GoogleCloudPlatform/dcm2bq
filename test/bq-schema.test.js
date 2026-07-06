@@ -239,7 +239,7 @@ describe("BigQuery insert payload matches schema", () => {
       objectPath: "gs://bkt/obj.jpg",
       objectSize: 123,
       objectMimeType: "image/jpeg",
-      frameNumber: null,
+      frameNumber: 0,
     }]);
     const eventhandlers = require("../src/eventhandlers");
 

@@ -43,8 +43,13 @@ output "bq_dataset_id" {
 }
 
 output "bq_instances_table_id" {
-  description = "The ID of the BigQuery instances table (includes embeddings)."
+  description = "The ID of the BigQuery instances table."
   value       = google_bigquery_table.instances_table.table_id
+}
+
+output "bq_embeddings_table_id" {
+  description = "The ID of the BigQuery embeddings table."
+  value       = google_bigquery_table.embeddings_table.table_id
 }
 
 output "pubsub_topic_name" {

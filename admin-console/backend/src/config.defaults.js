@@ -47,5 +47,12 @@ module.exports = {
 
     // Pub/Sub topic used to publish requeue messages back to the processing pipeline
     requeueTopic: process.env.PUBSUB_REQUEUE_TOPIC || "dcm2bq-gcs-events",
+
+    // Local mode: root directory file:// assets may be read from (rows created by `dcm2bq index`)
+    localRootPath: process.env.DCM2BQ_LOCAL_ROOT || "",
+
+    // Local mode: URL of a locally running dcm2bq service; file:// rows are
+    // reprocessed by POSTing synthetic events here instead of publishing to Pub/Sub
+    dcm2bqServiceUrl: process.env.DCM2BQ_SERVICE_URL || "",
   },
 };

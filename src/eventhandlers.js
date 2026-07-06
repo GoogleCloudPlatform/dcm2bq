@@ -20,6 +20,7 @@ const { DicomFile } = require("./dicomtojson");
 const { insert, insertEmbeddings } = require("./bigquery");
 const gcs = require("./gcs");
 const hcapi = require("./hcapi");
+const localfile = require("./localfile");
 const { createVectorEmbedding, createEmbeddingInput } = require("./embeddings");
 const { deepAssign, createNonRetryableError, isRetryableError, DEBUG_MODE } = require("./utils");
 const crypto = require("crypto");
@@ -201,28 +202,28 @@ async function persistRow(writeBase, infoObj, metadata, embeddingsData) {
   if (Array.isArray(embeddingsData) && embeddingsData.length > 0) {
     const embeddingVectorModel = embeddingInputConfig?.vector?.model || null;
     const embeddingRows = embeddingsData
-      .filter(e => e.embedding && Array.isArray(e.embedding) && e.embedding.length > 0)
+      // Keep rows that have a vector, embedding input (rendered image/text), or both —
+      // only drop entries with neither, since there's nothing to persist for those.
+      .filter(e => (e.embedding && Array.isArray(e.embedding) && e.embedding.length > 0) || e.objectPath || e.objectSize || e.objectMimeType)
       .map(e => {
-        // Readable composite key: the instance id plus the frame number (0 for
-        // single-frame/text embeddings, matching the COALESCE(frameNumber, 0)
-        // convention used in the views). Deterministic per (instance, frame), so
-        // reprocessing overwrites logically rather than accumulating new ids.
-        const embeddingId = `${id}_${e.frameNumber != null ? e.frameNumber : 0}`;
+        const hasVector = Array.isArray(e.embedding) && e.embedding.length > 0;
+        // Readable composite key: the instance id plus the frame number. Deterministic
+        // per (instance, frame), so reprocessing overwrites logically rather than
+        // accumulating new ids.
+        const embeddingId = `${id}_${e.frameNumber}`;
         const embeddingRow = {
           id: embeddingId,
           instanceId: id,
+          frameNumber: e.frameNumber,
           timestamp: writeBase.timestamp,
-          embeddingVector: e.embedding,
+          embeddingVector: hasVector ? e.embedding : [],
           info: {
-            model: embeddingVectorModel,
+            model: hasVector ? embeddingVectorModel : null,
             input: (e.objectPath || e.objectSize || e.objectMimeType)
               ? { path: e.objectPath || null, size: e.objectSize || null, mimeType: e.objectMimeType || null }
               : null,
           },
         };
-        if (e.frameNumber != null) {
-          embeddingRow.frameNumber = e.frameNumber;
-        }
         return embeddingRow;
       });
 
@@ -305,17 +306,16 @@ async function extractArchiveToTempDir(archiveType, archiveFilePath, tempDir) {
 /**
  * Handle a supported archive file containing DICOM files.
  * @param {string} archiveFilePath The local path to the archive file
- * @param {string} bucketId The GCS bucket ID
- * @param {string} objectId The GCS object ID (archive file name)
+ * @param {string} archiveUriPath The URI path of the archive (gs://, file://, etc)
  * @param {Date} timestamp The timestamp of the event
  * @param {number} version The version identifier
  * @param {string} eventType The event type
  * @param {('zip'|'tar')} archiveType The archive format
  * @param {string} storageClass The storage class of the archive object
+ * @param {string} storageType The type of storage (GCS, LOCAL, etc)
  */
-async function handleArchiveFile(archiveFilePath, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass) {
+async function handleArchiveFile(archiveFilePath, archiveUriPath, timestamp, version, eventType, archiveType, storageClass, storageType) {
   let tempDir = null;
-  const archiveUriPath = gcs.createUriPath(bucketId, objectId);
   try {
     // Extract archive to temporary directory
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dcm2bq-'));
@@ -345,7 +345,7 @@ async function handleArchiveFile(archiveFilePath, bucketId, objectId, timestamp,
           uriPath,
           eventType,
           fileStats.size,
-          consts.STORAGE_TYPE_GCS,
+          storageType,
           storageClass
         );
         successCount++;
@@ -457,7 +457,7 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
 
         const archiveType = getArchiveType(objectId);
         if (archiveType) {
-          await handleArchiveFile(localFilePath, bucketId, objectId, timestamp, version, eventType, archiveType, storageClass);
+          await handleArchiveFile(localFilePath, uriPath, timestamp, version, eventType, archiveType, storageClass, consts.STORAGE_TYPE_GCS);
         } else {
           const effectiveFileSize = fileSize ?? (await fs.stat(localFilePath)).size;
           await processAndPersistDicom(version, timestamp, localFilePath, uriPath, eventType, effectiveFileSize, consts.STORAGE_TYPE_GCS, storageClass);
@@ -480,6 +480,65 @@ async function handleGcsPubSubUnwrap(ctx, perfCtx) {
   }
   if (DEBUG_MODE) {
     console.log(JSON.stringify({ path: basePath }));
+  }
+}
+
+/**
+ * Handle a synthetic push envelope for a locally ingested file (see `dcm2bq index`).
+ * The message data payload is base64 JSON: { name, size, generation }, where name is
+ * an absolute local file path. The file is processed in place — no download, no
+ * temp copy, and the source file is never modified or deleted. The path must
+ * resolve under localConfig.rootPath or the event is rejected as non-retryable.
+ */
+async function handleLocalPubSubUnwrap(ctx, perfCtx) {
+  const { eventType } = ctx.message.attributes;
+  const msgData = JSON.parse(Buffer.from(ctx.message.data, "base64").toString());
+  const timestamp = new Date();
+  const version = msgData.generation;
+  // Config sources do not merge with defaults, so a config provided via
+  // DCM2BQ_CONFIG/DCM2BQ_CONFIG_FILE usually lacks localConfig entirely;
+  // honor the DCM2BQ_LOCAL_ROOT env var in that case.
+  const rootPath = config.get().localConfig?.rootPath || process.env.DCM2BQ_LOCAL_ROOT;
+
+  if (!isSupportedDicomObjectPath(msgData.name)) {
+    if (DEBUG_MODE) {
+      console.log(`Ignoring unsupported local file event: ${msgData.name} (${eventType})`);
+    }
+    return;
+  }
+
+  const localFilePath = await localfile.resolveUnderRoot(rootPath, msgData.name);
+  const uriPath = localfile.createUriPath(localFilePath);
+
+  try {
+    const fileSize = (await fs.stat(localFilePath)).size;
+    if (fileSize === 0) {
+      if (DEBUG_MODE) {
+        console.log(`Ignoring zero-size local file event: ${uriPath}`);
+      }
+      return;
+    }
+    if (msgData.size && fileSize !== Number(msgData.size)) {
+      throw createNonRetryableError(`Local file size mismatch: expected ${msgData.size} bytes, got ${fileSize} bytes (file changed since indexing?)`);
+    }
+
+    const archiveType = getArchiveType(localFilePath);
+    if (archiveType) {
+      await handleArchiveFile(localFilePath, uriPath, timestamp, version, eventType, archiveType, null, consts.STORAGE_TYPE_LOCAL);
+    } else {
+      await processAndPersistDicom(version, timestamp, localFilePath, uriPath, eventType, fileSize, consts.STORAGE_TYPE_LOCAL, null);
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (isRetryableError(error)) {
+      throw error;
+    }
+    console.error(`Non-retryable local processing error for ${uriPath}; acknowledging without retry: ${errorMsg}`);
+  }
+  perfCtx.addRef("afterProcessDicom");
+  perfCtx.addRef("afterBqInsert");
+  if (DEBUG_MODE) {
+    console.log(JSON.stringify({ path: uriPath }));
   }
 }
 
@@ -532,7 +591,11 @@ async function handleEvent(name, req, res) {
       await handleHcapiPubSubUnwrap(req.body, res.perfCtx);
       break;
     }
+    case consts.LOCAL_PUBSUB_UNWRAP: {
+      await handleLocalPubSubUnwrap(req.body, res.perfCtx);
+      break;
+    }
   }
 }
 
-module.exports = { handleEvent, handleGcsPubSubUnwrap };
+module.exports = { handleEvent, handleGcsPubSubUnwrap, handleLocalPubSubUnwrap, isSupportedDicomObjectPath };

@@ -39,6 +39,7 @@ const { extractDlqFileInfo } = require("./dlq-utils");
 const { requeueDlqMessages, requeueAllDlqMessages } = require("./dlq-requeue");
 const { parseQueuePathsText, queuePathsForProcessing } = require("./queue-paths");
 const { buildReprocessGeneration } = require("./reprocess-generation");
+const { isFileUri, readLocalAsset, postLocalReprocess } = require("./local-files");
 const config = require("./config");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -158,6 +159,22 @@ async function publishGcsRequeueMessage(topic, bucket, object, source, generatio
       dcm2bqRequeueAt: nowIso,
     },
   });
+}
+
+// Fetch an extracted asset by URI: file:// assets are read from the configured
+// local root, gs:// assets are downloaded from GCS.
+async function fetchAssetBuffer(filePath) {
+  if (isFileUri(filePath)) {
+    return readLocalAsset(CONFIG.localRootPath, filePath);
+  }
+  const gsMatch = String(filePath || "").match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!gsMatch) {
+    const err = new Error(`Invalid asset path: ${filePath}`);
+    err.statusCode = 400;
+    throw err;
+  }
+  const [buffer] = await storage.bucket(gsMatch[1]).file(gsMatch[2]).download();
+  return buffer;
 }
 
 // ============================================================================
@@ -315,6 +332,7 @@ app.get("/studies/:studyId/instances", async (req, res) => {
         timestamp,
         metadata,
         info,
+        frame_count,
         embedding_count,
         embedding_model,
         embedding_input
@@ -340,6 +358,7 @@ app.get("/studies/:studyId/instances", async (req, res) => {
         metadata: parseJsonValue(row.metadata),
         info: parseJsonValue(row.info),
         hasEmbeddingVector: embeddingCount > 0,
+        frameCount: Number(row.frame_count || 0),
         embeddingCount,
         embeddingModel: row.embedding_model || null,
         embeddingInput: parseJsonValue(row.embedding_input),
@@ -428,6 +447,7 @@ app.get("/api/instances/:id", async (req, res) => {
         timestamp,
         metadata,
         info,
+        frame_count,
         embedding_count,
         embedding_model,
         embedding_input
@@ -459,6 +479,7 @@ app.get("/api/instances/:id", async (req, res) => {
       metadata,
       info,
       hasEmbeddingVector: embeddingCount > 0,
+      frameCount: Number(row.frame_count || 0),
       embeddingCount,
       embeddingModel: row.embedding_model || null,
       embeddingInput: parseJsonValue(row.embedding_input),
@@ -576,18 +597,9 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
       return res.status(404).json({ error: "No extracted asset for this instance" });
     }
 
-    // Parse GCS path (gs://bucket/object/path)
-    const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
-    if (!gsMatch) {
-      return res.status(400).json({ error: `Invalid GCS path: ${filePath}` });
-    }
-
-    const bucket = gsMatch[1];
-    const object = gsMatch[2];
-
     try {
-      const [buffer] = await storage.bucket(bucket).file(object).download();
-      
+      const buffer = await fetchAssetBuffer(filePath);
+
       // For image formats, return as base64
       if (mimeType.startsWith("image/")) {
         return res.json({
@@ -613,7 +625,7 @@ app.get("/studies/:studyUid/series/:seriesUid/instances/:sopInstanceUid/render",
         dataBase64: buffer.toString("base64"),
       });
     } catch (error) {
-      return res.status(500).json({ error: `Failed to download content: ${error?.message}` });
+      return res.status(error?.statusCode || 500).json({ error: `Failed to fetch content: ${error?.message}` });
     }
   } catch (error) {
     console.error("Render error:", error);
@@ -720,16 +732,8 @@ app.get("/api/embeddings/:embeddingId/render", async (req, res) => {
       return res.status(404).json({ error: "No asset for this embedding" });
     }
 
-    const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
-    if (!gsMatch) {
-      return res.status(400).json({ error: `Invalid GCS path: ${filePath}` });
-    }
-
-    const bucket = gsMatch[1];
-    const object = gsMatch[2];
-
     try {
-      const [buffer] = await storage.bucket(bucket).file(object).download();
+      const buffer = await fetchAssetBuffer(filePath);
 
       if (mimeType.startsWith("image/")) {
         return res.json({
@@ -745,7 +749,7 @@ app.get("/api/embeddings/:embeddingId/render", async (req, res) => {
         dataBase64: buffer.toString("base64"),
       });
     } catch (error) {
-      return res.status(500).json({ error: `Failed to download content: ${error?.message}` });
+      return res.status(error?.statusCode || 500).json({ error: `Failed to fetch content: ${error?.message}` });
     }
   } catch (error) {
     console.error("Render embedding error:", error);
@@ -952,8 +956,23 @@ app.post("/api/studies/reprocess", async (req, res) => {
 
     for (let i = 0; i < uniqueObjects.length; i++) {
       const entry = uniqueObjects[i];
+      const filePath = entry.basePath;
       try {
-        const filePath = entry.basePath;
+        // Synthesize a fresh generation for this reprocess request instead of
+        // forwarding the original generation, so a deliberate reprocess can't
+        // be mistaken for a redelivery of the original finalize event. For GCS
+        // rows the original generation is still preserved as a separate attribute.
+        const syntheticGeneration = buildReprocessGeneration(reprocessBatchStamp, i);
+
+        // Local rows (created by `dcm2bq index`) have no Pub/Sub pipeline; POST
+        // the synthetic event directly to the locally running dcm2bq service.
+        if (isFileUri(filePath)) {
+          await postLocalReprocess(CONFIG.dcm2bqServiceUrl, filePath, syntheticGeneration);
+          succeeded++;
+          console.log(`Reprocessing triggered (local): ${filePath}`);
+          continue;
+        }
+
         // Parse normalized GCS path (gs://bucket/object/path)
         const gsMatch = filePath.match(/^gs:\/\/([^/]+)\/(.+)$/);
 
@@ -965,12 +984,6 @@ app.post("/api/studies/reprocess", async (req, res) => {
 
         const bucket = gsMatch[1];
         const object = gsMatch[2];
-
-        // Synthesize a fresh generation for this reprocess request instead of
-        // forwarding the original GCS generation, so a deliberate reprocess can't
-        // be mistaken for Pub/Sub redelivering the original finalize event. The
-        // original generation is still preserved as a separate attribute below.
-        const syntheticGeneration = buildReprocessGeneration(reprocessBatchStamp, i);
 
         await publishGcsRequeueMessage(
           REQUEUE_TOPIC,

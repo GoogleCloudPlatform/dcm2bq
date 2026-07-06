@@ -1012,7 +1012,7 @@
           };
           const hasAllUIDs = dicomUIDs.studyUid && dicomUIDs.seriesUid && dicomUIDs.sopInstanceUid;
           const contentKind = inferContentKind(item);
-          const isMultiframe = contentKind === 'image' && hasAllUIDs && (item.embeddingCount || 0) > 1;
+          const isMultiframe = contentKind === 'image' && hasAllUIDs && (item.frameCount || item.embeddingCount || 0) > 1;
 
           if (isMultiframe) {
             const framesResult = await wsCall('instances.frames', dicomUIDs);

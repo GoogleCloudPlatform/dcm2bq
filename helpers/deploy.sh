@@ -240,6 +240,7 @@ fi
 # 7. Update test/testconfig.json
 DATASET_ID=$(terraform output -raw bq_dataset_id)
 TABLE_ID=$(terraform output -raw bq_instances_table_id)
+EMBEDDINGS_TABLE_ID=$(terraform output -raw bq_embeddings_table_id 2>/dev/null || echo "embeddings")
 DICOM_BUCKET=$(terraform output -raw gcs_bucket_name)
 PROCESSED_DATA_BUCKET=$(terraform output -raw gcs_processed_data_bucket_name 2>/dev/null || true)
 PUBSUB_TOPIC=$(terraform output -raw pubsub_topic_name 2>/dev/null || echo "dcm2bq-gcs-events")
@@ -255,7 +256,7 @@ if [ ! -f "$TEST_CONFIG_FILE" ]; then
 fi
 
 # Build the jq filter based on embedding configuration
-JQ_FILTER='.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.instancesTableId = $table_id | .gcpConfig.gcs_bucket_name = $dicom_bucket | .projectId = $project_id | .bucketName = $dicom_bucket | .datasetId = $dataset_id | .topicName = $topic_name | .deadLetterTopicName = $dead_letter_topic | .deadLetterTableId = $dead_letter_table_id | .gcpConfig.location = $region'
+JQ_FILTER='.gcpConfig.projectId = $project_id | .gcpConfig.bigQuery.datasetId = $dataset_id | .gcpConfig.bigQuery.instancesTableId = $table_id | .gcpConfig.bigQuery.embeddingsTableId = $embeddings_table_id | .gcpConfig.gcs_bucket_name = $dicom_bucket | .projectId = $project_id | .bucketName = $dicom_bucket | .datasetId = $dataset_id | .topicName = $topic_name | .deadLetterTopicName = $dead_letter_topic | .deadLetterTableId = $dead_letter_table_id | .gcpConfig.location = $region'
 
 # Add embedding-related updates to the filter
 if [ "$CREATE_EMBEDDING_INPUT" == "true" ]; then
@@ -274,6 +275,7 @@ jq \
   --arg project_id "$PROJECT_ID" \
   --arg dataset_id "$DATASET_ID" \
   --arg table_id "$TABLE_ID" \
+  --arg embeddings_table_id "$EMBEDDINGS_TABLE_ID" \
   --arg dicom_bucket "$DICOM_BUCKET" \
   --arg gcs_bucket_path "gs://${PROCESSED_DATA_BUCKET}" \
   --arg topic_name "$PUBSUB_TOPIC" \

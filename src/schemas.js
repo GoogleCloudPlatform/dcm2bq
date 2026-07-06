@@ -74,6 +74,12 @@ addSchema(
         }
       },
       dicomParser: { type: "object" },
+      localConfig: {
+        type: "object",
+        properties: {
+          rootPath: { type: "string" },
+        },
+      },
       jsonOutput: {
         type: "object",
         properties: {
@@ -119,6 +125,35 @@ addSchema(
     },
   },
   consts.GCS_PUBSUB_UNWRAP
+);
+
+// Synthetic push envelope for locally ingested files (created by `dcm2bq index`
+// or the admin-console local reprocess). Mirrors the GCS envelope shape, but the
+// data payload carries an absolute local file path instead of bucket/object.
+addSchema(
+  {
+    type: "object",
+    required: ["message"],
+    properties: {
+      message: {
+        type: "object",
+        required: ["attributes", "data"],
+        properties: {
+          attributes: {
+            type: "object",
+            required: ["eventType"],
+            properties: {
+              eventType: { enum: consts.LOCAL_EVENT_TYPES },
+            },
+          },
+          data: {
+            type: "string",
+          },
+        },
+      },
+    },
+  },
+  consts.LOCAL_PUBSUB_UNWRAP
 );
 
 // Conforms to https://cloud.google.com/healthcare-api/docs/concepts/pubsub

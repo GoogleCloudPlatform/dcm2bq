@@ -238,6 +238,10 @@ function getConfig(options = {}) {
       adminCfg.requeueTopic = process.env.PUBSUB_REQUEUE_TOPIC;
     }
 
+    // Local mode settings (rows created by `dcm2bq index` with file:// paths)
+    adminCfg.localRootPath = process.env.DCM2BQ_LOCAL_ROOT || adminCfg.localRootPath || "";
+    adminCfg.dcm2bqServiceUrl = process.env.DCM2BQ_SERVICE_URL || adminCfg.dcm2bqServiceUrl || "";
+
     // Validate required fields
     if (!adminCfg.projectId) {
       throw new Error(

@@ -31,12 +31,14 @@ The admin console is a standalone UI for exploring DICOM studies and instance da
 - Set `BQ_LOCATION` to match your BigQuery dataset location (e.g., `US`, `EU`, `us-central1`). Defaults to `US`.
 - Set `PUBSUB_REQUEUE_TOPIC` to the ingest Pub/Sub topic that pushes into dcm2bq (defaults to `dcm2bq-gcs-events`).
 - Set `GCS_BUCKET_NAME` (or `ADMIN_UPLOAD_GCS_BUCKET`) to the source DICOM bucket used by your dcm2bq pipeline. The Upload tab writes files to this bucket.
+- Local mode (rows created by `dcm2bq index` with `file://` paths): set `DCM2BQ_SERVICE_URL` to the locally running dcm2bq service so reprocess POSTs there instead of publishing to Pub/Sub. `DCM2BQ_LOCAL_ROOT` is optional — when set, asset reads are restricted to that directory; when unset, any accessible path is served.
 
 ### Local development
 
 - `npm run dev` runs with `NODE_ENV=test` (to reuse local test config), but defaults `BQ_INSTANCES_VIEW_ID` to `instancesView` so queries use the view instead of raw `instances`.
 - To target a different view, set `BQ_INSTANCES_VIEW_ID` before running `npm run dev`.
 - If your BigQuery dataset is not in `US` region, set `BQ_LOCATION` environment variable or update `test/testconfig.json` with the correct location.
+- For fully local testing (local DICOM ingest via `dcm2bq index`), see "Local Mode" in the main [README](../README.md) and the "Local Mode: Service + Admin Console" VS Code compound launch configuration.
 
 ### Deployment (brief)
 

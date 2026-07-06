@@ -171,6 +171,23 @@ program
   });
 
 program
+  .command("index")
+  .description("index a local DICOM file or folder by posting synthetic events to a locally running dcm2bq service")
+  .argument("<inputPath>", "DICOM file or folder to index (.dcm, .dicom, .zip, .tar.gz, .tgz)")
+  .option("--service-url <url>", "URL of the running dcm2bq service (default: $DCM2BQ_SERVICE_URL or http://localhost:8080)")
+  .option("--force", "synthesize a fresh generation so unchanged files are reprocessed as new rows", false)
+  .option("--watch", "keep watching the folder and index new or changed files", false)
+  .action(async (inputPath, options) => {
+    const indexCommand = require("./index-command");
+    try {
+      await indexCommand.execute(inputPath, options);
+    } catch (error) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+  });
+
+program
   .command("process")
   .description("upload a DICOM file to GCS, process via deployed CloudRun, and retrieve results from BigQuery")
   .argument("<inputFile>", "DICOM file to process")

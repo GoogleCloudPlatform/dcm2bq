@@ -153,6 +153,33 @@ The workflow is as follows:
 
 The service also supports processing archives (`.zip`, `.tar.gz`, `.tgz`) containing multiple DICOM files. See [docs/ARCHIVE_SUPPORT.md](docs/ARCHIVE_SUPPORT.md) for details.
 
+### Local Mode (test the full pipeline without Pub/Sub)
+
+You can exercise the entire workflow on locally ingested files, without GCS/HCAPI notifications or Pub/Sub. Input is read from a local folder; metadata still goes to BigQuery, and generated assets go wherever the config points (GCS by default, or a local folder). A prior deployment is the prerequisite that creates the BigQuery dataset/tables and buckets.
+
+1. Start the service:
+
+    ```bash
+    DCM2BQ_CONFIG_FILE=test/testconfig.json dcm2bq service
+    ```
+
+    `DCM2BQ_LOCAL_ROOT` (or `localConfig.rootPath` in the config file) is optional. When set, the service restricts local file access to that directory — useful when the endpoint is reachable by others. When unset, any accessible path is accepted.
+
+2. Index a file or folder. This synthesizes push events (the same envelope shape Pub/Sub push delivers) and POSTs them to the running service:
+
+    ```bash
+    dcm2bq index /path/to/dicom               # one-shot: index all supported files recursively
+    dcm2bq index /path/to/dicom --watch       # keep watching for new or changed files
+    dcm2bq index /path/to/dicom --force       # reprocess unchanged files as new rows
+    dcm2bq index file.dcm --service-url http://localhost:8080
+    ```
+
+Rows created this way have `file://` paths and `info.input.type = "LOCAL"` in BigQuery. The event generation defaults to the file's mtime (in microseconds), mirroring GCS generation semantics: re-indexing an unchanged file is deduplicated, while a modified file lands as a new row.
+
+To keep extracted images/text local as well, set `gcpConfig.embedding.input.gcsBucketPath` to a `file:///path` URI instead of `gs://bucket/path`.
+
+The admin console also supports local rows: it reads `file://` assets from disk (optionally scoped to `DCM2BQ_LOCAL_ROOT`) and reprocesses them by POSTing directly to the service (set `DCM2BQ_SERVICE_URL`) instead of publishing to Pub/Sub. VS Code users can start both processes with the "Local Mode: Service + Admin Console" compound launch configuration.
+
 ### HTTP Service UI (local/admin usage)
 
 When running in HTTP service mode (`dcm2bq service [port]`), a static admin website is available at `/ui`.
@@ -204,6 +231,14 @@ dcm2bq extract test/files/dcm/sr.dcm
 ```
 
 If you do not pass `--summary`, the full extracted text will be saved (subject to length limits for embedding).
+
+**Example: Index a local file or folder through a locally running service**
+
+```bash
+dcm2bq index test/files/dcm --watch
+```
+
+This command posts synthetic events for each supported file (`.dcm`, `.dicom`, `.zip`, `.tar.gz`, `.tgz`) to a locally running `dcm2bq service`, which processes them through the full pipeline (parse, extract, embed, persist to BigQuery). With `--watch`, it keeps watching the folder and indexes new or changed files as they arrive. See [Local Mode](#local-mode-test-the-full-pipeline-without-pubsub) for setup.
 
 **Example: Process a DICOM file and retrieve results from BigQuery**
 

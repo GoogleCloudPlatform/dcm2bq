@@ -21,6 +21,7 @@ const { DEBUG_MODE, isRetryableError, createNonRetryableError } = require("./uti
 const { processImage, renderDicomImage, renderAllDicomFrames, getFrameIndicesToProcess } = require("./processors/image");
 const { processPdf } = require("./processors/pdf");
 const { processSR } = require("./processors/sr");
+const localfile = require("./localfile");
 
 const storage = new Storage();
 
@@ -93,6 +94,30 @@ async function doRequest(payload) {
 }
 
 /**
+ * Saves extracted image or text data to the configured embedding input location.
+ * Dispatches on the scheme of gcpConfig.embedding.input.gcsBucketPath: 'gs://...'
+ * saves to GCS, 'file://...' saves under a local directory.
+ * @param {Buffer|string} data - The data to save (image buffer or text content)
+ * @param {string} fileName - The file path within the output root (e.g., 'study/series/instance.jpg')
+ * @param {string} contentType - The MIME type of the file
+ * @param {string} subDirectory - Optional subdirectory within the base path (e.g., 'processed')
+ * @returns {Promise<string>} The URI (gs:// or file://) of the saved file
+ * @throws {Error} If the save operation fails
+ */
+async function saveOutput(data, fileName, contentType, subDirectory = '') {
+  const outputPath = gcpConfig.embedding?.input?.gcsBucketPath;
+  if (localfile.isFileUri(outputPath)) {
+    const relativePath = subDirectory ? `${subDirectory}/${fileName}` : fileName;
+    const uri = await localfile.saveToLocalPath(outputPath, data, relativePath);
+    if (DEBUG_MODE) {
+      console.log(`Saved file to ${uri}`);
+    }
+    return uri;
+  }
+  return saveToGCS(data, fileName, contentType, subDirectory);
+}
+
+/**
  * Saves extracted image or text data to a GCS bucket.
  * @param {Buffer|string} data - The data to save (image buffer or text content)
  * @param {string} fileName - The file path within the bucket (e.g., 'study/series/instance.jpg')
@@ -107,7 +132,7 @@ async function saveToGCS(data, fileName, contentType, subDirectory = '') {
   // Extract bucket name from GCS path (e.g., 'gs://bucket-name' from 'gs://bucket-name/path')
   const bucketMatch = gcsBucketPath.match(/^gs:\/\/([^\/]+)/);
   if (!bucketMatch) {
-    throw createNonRetryableError(`Invalid GCS bucket path format: '${gcsBucketPath}'. Expected 'gs://bucket-name/path'.`);
+    throw createNonRetryableError(`Invalid GCS bucket path format: '${gcsBucketPath}'. Expected 'gs://bucket-name/path' or 'file:///path'.`);
   }
 
   const bucketName = bucketMatch[1];
@@ -198,14 +223,14 @@ async function createEmbeddingInput(metadata, dicomInput) {
       const instance = { image: { bytesBase64Encoded: imageBuffer.toString("base64") } };
       const frameSuffix = frameCount > 1 ? `_frame${frameIndex}` : "";
       const fileName = `${studyUid}/${seriesUid}/${instanceUid}${frameSuffix}.jpg`;
-      const objectPath = await saveToGCS(imageBuffer, fileName, 'image/jpeg', '');
+      const objectPath = await saveOutput(imageBuffer, fileName, 'image/jpeg', '');
 
       results.push({
         instance,
         objectPath,
         objectSize: imageBuffer.length,
         objectMimeType: 'image/jpeg',
-        frameNumber: frameCount > 1 ? frameIndex : null,
+        frameNumber: frameCount > 1 ? frameIndex : 0,
       });
     }
 
@@ -226,8 +251,8 @@ async function createEmbeddingInput(metadata, dicomInput) {
     }
     const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
     const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
-    const objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
-    return [{ instance, objectPath, objectSize: textBuffer.length, objectMimeType: 'text/plain', frameNumber: null }];
+    const objectPath = await saveOutput(textBuffer, fileName, 'text/plain', '');
+    return [{ instance, objectPath, objectSize: textBuffer.length, objectMimeType: 'text/plain', frameNumber: 0 }];
   } else if (isStructuredReport(sopClassUid)) {
     const instance = await processSR(metadata, requireEmbeddingCompatible);
     if (!instance?.text) {
@@ -235,8 +260,8 @@ async function createEmbeddingInput(metadata, dicomInput) {
     }
     const textBuffer = Buffer.isBuffer(instance.text) ? instance.text : Buffer.from(instance.text);
     const fileName = `${studyUid}/${seriesUid}/${instanceUid}.txt`;
-    const objectPath = await saveToGCS(textBuffer, fileName, 'text/plain', '');
-    return [{ instance, objectPath, objectSize: textBuffer.length, objectMimeType: 'text/plain', frameNumber: null }];
+    const objectPath = await saveOutput(textBuffer, fileName, 'text/plain', '');
+    return [{ instance, objectPath, objectSize: textBuffer.length, objectMimeType: 'text/plain', frameNumber: 0 }];
   } else {
     if (DEBUG_MODE) {
       console.log(`Skipping embedding generation for unsupported SOP Class UID ${sopClassUid}.`);
@@ -344,4 +369,4 @@ async function createVectorEmbedding(metadata, dicomInput) {
   }
 }
 
-module.exports = { createVectorEmbedding, createEmbeddingInput, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS };
+module.exports = { createVectorEmbedding, createEmbeddingInput, isImage, isPdf, isStructuredReport, SOP_CLASS_UIDS, doRequest, saveToGCS, saveOutput };

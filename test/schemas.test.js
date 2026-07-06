@@ -25,9 +25,10 @@ const hcapiPubSubUnwrapExample = require("./files/json/hcapi_pubsub.json");
 describe("schemas", () => {
   it("getSchema", () => {
     const eventHandlerSchemas = consts.EVENT_HANDLER_NAMES;
-    assert.ok(eventHandlerSchemas.length == 2);
-    const result = getSchema(eventHandlerSchemas[0]);
-    assert.ok(result);
+    assert.ok(eventHandlerSchemas.length == 3);
+    for (const name of eventHandlerSchemas) {
+      assert.ok(getSchema(name));
+    }
   });
 
   it("matchEventSchema (GCS Pub/Sub unwrap)", () => {
@@ -40,6 +41,25 @@ describe("schemas", () => {
     const data = hcapiPubSubUnwrapExample;
     const result = matchEventSchema(data);
     assert.ok(result);
+  });
+
+  it("matchEventSchema (local Pub/Sub unwrap)", () => {
+    const data = {
+      message: {
+        messageId: "local-123",
+        attributes: { eventType: consts.LOCAL_FINALIZE },
+        data: Buffer.from(JSON.stringify({ name: "/data/dicom/file.dcm", size: 1234, generation: "1700000000000000" })).toString("base64"),
+      },
+      subscription: "local",
+    };
+    const result = matchEventSchema(data);
+    assert.equal(result, consts.LOCAL_PUBSUB_UNWRAP);
+  });
+
+  it("matchEventSchema (HCAPI not shadowed by local schema)", () => {
+    // HCAPI messages have no eventType attribute and must still route to HCAPI.
+    const result = matchEventSchema(hcapiPubSubUnwrapExample);
+    assert.equal(result, consts.HCAPI_PUBSUB_UNWRAP);
   });
 
   it("matchEventSchema (fail)", () => {

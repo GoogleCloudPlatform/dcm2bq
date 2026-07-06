@@ -88,7 +88,7 @@ describe("eventhandlers", () => {
       objectPath: "gs://mock-bucket/path/to/file.jpg",
       objectSize: 1024,
       objectMimeType: "image/jpeg",
-      frameNumber: null,
+      frameNumber: 0,
     }]);
     eventhandlers = require("../src/eventhandlers");
   });
@@ -113,7 +113,7 @@ describe("eventhandlers", () => {
       objectPath: "gs://mock-bucket/path/to/file.jpg",
       objectSize: 1024,
       objectMimeType: "image/jpeg",
-      frameNumber: null,
+      frameNumber: 0,
     }]);
   });
 
@@ -398,6 +398,52 @@ describe("eventhandlers", () => {
       const row = bqInsertStub.getCall(0).args[0];
       assert.ok(row.metadata, "Should persist metadata");
       assert.ok(!row.embeddingVector, "Should not persist embedding vector when embedding generation fails");
+    });
+
+    it("should persist embedding input (rendered image/text) even when no embedding vector was generated", async function() {
+      this.timeout(5000);
+
+      const dcmPath = path.join(__dirname, "files/dcm/ct.dcm");
+      const dcmBuffer = fs.readFileSync(dcmPath);
+      mockFile.download.resetHistory();
+      currentDownloadBuffer = dcmBuffer;
+
+      // Simulate the "input created, but no vector" scenario (e.g. vector generation
+      // wasn't configured, or the model call didn't happen) by omitting `embedding`.
+      createVectorEmbeddingStub.resolves([{
+        objectPath: "gs://mock-bucket/path/to/file.jpg",
+        objectSize: 1024,
+        objectMimeType: "image/jpeg",
+        frameNumber: 0,
+      }]);
+
+      const ctx = {
+        message: {
+          attributes: {
+            eventType: "OBJECT_FINALIZE",
+            bucketId: "test-bucket",
+            objectId: "ct.dcm"
+          },
+          data: Buffer.from(JSON.stringify({
+            bucket: "test-bucket",
+            name: "ct.dcm",
+            generation: "123456"
+          })).toString("base64")
+        }
+      };
+
+      const perfCtx = {
+        addRef: sinon.stub()
+      };
+
+      await eventhandlers.handleEvent(consts.GCS_PUBSUB_UNWRAP, { body: ctx }, { perfCtx });
+
+      assert.strictEqual(bqInsertEmbeddingsStub.callCount, 1, "Should persist an embeddings-table row for the embedding input");
+      const embeddingRows = bqInsertEmbeddingsStub.getCall(0).args[0];
+      assert.strictEqual(embeddingRows.length, 1);
+      assert.deepStrictEqual(embeddingRows[0].embeddingVector, [], "Embedding vector should be empty when none was generated");
+      assert.strictEqual(embeddingRows[0].info.model, null, "Model should be null when no vector was generated");
+      assert.strictEqual(embeddingRows[0].info.input.path, "gs://mock-bucket/path/to/file.jpg", "Should persist the embedding input path");
     });
 
     it("should fail and not persist when embedding fails with retryable error", async function() {

@@ -252,7 +252,8 @@ resource "google_bigquery_table" "instances_view" {
       embedding_info AS (
         SELECT
           instanceId,
-          COUNT(*) AS embedding_count,
+          COUNT(*) AS frame_count,
+          COUNTIF(ARRAY_LENGTH(embeddingVector) > 0) AS embedding_count,
           ARRAY_AGG(info ORDER BY COALESCE(frameNumber, 0) ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_embedding_info
         FROM
           `${google_bigquery_dataset.dicom_dataset.dataset_id}.${google_bigquery_table.embeddings_view.table_id}`
@@ -261,6 +262,7 @@ resource "google_bigquery_table" "instances_view" {
       )
       SELECT
         l.* EXCEPT(_row_id),
+        COALESCE(ei.frame_count, 0) AS frame_count,
         COALESCE(ei.embedding_count, 0) AS embedding_count,
         ei.first_embedding_info.model AS embedding_model,
         ei.first_embedding_info.input AS embedding_input
