@@ -280,43 +280,70 @@ app.post("/api/studies/search", async (req, res) => {
     const viewTable = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.instancesViewId}\``;
     const searchFilter = buildSearchFilter(key, value);
 
-    const studyUidExpr = `NULLIF(TRIM(JSON_VALUE(metadata, '$.StudyInstanceUID')), '')`;
+    const studyUidExpr = `NULLIF(TRIM(JSON_VALUE(meta.metadata, '$.StudyInstanceUID')), '')`;
+
+    let fromClause = `${viewTable} AS meta`;
+    let whereClause = searchFilter.whereClause || "1=1";
+    let finalOrderByClause = orderByClause;
+
+    if (searchFilter.isVectorSearch) {
+      const embeddingsView = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingsViewId}\``;
+      const modelId = `\`${CONFIG.projectId}.${CONFIG.datasetId}.${CONFIG.embeddingModelId}\``;
+
+      fromClause = `
+        ${viewTable} AS meta
+        JOIN VECTOR_SEARCH(
+          TABLE ${embeddingsView},
+          'embeddingVector',
+          (
+            SELECT ml_generate_embedding_result
+            FROM ML.GENERATE_EMBEDDING(
+              MODEL ${modelId},
+              (SELECT @value AS content)
+            )
+          ),
+          top_k => 1000
+        ) AS vectorSearch ON meta.id = vectorSearch.base.instanceId
+      `;
+      // Vector search overrides sorting by distance first
+      finalOrderByClause = `MIN(vectorSearch.distance) ASC, ${orderByClause}`;
+    }
 
     const studiesQuery = `
       SELECT
         ${studyUidExpr} as study_id,
-        MAX(timestamp) as max_timestamp,
-        COUNT(*) as instance_count,
-        COUNT(DISTINCT COALESCE(JSON_VALUE(metadata, '$.SeriesInstanceUID'), 'UNKNOWN')) as series_count,
-        ANY_VALUE(JSON_VALUE(metadata, '$.PatientName')) as patient_name,
-        ANY_VALUE(JSON_VALUE(metadata, '$.PatientID')) as patient_id,
-        ANY_VALUE(JSON_VALUE(metadata, '$.AccessionNumber')) as accession_number,
-        ANY_VALUE(JSON_VALUE(metadata, '$.ReferringPhysicianName')) as referring_physician_name,
-        ANY_VALUE(JSON_VALUE(metadata, '$.InstitutionName')) as institution_name,
-        ANY_VALUE(JSON_VALUE(metadata, '$.StudyDate')) as study_date,
-        ANY_VALUE(JSON_VALUE(metadata, '$.StudyTime')) as study_time,
-        ANY_VALUE(JSON_VALUE(metadata, '$.StudyDescription')) as study_description,
+        MAX(meta.timestamp) as max_timestamp,
+        COUNT(DISTINCT meta.id) as instance_count,
+        COUNT(DISTINCT COALESCE(JSON_VALUE(meta.metadata, '$.SeriesInstanceUID'), 'UNKNOWN')) as series_count,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.PatientName')) as patient_name,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.PatientID')) as patient_id,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.AccessionNumber')) as accession_number,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.ReferringPhysicianName')) as referring_physician_name,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.InstitutionName')) as institution_name,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.StudyDate')) as study_date,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.StudyTime')) as study_time,
+        ANY_VALUE(JSON_VALUE(meta.metadata, '$.StudyDescription')) as study_description,
         ARRAY_TO_STRING(
           ARRAY_AGG(
-            DISTINCT NULLIF(UPPER(TRIM(JSON_VALUE(metadata, '$.Modality'))), '')
+            DISTINCT NULLIF(UPPER(TRIM(JSON_VALUE(meta.metadata, '$.Modality'))), '')
             IGNORE NULLS
           ),
           ', '
         ) as study_modalities
-      FROM ${viewTable}
-      WHERE ${searchFilter.whereClause}
+      FROM ${fromClause}
+      WHERE ${whereClause}
         AND ${studyUidExpr} IS NOT NULL
       GROUP BY study_id
-      ORDER BY ${orderByClause}
+      ORDER BY ${finalOrderByClause}
       LIMIT @studyLimit OFFSET @studyOffset
     `;
 
     const totalsQuery = `
       SELECT
-        COUNT(*) as totalInstances,
+        COUNT(DISTINCT meta.id) as totalInstances,
         COUNT(DISTINCT ${studyUidExpr}) as totalStudies
-      FROM ${viewTable}
-      WHERE ${searchFilter.whereClause}
+      FROM ${fromClause}
+      WHERE ${whereClause}
         AND ${studyUidExpr} IS NOT NULL
     `;
 
@@ -1635,7 +1662,7 @@ function buildSearchFilter(key, value) {
   const allowedKeys = new Set([
     "PatientID", "PatientName", "StudyInstanceUID", "AccessionNumber",
     "ReferringPhysicianName", "InstitutionName", "Modality", "StudyDate",
-    "StudyDescription", "SeriesDescription",
+    "StudyDescription", "SeriesDescription", "Embedding",
   ]);
 
   if (!allowedKeys.has(key)) {
@@ -1653,6 +1680,16 @@ function buildSearchFilter(key, value) {
   }
 
   const rawValue = String(value);
+
+  if (key === "Embedding") {
+    return {
+      isVectorSearch: true,
+      params: {
+        value: rawValue,
+      },
+    };
+  }
+
   const lowerValue = rawValue.toLowerCase();
   // Escape special characters for regex literal match
   const escapedValue = rawValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1661,11 +1698,11 @@ function buildSearchFilter(key, value) {
   // Build the where clause
   let whereClause;
   if (key === "Modality") {
-    whereClause = `UPPER(TRIM(JSON_VALUE(metadata, '$.${key}'))) = UPPER(@value)`;
+    whereClause = `UPPER(TRIM(JSON_VALUE(meta.metadata, '$.${key}'))) = UPPER(@value)`;
   } else if (key === "StudyDate") {
-    whereClause = `REGEXP_CONTAINS(CAST(JSON_VALUE(metadata, '$.${key}') AS STRING), CONCAT('.*', @valueRegex, '.*'))`;
+    whereClause = `REGEXP_CONTAINS(CAST(JSON_VALUE(meta.metadata, '$.${key}') AS STRING), CONCAT('.*', @valueRegex, '.*'))`;
   } else {
-    whereClause = `REGEXP_CONTAINS(LOWER(JSON_VALUE(metadata, '$.${key}')), CONCAT('.*', @valueRegexLower, '.*'))`;
+    whereClause = `REGEXP_CONTAINS(LOWER(JSON_VALUE(meta.metadata, '$.${key}')), CONCAT('.*', @valueRegexLower, '.*'))`;
   }
 
   return {

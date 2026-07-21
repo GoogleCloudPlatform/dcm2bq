@@ -42,6 +42,9 @@ module.exports = {
     // BigQuery deduplicated embeddings view ID (read path; one row per frame even after reprocessing)
     embeddingsViewId: process.env.BQ_EMBEDDINGS_VIEW_ID || "embeddingsView",
 
+    // BigQuery model ID for vector search
+    embeddingModelId: process.env.BQ_EMBEDDING_MODEL_ID || "embedding_model",
+
     // BigQuery location (must match dataset location)
     bqLocation: process.env.BQ_LOCATION || "US",
 

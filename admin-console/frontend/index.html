@@ -40,8 +40,20 @@
     <section id="instances" class="panel active">
       <div class="row section-toolbar" style="margin-bottom: 0;" id="instances-toolbar">
         <div class="toolbar-cell search-cell">
-          <input id="search-key" value="PatientID" placeholder="key (e.g. PatientID, metadata.PatientName, info.event, path)" style="min-width:300px" onkeypress="if(event.key==='Enter') runSearch()" />
-          <input id="search-value" placeholder="value" style="min-width:220px" onkeypress="if(event.key==='Enter') runSearch()" />
+          <select id="search-key" style="min-width:180px">
+            <option value="PatientID" selected>PatientID</option>
+            <option value="PatientName">PatientName</option>
+            <option value="StudyInstanceUID">StudyInstanceUID</option>
+            <option value="AccessionNumber">AccessionNumber</option>
+            <option value="ReferringPhysicianName">ReferringPhysicianName</option>
+            <option value="InstitutionName">InstitutionName</option>
+            <option value="Modality">Modality</option>
+            <option value="StudyDate">StudyDate</option>
+            <option value="StudyDescription">StudyDescription</option>
+            <option value="SeriesDescription">SeriesDescription</option>
+            <option value="Embedding">Embedding (Semantic Search)</option>
+          </select>
+          <input id="search-value" placeholder="value / search text" style="min-width:320px" onkeypress="if(event.key==='Enter') runSearch()" />
           <button class="primary" id="search-btn">Search</button>
         </div>
         <div class="toolbar-cell bulk-cell">
