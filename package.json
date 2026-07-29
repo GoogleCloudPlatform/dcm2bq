@@ -19,6 +19,7 @@
     "@google-cloud/pubsub": "^5.2.0",
     "@google-cloud/storage": "^7.17.0",
     "@google/genai": "^2.0.0",
+    "@pohcee/dcmnorm-node": "file:dcmnorm/bindings/node",
     "adm-zip": "^0.6.0",
     "ajv": "^8.17.1",
     "commander": "^15.0.0",

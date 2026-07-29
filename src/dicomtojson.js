@@ -14,14 +14,8 @@
  limitations under the License.
  */
 
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
 const { fileURLToPath } = require("url");
-const { execFileSync } = require("child_process");
-
-const DCMNORM_PATH = process.env.DCM2BQ_DCMNORM_PATH || "dcmnorm";
-let dcmnormVersionCache;
+const { readJson } = require("@pohcee/dcmnorm-node");
 
 const FILE_META_HEADER_KEYS = new Set([
   "FileMetaInformationGroupLength",
@@ -43,103 +37,25 @@ function isPlainObject(value) {
 }
 
 function getDcmnormVersion() {
-  if (dcmnormVersionCache !== undefined) {
-    return dcmnormVersionCache;
-  }
-
   try {
-    const versionText = execFileSync(DCMNORM_PATH, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
-    dcmnormVersionCache = String(versionText).trim() || "unknown";
+    const pkg = require("@pohcee/dcmnorm-node/package.json");
+    return pkg.version || "unknown";
   } catch (error) {
-    dcmnormVersionCache = "unavailable";
+    return "unavailable";
   }
-
-  return dcmnormVersionCache;
 }
 
-function parseDicomFileWithDcmnorm(inputPath) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm2bq-parse-"));
-  const outputPath = path.join(tempDir, "output.json");
-
+async function parseDicomFileWithDcmnorm(inputPath) {
   try {
-    const stdout = execFileSync(DCMNORM_PATH, [inputPath, outputPath, "--format", "flat", "--bulk-data", "uri"], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    const stdoutText = stdout ? String(stdout).trim() : "";
-    if (stdoutText) {
-      try {
-        return JSON.parse(stdoutText);
-      } catch (stdoutParseError) {
-        // Fall back to file output for dcmnorm builds that emit non-JSON stdout noise.
-      }
-    }
-
-    let outputText = "";
-    try {
-      outputText = fs.readFileSync(outputPath, "utf8");
-    } catch (readError) {
-      if (stdoutText) {
-        return JSON.parse(stdoutText);
-      }
-      throw readError;
-    }
-
-    if (!outputText.trim() && stdoutText) {
-      return JSON.parse(stdoutText);
-    }
-
-    return JSON.parse(outputText);
+    const jsonText = await readJson(inputPath, { format: "flat", bulkData: "uri" });
+    return typeof jsonText === "string" ? JSON.parse(jsonText) : jsonText;
   } catch (error) {
     const details = [];
-    details.push(`dcmnormPath=${DCMNORM_PATH}`);
-    details.push(`dcmnormVersion=${getDcmnormVersion()}`);
-
-    if (error && typeof error === "object") {
-      if (error.code) {
-        details.push(`code=${error.code}`);
-      }
-      if (Number.isInteger(error.status)) {
-        details.push(`exit=${error.status}`);
-      }
-      if (error.signal) {
-        details.push(`signal=${error.signal}`);
-      }
-      if (error.path) {
-        details.push(`path=${error.path}`);
-      }
-
-      const stderr = error.stderr ? String(error.stderr).trim() : "";
-      const stdout = error.stdout ? String(error.stdout).trim() : "";
-      if (stderr) {
-        details.push(`stderr=${JSON.stringify(stderr.slice(0, 1000))}`);
-      }
-      if (stdout) {
-        details.push(`stdout=${JSON.stringify(stdout.slice(0, 300))}`);
-      }
+    if (error && typeof error === "object" && error.message) {
+      details.push(error.message);
     }
-
-    if (error instanceof SyntaxError) {
-      details.push(`jsonError=${JSON.stringify(error.message)}`);
-      try {
-        if (fs.existsSync(outputPath)) {
-          const outputText = fs.readFileSync(outputPath, "utf8");
-          details.push(`outputBytes=${outputText.length}`);
-          if (outputText.trim()) {
-            details.push(`outputPreview=${JSON.stringify(outputText.slice(0, 300))}`);
-          }
-        } else {
-          details.push("outputMissing=true");
-        }
-      } catch (readError) {
-        details.push(`outputReadError=${JSON.stringify(String(readError))}`);
-      }
-    }
-
     const detail = details.length > 0 ? ` (${details.join(", ")})` : "";
     throw new Error(`Failed to parse DICOM with dcmnorm${detail}`);
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -225,13 +141,13 @@ class DicomFile {
     this.parserOptions = parserOptions;
   }
 
-  parse() {
+  async parse() {
     const inputPath = fileURLToPath(this.url);
     return parseDicomFileWithDcmnorm(inputPath);
   }
 
-  toJson(outputOptions = {}) {
-    const parsed = this.parse();
+  async toJson(outputOptions = {}) {
+    const parsed = await this.parse();
     return filterByOutputOptions(parsed, outputOptions);
   }
 }

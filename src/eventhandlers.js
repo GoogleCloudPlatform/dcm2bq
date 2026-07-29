@@ -106,7 +106,7 @@ async function processDicom(dicomFilePath, uriPath) {
   try {
     const fileUrl = url.pathToFileURL(dicomFilePath);
     const reader = new DicomFile(fileUrl);
-    json = reader.toJson(outputOptions);
+    json = await reader.toJson(outputOptions);
   } catch (error) {
     // DICOM parsing errors are non-retryable - the file is permanently invalid
     const errorMsg = error instanceof Error ? error.message : String(error);

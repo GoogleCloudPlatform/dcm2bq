@@ -31,7 +31,7 @@ describe("embeddings", () => {
   let storageStub, doRequestStub, askGeminiStub;
   let processImage, processPdf, processSR, SOP_CLASS_UIDS, createVectorEmbedding, createEmbeddingInput;
 
-  const findAllTestDataBySopClass = (sopClassUids) => {
+  const findAllTestDataBySopClass = async (sopClassUids) => {
     if (!Array.isArray(sopClassUids)) {
       sopClassUids = [sopClassUids];
     }
@@ -40,7 +40,7 @@ describe("embeddings", () => {
       const buffer = fs.readFileSync(file);
       try {
         const reader = new DicomFile(pathToFileURL(path.resolve(file)));
-        const metadata = reader.toJson({ useCommonNames: true });
+        const metadata = await reader.toJson({ useCommonNames: true });
         if (sopClassUids.includes(metadata.SOPClassUID)) {
           testData.push({ buffer, metadata, file });
         }
@@ -51,7 +51,7 @@ describe("embeddings", () => {
     return testData;
   };
 
-  before(() => {
+  before(async () => {
     const c = config.get();
     const hasEmbeddingVector = c.gcpConfig.embedding?.input?.vector?.model;
     assert.ok(hasEmbeddingVector, "Embeddings need to be configured (embedding.input.vector.model)");
@@ -141,17 +141,9 @@ describe("embeddings", () => {
     ({ processSR } = require("../src/processors/sr"));
     ({ SOP_CLASS_UIDS, createVectorEmbedding, createEmbeddingInput } = require("../src/embeddings"));
 
-    imageTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
-    srTestData = findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
-    pdfTestData = findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
-  });
-
-  before(function () {
-    const dcmnormPath = process.env.DCM2BQ_DCMNORM_PATH || "dcmnorm";
-    const probe = spawnSync(dcmnormPath, ["--version"], { stdio: "ignore" });
-    if (probe.status !== 0) {
-      this.skip();
-    }
+    imageTestData = await findAllTestDataBySopClass(SOP_CLASS_UIDS.IMAGE_SOP_CLASSES);
+    srTestData = await findAllTestDataBySopClass([SOP_CLASS_UIDS.BASIC_TEXT_SR, SOP_CLASS_UIDS.ENHANCED_SR, SOP_CLASS_UIDS.COMPREHENSIVE_SR]);
+    pdfTestData = await findAllTestDataBySopClass(SOP_CLASS_UIDS.ENCAPSULATED_PDF);
   });
 
   describe("processors", () => {

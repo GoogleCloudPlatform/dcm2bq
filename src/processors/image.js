@@ -14,12 +14,10 @@
  limitations under the License.
  */
 
-const { execFile } = require("child_process");
-const { mkdtemp, writeFile, readFile, readdir, rm } = require("fs/promises");
+const { renderFrame } = require("@pohcee/dcmnorm-node");
+const { mkdtemp, writeFile, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
-
-// TODO[P1]: Replace shell wrapper with direct in-process rendering if a stable library becomes available.
 
 // Supported transfer syntaxes for image rendering
 const SUPPORTED_TRANSFER_SYNTAXES = new Set([
@@ -62,8 +60,7 @@ function getFrameIndicesToProcess(numFrames, maxFrames) {
 }
 
 /**
- * Renders a DICOM image to a JPG buffer by wrapping the convert_dcm_to_jpg.sh script.
- * This requires dcmnorm to be installed in the execution environment.
+ * Renders a DICOM image to a JPG buffer using native dcmnorm node bindings.
  * @param {Object} metadata - DICOM metadata JSON
  * @param {Buffer|string} dicomInput - Raw DICOM file buffer or local DICOM file path
  * @param {number|null} frameIndex - 0-based frame index to render (null = auto-select middle frame)
@@ -77,55 +74,39 @@ async function renderDicomImage(metadata, dicomInput, frameIndex) {
 
   let tempDir;
   try {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-"));
-    const dicomPath = typeof dicomInput === "string" ? dicomInput : path.join(tempDir, "input.dcm");
-    const jpgPath = path.join(tempDir, "output.jpg");
-    const scriptPath = path.resolve(__dirname, "..", "..", "helpers", "convert_dcm_to_jpg.sh");
-
-    if (Buffer.isBuffer(dicomInput)) {
+    let dicomPath;
+    if (typeof dicomInput === "string") {
+      dicomPath = dicomInput;
+    } else if (Buffer.isBuffer(dicomInput)) {
+      tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-"));
+      dicomPath = path.join(tempDir, "input.dcm");
       await writeFile(dicomPath, dicomInput);
-    } else if (typeof dicomInput !== "string") {
+    } else {
       throw new Error("Expected dicom input to be a file path or Buffer");
     }
 
-    let frameArg = null;
+    let targetFrame = 0;
     if (frameIndex != null) {
-      frameArg = frameIndex;
+      targetFrame = frameIndex;
     } else {
       const numFrames = parseInt(metadata?.NumberOfFrames, 10);
       if (!isNaN(numFrames) && numFrames > 1) {
-        frameArg = Math.floor((numFrames - 1) / 2);
+        targetFrame = Math.floor((numFrames - 1) / 2);
       }
     }
 
-    const args = [dicomPath, jpgPath];
-    if (frameArg !== null) {
-      args.push(frameArg.toString());
-    }
-
-    await new Promise((resolve, reject) => {
-      execFile(scriptPath, args, (error, stdout, stderr) => {
-        if (error) {
-          console.error(JSON.stringify({
-            message: "convert_dcm_to_jpg.sh execution failed",
-            stderr,
-          }));
-          const enhancedError = new Error(error.message);
-          enhancedError.cause = error;
-          enhancedError.stderr = stderr;
-          return reject(enhancedError);
-        }
-        resolve(stdout);
-      });
+    const rendered = await renderFrame(dicomPath, {
+      format: "jpeg",
+      outputWidth: 512,
+      outputHeight: 512,
+      frameIndex: targetFrame,
     });
 
-    const jpgBuffer = await readFile(jpgPath);
-    return jpgBuffer;
+    return rendered && rendered.data ? rendered.data : null;
   } catch (error) {
     console.error(JSON.stringify({
       message: "Could not render DICOM image for embedding using dcmnorm renderer",
       error: error?.message || String(error),
-      stderr: error?.stderr || null,
     }));
     return null;
   } finally {
@@ -138,9 +119,9 @@ async function renderDicomImage(metadata, dicomInput, frameIndex) {
 }
 
 /**
- * Renders all frames of a multi-frame DICOM file in a single dcmnorm invocation.
+ * Renders all frames of a multi-frame DICOM file using native dcmnorm node bindings.
  * Returns an array of {frameIndex, buffer} sorted by frame index.
- * Only the frames in frameIndices are returned (others are discarded).
+ * Only the frames in frameIndices are returned.
  */
 async function renderAllDicomFrames(metadata, dicomInput, frameIndices) {
   const transferSyntax = metadata && metadata.TransferSyntaxUID;
@@ -151,48 +132,28 @@ async function renderAllDicomFrames(metadata, dicomInput, frameIndices) {
 
   let tempDir;
   try {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-all-"));
-    const dicomPath = typeof dicomInput === "string" ? dicomInput : path.join(tempDir, "input.dcm");
-    const jpgPath = path.join(tempDir, "output.jpg");
-    const scriptPath = path.resolve(__dirname, "..", "..", "helpers", "convert_dcm_to_jpg.sh");
-
-    if (Buffer.isBuffer(dicomInput)) {
+    let dicomPath;
+    if (typeof dicomInput === "string") {
+      dicomPath = dicomInput;
+    } else if (Buffer.isBuffer(dicomInput)) {
+      tempDir = await mkdtemp(path.join(os.tmpdir(), "dcm-render-all-"));
+      dicomPath = path.join(tempDir, "input.dcm");
       await writeFile(dicomPath, dicomInput);
-    } else if (typeof dicomInput !== "string") {
+    } else {
       throw new Error("Expected dicom input to be a file path or Buffer");
     }
 
-    await new Promise((resolve, reject) => {
-      execFile(scriptPath, [dicomPath, jpgPath, "--all-frames"], (error, stdout, stderr) => {
-        if (error) {
-          console.error(JSON.stringify({
-            message: "convert_dcm_to_jpg.sh --all-frames execution failed",
-            stderr,
-          }));
-          const enhancedError = new Error(error.message);
-          enhancedError.cause = error;
-          enhancedError.stderr = stderr;
-          return reject(enhancedError);
-        }
-        resolve(stdout);
-      });
-    });
-
-    // dcmnorm produces files like output_000001.jpg, output_000002.jpg, ... (1-based)
-    const wantedSet = new Set(frameIndices);
-    const files = await readdir(tempDir);
-    const frameFiles = files
-      .filter(f => f.startsWith("output_") && f.endsWith(".jpg"))
-      .sort();
-
     const results = [];
-    for (const file of frameFiles) {
-      const match = file.match(/^output_(\d+)\.jpg$/);
-      if (!match) continue;
-      const frameIndex = parseInt(match[1], 10) - 1; // dcmnorm is 1-based, we use 0-based
-      if (!wantedSet.has(frameIndex)) continue;
-      const buffer = await readFile(path.join(tempDir, file));
-      results.push({ frameIndex, buffer });
+    for (const frameIndex of frameIndices) {
+      const rendered = await renderFrame(dicomPath, {
+        format: "jpeg",
+        outputWidth: 512,
+        outputHeight: 512,
+        frameIndex,
+      });
+      if (rendered && rendered.data) {
+        results.push({ frameIndex, buffer: rendered.data });
+      }
     }
 
     return results;
@@ -200,7 +161,6 @@ async function renderAllDicomFrames(metadata, dicomInput, frameIndices) {
     console.error(JSON.stringify({
       message: "Could not render all DICOM frames using dcmnorm renderer",
       error: error?.message || String(error),
-      stderr: error?.stderr || null,
     }));
     return [];
   } finally {

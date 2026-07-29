@@ -1,319 +1,247 @@
 # DCM2BQ
 
+`DCM2BQ` (DICOM to BigQuery) is a tool and service for extracting metadata and generating vector embeddings from DICOM files (images, Structured Reports, PDFs) and loading both into Google BigQuery. It can be run as a standalone CLI or as a containerized Cloud Run service.
 
-`DCM2BQ` (DICOM to BigQuery) is a tool for extracting metadata and generating vector embeddings from DICOM files, loading both into Google BigQuery. It can be run as a standalone CLI or as a containerized service, making it easy to integrate into data pipelines.
+This open-source package can be used with either a [Google Cloud Healthcare API](https://cloud.google.com/healthcare-api) DICOM store or [Google Cloud Storage](https://cloud.google.com/storage) to extract metadata and generate embeddings for existing or new DICOM data.
 
-By generating vector embeddings for DICOM images, Structured Reports, and PDFs, DCM2BQ enables powerful semantic search and similarity-based retrieval across your medical imaging data. This allows you to find related studies, cases, or reports even when traditional metadata fields do not match exactly.
+## Table of Contents
 
-This open-source package can be used as an alternative to the DICOM metadata streaming feature in the [Google Cloud Healthcare API](https://cloud.google.com/healthcare-api), enabling similar functionality for DICOM data stored in [Google Cloud Storage](https://cloud.google.com/storage). It can also be used to complement a Healthcare API DICOM store by generating embeddings for existing or new data.
+- [Why DCM2BQ?](#why-dcm2bq)
+- [Features](#features)
+- [Installation & Setup](#installation--setup)
+  - [Dependencies](#dependencies)
+  - [Docker](#docker)
+  - [From Source (CLI)](#from-source-cli)
+- [Deployment with Terraform](#deployment-with-terraform)
+- [Usage](#usage)
+  - [As a Service (Cloud Run)](#as-a-service-cloud-run)
+  - [Local Mode](#local-mode-test-the-full-pipeline-without-pubsub)
+  - [As a CLI](#as-a-cli)
+  - [Admin Console & UI](#admin-console--ui)
+- [BigQuery Schema & Queries](#bigquery-schema--queries)
+  - [Tables & Views](#tables--views)
+  - [Example Queries](#example-queries)
+- [Configuration](#configuration)
+- [Development & Testing](#development--testing)
+  - [Running Unit Tests](#running-unit-tests)
+  - [Integration Tests](#integration-tests)
+- [Documentation](#documentation)
+- [Contributing & License](#contributing--license)
+
+---
 
 ## Why DCM2BQ?
 
-Traditional imaging systems like PACS and VNAs offer limited query capabilities over DICOM metadata. By ingesting the complete metadata and vector embeddings into [BigQuery](https://cloud.google.com/bigquery), you unlock powerful, large-scale analytics and insights from your imaging data.
+Traditional imaging systems (PACS and VNAs) offer limited query capabilities over DICOM metadata. By ingesting complete metadata and vector embeddings into [BigQuery](https://cloud.google.com/bigquery), you unlock powerful, large-scale analytics and similarity search across your imaging archive:
 
-**Benefits of Embedding-Based Search:**
+- **Beyond Exact Field Matching**: Find similar images, reports, or studies based on visual or textual content rather than matching exact metadata tags.
+- **Content-Based & Multi-Modal Retrieval**: Query across images, Structured Reports (SR), and PDFs using unified vector embeddings.
+- **Enhanced Research & Cohort Discovery**: Discover relevant cases that would be missed by traditional tag-based queries.
 
-- Go beyond exact field matching: Find similar images, reports, or studies based on visual or textual content, not just metadata.
-- Enable content-based retrieval: Search for "cases like this one" or "find similar findings" using embeddings.
-- Support multi-modal queries: Use embeddings from images, SRs, and PDFs for unified search across modalities.
-- Improve research, cohort discovery, and clinical decision support by surfacing relevant cases that would be missed by keyword or tag-based search alone.
+---
 
 ## Features
 
--   Parse DICOM Part 10 files.
--   Convert DICOM metadata to a flexible JSON representation.
--   Load DICOM metadata and vector embeddings into a BigQuery table.
--   Enable semantic and similarity search over your imaging archive using embeddings.
--   Run as a containerized service, ideal for event-driven pipelines.
--   Run as a command-line interface (CLI) for manual or scripted processing.
--   Handle Google Cloud Storage object lifecycle events (creation, deletion) to keep BigQuery synchronized.
--   Process zip and tar.gz/tgz archives containing multiple DICOM files with a single event.
--   Generate vector embeddings from DICOM images, Structured Reports, and encapsulated PDFs using Google's multi-modal embedding model.
--   Highly configurable to adapt to your needs.
+- **DICOM Parsing**: Parses DICOM Part 10 files using native [`dcmnorm`](https://github.com/pohcee/dcmnorm) Node.js bindings (`@pohcee/dcmnorm-node`).
+- **Vector Embeddings**: Generates multimodal embeddings for images (per-frame sampling for multi-frame/WSI), SR text, and encapsulated PDFs via Vertex AI.
+- **Event-Driven Service**: Containerized service responding to Cloud Storage and Healthcare API Pub/Sub lifecycle events (finalize, delete).
+- **Archive Support**: Extracts and processes DICOM files directly from `.zip`, `.tar.gz`, and `.tgz` archives.
+- **CLI & Local Mode**: Full command-line interface and offline local testing workflow.
+- **Admin Console**: Built-in web UI (`/ui`) and standalone admin web application.
 
-## BigQuery schema
+---
 
-The project uses two BigQuery tables: an **instances** table for DICOM metadata and a separate **embeddings** table for per-frame vector embeddings.
-
-### Instances table (`instances`)
-
-- `id`: STRING (REQUIRED) - Deterministic SHA256 hash of DICOM UIDs
-- `timestamp`: TIMESTAMP (REQUIRED) - When the record was written
-- `path`: STRING (REQUIRED) - Full path to the DICOM file
-- `version`: STRING (NULLABLE) - Object version identifier
-- `info`: RECORD (REQUIRED) - Processing metadata with structured fields:
-  - `event`: STRING - Event type (e.g., OBJECT_FINALIZE)
-  - `input`: RECORD - DICOM file metadata (size, type, storageClass)
-- `metadata`: JSON (NULLABLE) - Complete DICOM JSON metadata
-
-### Embeddings table (`embeddings`)
-
-Stores one row per embedding (one per frame for multi-frame DICOM images, one for SR/PDF):
-
-- `id`: STRING (REQUIRED) - Composite key `<instanceId>_<frameNumber>` (frame 0 for single-frame/text content), deterministic per frame
-- `instanceId`: STRING (REQUIRED) - Foreign key to the instances table
-- `timestamp`: TIMESTAMP (REQUIRED) - When the embedding was generated
-- `frameNumber`: INT64 (NULLABLE) - 0-based frame index (null for non-image content)
-- `info`: RECORD (NULLABLE) - Embedding metadata (model, input path/size/mimeType)
-- `embeddingVector`: FLOAT ARRAY - The vector embedding
-
-### Instances view (`instancesView`)
-
-A BigQuery view that resolves the latest row per instance (both tables are append-only, so reprocessing a file adds rows rather than replacing them) and joins in a count of embeddings per instance, exposing an `embedding_count` column.
-
-### Embeddings view (`embeddingsView`)
-
-A BigQuery view over the embeddings table that keeps only the latest row per embedding `id`, guaranteeing a single embedding per frame even after a file has been processed multiple times. Consumers should read per-frame embeddings through this view rather than the raw table.
-
-The Cloud Run service is configured with table IDs via `gcpConfig.bigQuery.instancesTableId` and `gcpConfig.bigQuery.embeddingsTableId` settings (see `config.defaults.js`). Use the `embeddingVector` column on the **embeddings** table when running vector searches or creating vector indexes.
-
-Note: the project includes sample DDL and queries — see `src/bq-samples.sql`.
-
-## Example queries
-
-You can find example queries and DDL for creating the embedding model and vector index in `src/bq-samples.sql`. The file includes:
-
-- example SELECTs against the instances and embeddings tables,
-- sample aggregation queries for vector search,
-- and DDL samples to create an embedding model and a vector index on the `embeddings.embeddingVector` column.
-
-Before running vector searches, ensure you have created the embedding model and vector index (the samples show how to do this with `bq query`).
-
-## Installation
+## Installation & Setup
 
 ### Dependencies
 
-`dcm2bq` uses [`dcmnorm`](https://github.com/pohcee/dcmnorm), a very fast, Rust-based DICOM parser and renderer.
+`DCM2BQ` uses [`dcmnorm`](https://github.com/pohcee/dcmnorm), a fast Rust-based DICOM parser and renderer included in this repository as a Git submodule. Native Node.js bindings (`@pohcee/dcmnorm-node`) provide in-process execution.
 
-For DICOM parsing and image rendering, `dcm2bq` relies on the external [`dcmnorm`](https://github.com/pohcee/dcmnorm) CLI binary in the execution environment.
-
-If you use MPEG4 rendering via `dcmnorm`, `ffmpeg` must also be installed and available on `PATH`.
-
-It is included in the provided Docker image. If you are building from source or running the CLI locally, you will need to install it manually.
-
-**On Debian/Ubuntu/macOS/Linux (recommended):**
-```bash
-curl -sSL pohcee.com/dcmnorm | sh
-```
+- **Node.js**: Version 18 or higher (v22+ recommended).
+- **ffmpeg** *(Optional)*: Required on `PATH` if using MPEG4 video rendering.
 
 ### Docker
 
-The service is distributed as a container image. You can find the latest releases on [Docker Hub](https://hub.docker.com/r/jasonklotzer/dcm2bq).
+Pre-built container images are available on [Docker Hub](https://hub.docker.com/r/jasonklotzer/dcm2bq):
 
 ```bash
 docker pull jasonklotzer/dcm2bq:latest
 ```
 
-### From Source (for CLI)
+### From Source (CLI)
 
-To use the CLI, you can install it from the source code.
+To install the `dcm2bq` CLI from source:
 
-1.  Ensure you have `node` and `npm` installed. We recommend using nvm.
-2.  Ensure you have installed the required [Dependencies](#dependencies) including [`dcmnorm`](https://github.com/pohcee/dcmnorm).
-3.  Clone the repository:
-    ```bash
-    git clone https://github.com/googlecloudplatform/dcm2bq.git
-    ```
-4.  Navigate to the directory and install dependencies and the CLI:
-    ```bash
-    cd dcm2bq
-    npm install
-    npm install -g .
-    ```
-5.  Verify the installation:
-    ```bash
-    dcm2bq --help
-    ```
+1. Clone the repository recursively with submodules:
+   ```bash
+   git clone --recursive https://github.com/googlecloudplatform/dcm2bq.git
+   cd dcm2bq
+   ```
+2. Install Node.js dependencies and link the CLI executable:
+   ```bash
+   npm install
+   npm install -g .
+   ```
+3. Verify installation:
+   ```bash
+   dcm2bq --help
+   ```
+
+---
+
+## Deployment with Terraform
+
+The recommended way to deploy the service and all required Google Cloud resources (GCS buckets, Pub/Sub topics/subscriptions, BigQuery dataset/tables, Cloud Run service, IAM permissions) is using Terraform.
+
+A helper script is provided to automate infrastructure deployment:
+
+```bash
+./helpers/deploy.sh [OPTIONS] [destroy|upload] <gcp_project_id>
+```
+
+### Deploy Flags & Options
+- `<gcp_project_id>`: Your GCP Project ID.
+- `upload`: Upload test DICOM files (`test/files/dcm/*.dcm`) to the deployed GCS bucket.
+- `destroy`: Destroy all previously created Terraform resources.
+- `--debug`: Enable verbose debug mode in the Cloud Run service.
+- `--no-embeddings`: Disable vector embedding generation.
+- `--no-embedding-input`: Disable extraction/storage of embedding input assets.
+- `--no-admin-console`: Skip deploying the standalone admin console app.
+
+### Deployment Examples
+
+```bash
+# 1. Deploy all infrastructure
+./helpers/deploy.sh my-gcp-project-id
+
+# 2. Deploy with debug logging enabled
+./helpers/deploy.sh --debug my-gcp-project-id
+
+# 3. Upload test data to GCS
+./helpers/deploy.sh upload my-gcp-project-id
+
+# 4. Tear down all deployed resources
+./helpers/deploy.sh destroy my-gcp-project-id
+```
+
+---
 
 ## Usage
 
 ### As a Service (Cloud Run)
 
-The recommended deployment uses Google Cloud Storage, Pub/Sub, and Cloud Run.
+In production, `dcm2bq` runs on Cloud Run in an event-driven architecture with Google Cloud Storage and Pub/Sub.
 
 ![Deployment Architecture](assets/arch.svg)
 
-The workflow is as follows:
+1. A DICOM file or archive is uploaded or deleted in GCS.
+2. A GCS notification publishes a message to a Pub/Sub topic.
+3. Pub/Sub pushes the event payload to the `dcm2bq` Cloud Run endpoint.
+4. The service parses DICOM metadata, renders image frames or extracts report text, computes vector embeddings via Vertex AI, and streams records into BigQuery.
+5. Failures are automatically retried or routed to a Dead Letter Queue (DLQ).
 
-1.  An object operation (e.g., creation, deletion) occurs in a GCS bucket.
-2.  A notification is sent to a Pub/Sub topic.
-3.  A Pub/Sub subscription pushes the message to a Cloud Run service running the `dcm2bq` container.
-4.  The `dcm2bq` container processes the message:
-    -   It validates the message schema and checks for a DICOM-like file extension (e.g., `.dcm`) or supported archive (`.zip`, `.tar.gz`, `.tgz`).
-    -   For new objects, it reads the file from GCS and parses the DICOM metadata.
-    -   For archive files, it extracts all `.dcm` files and processes each one individually.
-    -   If embeddings are enabled, it generates vector embeddings from the DICOM data (for supported types like images, SRs, and PDFs) by calling the Vertex AI Embeddings API. For multi-frame images (e.g., WSI), it generates one embedding per frame.
-    -   It inserts DICOM metadata into the instances table and embeddings into the separate embeddings table in BigQuery.
-    -   For deleted objects, it records the deletion event in BigQuery.
-5.  If an error occurs, the message is NACK'd for retry. After maximum retries, it's sent to a dead-letter topic for analysis.
+### Local Mode (Test Pipeline Offline)
 
-**Note:** When deploying to Cloud Run, ensure the container has enough memory allocated to handle your largest DICOM files.
+Test the full processing pipeline locally without Pub/Sub or GCS push triggers:
 
-The service also supports processing archives (`.zip`, `.tar.gz`, `.tgz`) containing multiple DICOM files. See [docs/ARCHIVE_SUPPORT.md](docs/ARCHIVE_SUPPORT.md) for details.
+```bash
+# Start the HTTP service locally
+DCM2BQ_CONFIG_FILE=test/testconfig.json dcm2bq service
 
-### Local Mode (test the full pipeline without Pub/Sub)
-
-You can exercise the entire workflow on locally ingested files, without GCS/HCAPI notifications or Pub/Sub. Input is read from a local folder; metadata still goes to BigQuery, and generated assets go wherever the config points (GCS by default, or a local folder). A prior deployment is the prerequisite that creates the BigQuery dataset/tables and buckets.
-
-1. Start the service:
-
-    ```bash
-    DCM2BQ_CONFIG_FILE=test/testconfig.json dcm2bq service
-    ```
-
-    `DCM2BQ_LOCAL_ROOT` (or `localConfig.rootPath` in the config file) is optional. When set, the service restricts local file access to that directory — useful when the endpoint is reachable by others. When unset, any accessible path is accepted.
-
-2. Index a file or folder. This synthesizes push events (the same envelope shape Pub/Sub push delivers) and POSTs them to the running service:
-
-    ```bash
-    dcm2bq index /path/to/dicom               # one-shot: index all supported files recursively
-    dcm2bq index /path/to/dicom --watch       # keep watching for new or changed files
-    dcm2bq index /path/to/dicom --force       # reprocess unchanged files as new rows
-    dcm2bq index file.dcm --service-url http://localhost:8080
-    ```
-
-Rows created this way have `file://` paths and `info.input.type = "LOCAL"` in BigQuery. The event generation defaults to the file's mtime (in microseconds), mirroring GCS generation semantics: re-indexing an unchanged file is deduplicated, while a modified file lands as a new row.
-
-To keep extracted images/text local as well, set `gcpConfig.embedding.input.gcsBucketPath` to a `file:///path` URI instead of `gs://bucket/path`.
-
-The admin console also supports local rows: it reads `file://` assets from disk (optionally scoped to `DCM2BQ_LOCAL_ROOT`) and reprocesses them by POSTing directly to the service (set `DCM2BQ_SERVICE_URL`) instead of publishing to Pub/Sub. VS Code users can start both processes with the "Local Mode: Service + Admin Console" compound launch configuration.
-
-### HTTP Service UI (local/admin usage)
-
-When running in HTTP service mode (`dcm2bq service [port]`), a static admin website is available at `/ui`.
-
-### Admin Console (standalone deployment)
-
-The admin console can also be deployed as a standalone service with its own Node.js backend and static frontend. It connects directly to BigQuery and GCS to query instances, show metadata, and download extracted assets. For full deployment and usage instructions, see [admin-console/README.md](admin-console/README.md).
+# Index local files by sending synthetic push events to the running service
+dcm2bq index /path/to/dicom               # Process all DICOM files recursively
+dcm2bq index /path/to/dicom --watch       # Watch directory for new/modified files
+dcm2bq index /path/to/dicom --force       # Force re-indexing unchanged files
+```
 
 ### As a CLI
 
-The CLI is useful for testing, development, and batch processing.
-
-**Example: Dump DICOM metadata as JSON**
+The CLI provides utility commands for inspection, batch embedding, and DLQ management.
 
 ```bash
+# Dump DICOM metadata as JSON
 dcm2bq dump test/files/dcm/ct.dcm | jq
-```
 
-This command will output the full DICOM metadata in JSON format, which can be piped to tools like `jq` for filtering and inspection.
-
-**Example: Generate a vector embedding**
-
-```bash
-dcm2bq embed test/files/dcm/ct.dcm
-```
-
-This command will process the DICOM file, generate a vector embedding using the configured model, and output the embedding as a JSON array.
-
-**Example: Extract rendered image or text from a DICOM file**
-
-```bash
+# Extract rendered JPG image or text from DICOM file
 dcm2bq extract test/files/dcm/ct.dcm
-```
+dcm2bq extract test/files/dcm/sr.dcm --summary   # Extract & summarize text with Gemini
 
-This command will extract and save a rendered image (JPG) or extracted text (TXT) from the DICOM file, depending on its type (image, SR, or PDF). The output file extension is chosen automatically unless you specify `--output`.
+# Generate vector embeddings directly
+dcm2bq embed test/files/dcm/ct.dcm
 
-**Example: Extract with summarization (SR/PDF only)**
-
-```bash
-dcm2bq extract test/files/dcm/sr.dcm --summary
-```
-
-By default, summarization is disabled for extracted text. If you pass `--summary`, the extracted text from Structured Reports (SR) or PDFs will be summarized using Gemini before saving. This is useful for generating concise, embedding-friendly text.
-
-**Example: Extract without summarization (explicitly)**
-
-```bash
-dcm2bq extract test/files/dcm/sr.dcm
-```
-
-If you do not pass `--summary`, the full extracted text will be saved (subject to length limits for embedding).
-
-**Example: Index a local file or folder through a locally running service**
-
-```bash
-dcm2bq index test/files/dcm --watch
-```
-
-This command posts synthetic events for each supported file (`.dcm`, `.dicom`, `.zip`, `.tar.gz`, `.tgz`) to a locally running `dcm2bq service`, which processes them through the full pipeline (parse, extract, embed, persist to BigQuery). With `--watch`, it keeps watching the folder and indexes new or changed files as they arrive. See [Local Mode](#local-mode-test-the-full-pipeline-without-pubsub) for setup.
-
-**Example: Process a DICOM file and retrieve results from BigQuery**
-
-```bash
+# Upload a file, trigger service processing, and poll BigQuery results
 dcm2bq process test/files/dcm/ct.dcm
+
+# Dead Letter Queue operations
+dcm2bq dlq list                                    # List processing failure summary
+dcm2bq dlq requeue --limit 50                      # Requeue failed items for reprocessing
 ```
 
-This command uploads a DICOM file to GCS, triggers CloudRun processing via Pub/Sub, polls BigQuery for results, and displays a formatted overview. It uses `test/testconfig.json` if available, or you can specify a config file with `--config deployment-config.json`. See [docs/PROCESS_COMMAND.md](docs/PROCESS_COMMAND.md) for detailed usage and archive file support.
+### Admin Console & UI
 
-**Example: List items in the dead letter queue**
+- **Embedded UI**: Accessible at `/ui` when running `dcm2bq service`.
+- **Standalone Admin Console**: Located under `admin-console/` with its own Node.js backend and React frontend. See [admin-console/README.md](admin-console/README.md) for setup.
 
-```bash
-dcm2bq dlq list
-```
+---
 
-This command queries the BigQuery dead letter table and displays a summary showing the total count of failed messages and a list of distinct failed files with their failure counts. Useful for monitoring and troubleshooting processing failures.
+## BigQuery Schema & Queries
 
-**Example: Requeue failed items from the dead letter queue**
+### Tables & Views
 
-```bash
-dcm2bq dlq requeue
-```
+`DCM2BQ` populates two BigQuery tables and two pre-defined views:
 
-This command reads the dead letter queue, identifies failed GCS and HCAPI objects, and republishes schema-compliant Pub/Sub messages so they are processed again via Cloud Run. You can limit the number of items with `--limit 50`. By default it publishes to topic `dcm2bq-gcs-events`; override with `PUBSUB_REQUEUE_TOPIC` if needed.
+1. **`instances` table**: Stores full normalized DICOM JSON metadata per file/version.
+   - `id`: Deterministic SHA256 hash of DICOM UIDs.
+   - `timestamp`: Record write timestamp.
+   - `path`: GCS object or local `file://` URI.
+   - `info`: File size, type, and Pub/Sub event attributes.
+   - `metadata`: Complete DICOM JSON object.
+
+2. **`embeddings` table**: Stores vector embeddings per frame/asset.
+   - `id`: Composite key `<instanceId>_<frameNumber>`.
+   - `instanceId`: Foreign key to `instances.id`.
+   - `frameNumber`: 0-based frame index.
+   - `info`: Model name, input URI, size, and MIME type.
+   - `embeddingVector`: Array of float values (`FLOAT64`).
+
+3. **`instancesView`**: Resolves the latest row per DICOM instance and includes `embedding_count`.
+4. **`embeddingsView`**: Resolves the latest vector per frame ID.
+
+### Example Queries
+
+Sample DDL statements and vector search SQL queries (including vector index creation) are available in [`src/bq-samples.sql`](src/bq-samples.sql).
+
+---
 
 ## Configuration
 
-Configuration options can be found in the [default config file](./src/config.defaults.js).
+Configuration is managed via default settings in [`src/config.defaults.js`](src/config.defaults.js) and can be overridden via environment variables or a configuration JSON file.
 
-You can override these defaults in two ways.
+- **`DCM2BQ_CONFIG`**: JSON string containing full configuration overrides.
+- **`DCM2BQ_CONFIG_FILE`**: Path to a JSON file containing configuration overrides.
 
-**Important:** When providing an override via environment variable or a file, you must supply the entire configuration object. The default configuration is not merged with your overrides; your provided configuration will be used as-is.
+> **Note**: Configuration overrides replace top-level configuration blocks rather than shallow-merging.
 
-1.  **Environment Variable:** Set `DCM2BQ_CONFIG` to a JSON string containing the full configuration.
-    ```bash
-    export DCM2BQ_CONFIG='{"bigquery":{"datasetId":"my_dataset","instancesTableId":"my_table"},"gcpConfig":{"projectId":"my-gcp-project","embeddings":{"enabled":true,"model":"multimodalembedding@001"}},"jsonOutput":{...}}'
-    ```
-2.  **Config File:** Set `DCM2BQ_CONFIG_FILE` to the path of a JSON file containing your full configuration.
-    ```bash
-    # config.json
-    # {
-    #   "bigquery": {
-    #     "datasetId": "my_dataset",
-    #     "instancesTableId": "my_table"
-    #   },
-    #   "gcpConfig": {
-    #     "projectId": "my-gcp-project",
-    #     "embeddings": {
-    #       "enabled": true,
-    #       "model": "multimodalembedding@001"
-    #     }
-    #   },
-    #   "jsonOutput": {
-    #      ...
-    #   }
-    # }
-    export DCM2BQ_CONFIG_FILE=./config.json
-    ```
+### Example Configuration Snippet (`config.json`)
 
-
-### Embedding and Summarization Configuration
-
-To enable vector embedding generation and input extraction, configure the `embedding.input` section within `gcpConfig`. The configuration uses a hierarchical structure where the presence of settings indicates they are enabled.
-
-Example `config.json` override:
 ```json
 {
   "gcpConfig": {
+    "projectId": "my-gcp-project",
+    "bigQuery": {
+      "datasetId": "dicom_dataset",
+      "instancesTableId": "instances",
+      "embeddingsTableId": "embeddings"
+    },
     "embedding": {
       "input": {
-        "gcsBucketPath": "gs://my-bucket/processed-data",
+        "gcsBucketPath": "gs://my-bucket/processed-assets",
+        "vector": {
+          "model": "multimodalembedding@001"
+        },
         "summarizeText": {
           "model": "gemini-2.5-flash-lite",
           "maxLength": 1024
-        },
-        "vector": {
-          "model": "multimodalembedding@001"
         }
       }
     }
@@ -321,172 +249,47 @@ Example `config.json` override:
 }
 ```
 
-**Note:** The JSON snippet above is a partial example showing only the embeddings-related settings. When providing an override (via `DCM2BQ_CONFIG` or `DCM2BQ_CONFIG_FILE`), you must supply the entire configuration object — partial merges are not supported.
+---
 
-### Embedding Input Configuration
+## Development & Testing
 
-- `embedding.input.gcsBucketPath`: GCS bucket path where processed images (.jpg) and text (.txt) files will be saved. Format: `gs://bucket-name/optional-path`. Files are organized as `{gcsBucketPath}/{StudyInstanceUID}/{SeriesInstanceUID}/{SOPInstanceUID}.{jpg|txt}`. If this is omitted or empty, no files will be saved. **Important:** This bucket should be separate from the DICOM source bucket to avoid triggering unwanted events when processed files are created.
-- `embedding.input.vector.model`: If present, vector embeddings will be generated using the specified Vertex AI model (e.g., `multimodalembedding@001`). Omit this section to only extract and save inputs without generating embeddings.
+### Running Unit Tests
 
-### Text Summarization Configuration
-
-- `embedding.input.summarizeText.model`: If present, long text extracted from SR/PDF will be summarized using the specified Gemini model before processing. Omit this section to skip summarization. This can be overridden at runtime by the CLI `--summary` flag.
-- `embedding.input.summarizeText.maxLength`: Maximum character length for summarized text (default: 1024). The summarization prompt instructs the model to keep output under this limit. This also controls when summarization is triggered: text longer than `maxLength` will be summarized when embedding compatibility is required.
-
-## Documentation
-
-Additional documentation on new features and development guides can be found in the [docs](docs/) directory:
-
-### CLI Process Command
-- **[docs/PROCESS_COMMAND.md](docs/PROCESS_COMMAND.md)** - Overview and usage of the `dcm2bq process` command for uploading DICOM files and retrieving results
-- **[docs/PROCESS_COMMAND_IMPLEMENTATION.md](docs/PROCESS_COMMAND_IMPLEMENTATION.md)** - Implementation details of the process command
-
-### Archive Support
-- **[docs/ARCHIVE_SUPPORT.md](docs/ARCHIVE_SUPPORT.md)** - Comprehensive guide to archive file processing (.zip, .tar.gz, .tgz), including usage, timeouts, and troubleshooting
-- **[docs/QUICK_REFERENCE_ARCHIVE.md](docs/QUICK_REFERENCE_ARCHIVE.md)** - Quick examples and reference table for common archive scenarios
-
-### Testing
-- **[docs/TEST_COVERAGE_PROCESS_COMMAND.md](docs/TEST_COVERAGE_PROCESS_COMMAND.md)** - Comprehensive test coverage documentation for the process command, including unit and integration tests
-
-## Development
-
-To get started with development, follow the installation steps for the CLI.
-
-The `test` directory contains numerous examples, unit tests, and integration tests that are helpful for understanding the codebase and validating changes.
-
-### Running Tests
-
-The unit tests are fully mocked and can be run without any GCP dependencies or configuration files. All external service calls (BigQuery, Cloud Storage, Vertex AI, Gemini) are stubbed to ensure fast, reliable test execution.
-
-To run the unit test suite:
+Unit tests are fully mocked and run locally without requiring GCP credentials:
 
 ```bash
 npm test
-# or using the helper script
+# or via helper script
 ./helpers/run-unit-tests.sh
 ```
 
-The tests use a mock configuration defined in [test/test-config.js](test/test-config.js) and don't require any real GCP resources or the `test/testconfig.json` file.
-
 ### Integration Tests
 
-For testing against real GCP services, integration test files are available that require:
-
-1. A properly configured `test/testconfig.json` file (generated by running `./helpers/deploy.sh my-project-name`)
-2. GCP authentication (`gcloud auth application-default login`)
-3. Deployed GCP resources (BigQuery dataset/table, GCS buckets)
-4. Docker CLI/runtime (for container smoke checks run as part of integration tests)
-
-**When to run integration tests**
-- Run unit tests (`npm test`) locally before sending a PR or release tag; they are fully mocked and fast.
-- Run integration tests **only after** deploying the test stack (e.g., `./helpers/deploy.sh upload <project>`) or promoting a build to a staging environment, because they need live GCP resources.
-- Recommended checkpoints: after dependency or schema changes, before a release cut once the candidate container is deployed to the test/staging project, and periodically in CI on a schedule against that deployed environment.
-
-Available integration test suites:
-
-- **`semantic_compare.integration.js`** - Tests semantic similarity between text and image embeddings
-- **`pipeline.integration.js`** - End-to-end pipeline tests (GCS upload → processing → BigQuery insertion)
-- **`storage-embeddings.integration.js`** - Storage and embedding feature tests
-- **`config-validation.integration.js`** - Configuration, schema, and permissions validation tests
-- **`dead-letter.integration.js`** - Dead letter queue functionality (failed message handling, BigQuery writes, IAM permissions)
-- **`error-handling.integration.js`** - Error handling and HTTP status code validation
-- **`docker-admin-ui.integration.js`** - Docker image smoke checks (container boot, `/`, `/ui`, static assets, and WebSocket endpoint)
-
-To run all integration tests:
+Integration tests validate pipeline operations against live Google Cloud services. They require GCP authentication (`gcloud auth application-default login`) and a configured `test/testconfig.json` file.
 
 ```bash
+# Run all integration tests (includes Docker smoke tests)
 npm run test:integration
-# or using the helper script directly
-./helpers/run-integration-tests.sh
+
+# Run a specific integration test file
+DCM2BQ_CONFIG_FILE=test/testconfig.json npx mocha test/pipeline.integration.js
 ```
 
-Or manually with mocha:
+---
 
-```bash
-DCM2BQ_CONFIG_FILE=test/testconfig.json mocha test/*.integration.js
-```
+## Documentation
 
-To run a specific integration test suite:
+Detailed guides are available in the [`docs/`](docs/) directory:
 
-```bash
-DCM2BQ_CONFIG_FILE=test/testconfig.json mocha test/pipeline.integration.js
-```
+- **[Process Command Guide](docs/PROCESS_COMMAND.md)**: Detailed CLI `process` command usage.
+- **[Archive Support](docs/ARCHIVE_SUPPORT.md)**: Details on zip and tar archive handling.
+- **[Archive Quick Reference](docs/QUICK_REFERENCE_ARCHIVE.md)**: Archive processing reference table.
+- **[Test Coverage Details](docs/TEST_COVERAGE_PROCESS_COMMAND.md)**: Test coverage documentation.
 
-**Note:** Integration tests make real API calls to Google Cloud services and may incur costs. They also upload test files to GCS and insert rows into BigQuery (cleanup is performed automatically).
+---
 
-Integration runs now also execute Docker smoke checks in the same pass, so expect a longer overall runtime.
+## Contributing & License
 
-## Contributing
+Contributions are welcome! Please review [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to contribute to this project.
-
-## License
-
-This project is licensed under the Apache 2.0 License.
-
-## Deployment with Terraform
-
-The recommended way to deploy the service and all required Google Cloud resources is using Terraform. This will provision:
-- Google Cloud Storage bucket(s)
-- Pub/Sub topics and subscriptions
-- BigQuery dataset and tables
-- Cloud Run service
-- All necessary IAM permissions
-
-A helper script is provided to automate the process:
-
-```bash
-./helpers/deploy.sh [OPTIONS] [destroy|upload] <gcp_project_id>
-```
-- `upload`: Upload test DICOM files from `test/files/dcm/*.dcm` to the GCS bucket created by Terraform (standalone; does not deploy).
-- `destroy`: Destroy all previously created resources (cleanup).
-- `--debug`: Enable debug mode with verbose logging in the Cloud Run service.
-- `--no-embeddings`: Disable vector embedding generation.
-- `--no-embedding-input`: Disable extraction/storage of embedding input files (also disables embeddings).
-- `--no-admin-console`: Skip standalone admin-console deployment.
-- `--help` or `-h`: Show usage instructions.
-
-The Terraform default for `dcm2bq_concurrency` is `80`, so new Cloud Run deployments allow up to 80 simultaneous requests per instance by default. If you need a different value, set it through Terraform before running the helper script, for example:
-
-```bash
-TF_VAR_dcm2bq_concurrency=120 ./helpers/deploy.sh my-gcp-project-id
-```
-
-When `deploy_admin_console` is enabled, admin-console IAP is configured using Cloud Run native IAP (`iap_enabled = true`). The legacy HTTPS load balancer + OAuth client flow is no longer required.
-
-**Examples**
-
-- Deploy infrastructure:
-  ```bash
-  ./helpers/deploy.sh my-gcp-project-id
-  ```
-
-- Deploy with debug mode enabled:
-  ```bash
-  ./helpers/deploy.sh --debug my-gcp-project-id
-  ```
-
-- Upload test data only (no deploy):
-  ```bash
-  ./helpers/deploy.sh upload my-gcp-project-id
-  ```
-
-- Deploy and then upload test data (two steps):
-  ```bash
-  ./helpers/deploy.sh my-gcp-project-id
-  ./helpers/deploy.sh upload my-gcp-project-id
-  ```
-
-- Destroy all resources:
-  ```bash
-  ./helpers/deploy.sh destroy my-gcp-project-id
-  ```
-
-The script will:
-1. Ensure all dependencies (Terraform, gcloud, gsutil) are installed.
-2. Create a GCS bucket for Terraform state (if needed).
-3. Generate a backend config for Terraform.
-4. Deploy all infrastructure using Terraform.
-5. Optionally upload test DICOM files if the flag is supplied.
-
-> **Note:** All resource names (buckets, datasets, tables, etc.) are made unique per deployment to avoid collisions.
+Distributed under the **Apache 2.0 License**. See [LICENSE](LICENSE) for details.

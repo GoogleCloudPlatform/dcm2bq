@@ -59,7 +59,7 @@ program
     }
     const fileUrl = url.pathToFileURL(fileName);
     const reader = new DicomFile(fileUrl);
-    const metadata = reader.toJson(jsonOutput);
+    const metadata = await reader.toJson(jsonOutput);
     let outFile = options.output;
     const sopClassUid = metadata?.SOPClassUID;
 
@@ -134,11 +134,11 @@ program
   .command("dump")
   .description("dump file to JSON")
   .argument("<inputFile>", "file to parse")
-  .action((fileName) => {
+  .action(async (fileName) => {
     const fileUrl = new URL(url.pathToFileURL(fileName));
     const { jsonOutput } = config.get();
     const reader = new DicomFile(fileUrl);
-    const json = reader.toJson(jsonOutput);
+    const json = await reader.toJson(jsonOutput);
     console.log(JSON.stringify(json));
   });
 
@@ -156,7 +156,7 @@ program
     }
     const fileUrl = url.pathToFileURL(fileName);
     const reader = new DicomFile(fileUrl);
-    const json = reader.toJson(jsonOutput);
+    const json = await reader.toJson(jsonOutput);
     const embeddings = await createVectorEmbedding(json, fileName);
     console.log(JSON.stringify(embeddings));
   });

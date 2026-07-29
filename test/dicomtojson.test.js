@@ -27,26 +27,18 @@ const notDicomFile = "./test/files/dcm/notdicom.txt";
 
 describe("dicomtojson", () => {
   describe("DicomFile", () => {
-    before(function () {
-      const dcmnormPath = process.env.DCM2BQ_DCMNORM_PATH || "dcmnorm";
-      const probe = spawnSync(dcmnormPath, ["--version"], { stdio: "ignore" });
-      if (probe.status !== 0) {
-        this.skip();
-      }
-    });
-
-    it("should parse a DICOM file from file path", () => {
+    it("should parse a DICOM file from file path", async () => {
       const testFile = testFiles[0];
       const dicom = new DicomFile(pathToFileURL(path.resolve(testFile)));
-      const json = dicom.toJson();
+      const json = await dicom.toJson();
       assert.ok(json);
       assert.ok(Object.keys(json).length > 0);
     });
 
-    it("should fail to parse a non-DICOM file", () => {
+    it("should fail to parse a non-DICOM file", async () => {
       const dicom = new DicomFile(pathToFileURL(path.resolve(notDicomFile)));
       try {
-        dicom.parse();
+        await dicom.parse();
         assert.fail("Should have thrown an error");
       } catch (e) {
       }
