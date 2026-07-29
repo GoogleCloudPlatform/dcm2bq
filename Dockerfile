@@ -23,9 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng16-16 libxml2 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and install dcmnorm from GitHub releases
-RUN curl -fsSL "https://github.com/pohcee/dcmnorm/releases/latest/download/dcmnorm-linux-x86_64.tar.gz" \
-    | tar -xz -C /usr/local/bin dcmnorm \
+# Install dcmnorm
+RUN curl -sSL pohcee.com/dcmnorm | sh \
+    && cp /root/.cargo/bin/dcmnorm /usr/local/bin/ \
     && chmod 755 /usr/local/bin/dcmnorm
 
 # Install npm dependencies

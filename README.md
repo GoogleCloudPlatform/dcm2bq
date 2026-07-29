@@ -83,20 +83,18 @@ Before running vector searches, ensure you have created the embedding model and 
 
 ### Dependencies
 
-`dcm2bq` uses `dcmnorm`, a very fast, Rust-based DICOM parser and renderer.
+`dcm2bq` uses [`dcmnorm`](https://github.com/pohcee/dcmnorm), a very fast, Rust-based DICOM parser and renderer.
 
-For DICOM parsing and image rendering, `dcm2bq` relies on the external `dcmnorm` CLI binary in the execution environment.
+For DICOM parsing and image rendering, `dcm2bq` relies on the external [`dcmnorm`](https://github.com/pohcee/dcmnorm) CLI binary in the execution environment.
 
-If you use MPEG4 rendering via dcmnorm, `ffmpeg` must also be installed and available on `PATH`.
+If you use MPEG4 rendering via `dcmnorm`, `ffmpeg` must also be installed and available on `PATH`.
 
 It is included in the provided Docker image. If you are building from source or running the CLI locally, you will need to install it manually.
 
 **On Debian/Ubuntu/macOS/Linux (recommended):**
 ```bash
-./helpers/install-dcmnorm.sh
+curl -sSL pohcee.com/dcmnorm | sh
 ```
-
-You can pin a version by passing it as the only argument, for example `./helpers/install-dcmnorm.sh 0.1.3`.
 
 ### Docker
 
@@ -111,7 +109,7 @@ docker pull jasonklotzer/dcm2bq:latest
 To use the CLI, you can install it from the source code.
 
 1.  Ensure you have `node` and `npm` installed. We recommend using nvm.
-2.  Ensure you have installed the required [Dependencies](#dependencies) including `dcmnorm`.
+2.  Ensure you have installed the required [Dependencies](#dependencies) including [`dcmnorm`](https://github.com/pohcee/dcmnorm).
 3.  Clone the repository:
     ```bash
     git clone https://github.com/googlecloudplatform/dcm2bq.git
