@@ -28,6 +28,7 @@ module.exports = {
       datasetId: "dicom",
       instancesTableId: "instances",
       embeddingsTableId: "embeddings",
+      insertBatchSize: 50,
     },
     // Configuration for embeddings: input extraction, summarization, and vector generation
     embedding: {

@@ -72,7 +72,9 @@ async function insert(obj, insertId) {
 }
 
 /**
- * Inserts rows into the embeddings table.
+ * Inserts rows into the embeddings table in batches.
+ * Batching prevents exceeding BigQuery streaming insert HTTP payload limits
+ * (Request Entity Too Large / HTTP 413/418) when single multi-frame DICOM instances contain many frames (>100).
  * @param {Object[]} rows The rows to insert.
  * @param {string[]} [insertIds] Optional per-row BigQuery streaming insertIds, parallel
  *   to `rows`. See `insert()` for why this is best-effort only.
@@ -80,12 +82,18 @@ async function insert(obj, insertId) {
 async function insertEmbeddings(rows, insertIds) {
   if (!datasetId || !embeddingsTable) throw new Error('BigQuery embeddings table not configured');
   if (!Array.isArray(rows) || rows.length === 0) return;
+  const bqCfg = config.get().gcpConfig.bigQuery || {};
+  const batchSize = bqCfg.insertBatchSize || 50;
   try {
-    if (Array.isArray(insertIds) && insertIds.length === rows.length) {
-      const rawRows = rows.map((row, i) => ({ insertId: insertIds[i], json: row }));
-      await bigquery.dataset(datasetId).table(embeddingsTable).insert(rawRows, { raw: true });
-    } else {
-      await bigquery.dataset(datasetId).table(embeddingsTable).insert(rows);
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const rowsBatch = rows.slice(i, i + batchSize);
+      if (Array.isArray(insertIds) && insertIds.length === rows.length) {
+        const insertIdsBatch = insertIds.slice(i, i + batchSize);
+        const rawRows = rowsBatch.map((row, j) => ({ insertId: insertIdsBatch[j], json: row }));
+        await bigquery.dataset(datasetId).table(embeddingsTable).insert(rawRows, { raw: true });
+      } else {
+        await bigquery.dataset(datasetId).table(embeddingsTable).insert(rowsBatch);
+      }
     }
   } catch (error) {
     console.error('BigQuery embeddings insert error:', JSON.stringify({
