@@ -97,13 +97,13 @@ variable "dcm2bq_concurrency" {
 variable "dcm2bq_memory" {
   description = "Memory limit for each dcm2bq Cloud Run instance"
   type        = string
-  default     = "8Gi"
+  default     = "16Gi"
 }
 
 variable "dcm2bq_cpu" {
   description = "CPU limit for each dcm2bq Cloud Run instance"
   type        = string
-  default     = "2"
+  default     = "4000m"
 }
 
 variable "create_embedding_input" {
