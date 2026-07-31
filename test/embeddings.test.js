@@ -350,4 +350,29 @@ describe("embeddings", () => {
       }
     });
   });
+
+  describe("getRenderDimensions", () => {
+    const { getRenderDimensions } = require("../src/processors/image");
+
+    it("should return outputHeight when Rows > Columns (portrait)", () => {
+      const result = getRenderDimensions({ Rows: 1024, Columns: 768 }, 512);
+      assert.deepStrictEqual(result, { outputHeight: 512 });
+    });
+
+    it("should return outputWidth when Columns >= Rows (landscape)", () => {
+      const result = getRenderDimensions({ Rows: 768, Columns: 1024 }, 512);
+      assert.deepStrictEqual(result, { outputWidth: 512 });
+    });
+
+    it("should return outputWidth when Columns == Rows (square)", () => {
+      const result = getRenderDimensions({ Rows: 512, Columns: 512 }, 512);
+      assert.deepStrictEqual(result, { outputWidth: 512 });
+    });
+
+    it("should default to outputWidth when metadata or dimensions are missing", () => {
+      assert.deepStrictEqual(getRenderDimensions(null, 512), { outputWidth: 512 });
+      assert.deepStrictEqual(getRenderDimensions({}, 512), { outputWidth: 512 });
+      assert.deepStrictEqual(getRenderDimensions({ Rows: "invalid" }, 512), { outputWidth: 512 });
+    });
+  });
 });

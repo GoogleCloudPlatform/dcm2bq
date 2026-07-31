@@ -60,6 +60,22 @@ function getFrameIndicesToProcess(numFrames, maxFrames) {
 }
 
 /**
+ * Determines whether to pass outputWidth or outputHeight to dcmnorm
+ * so that the rendered image maintains its original aspect ratio and fits within maxDim x maxDim.
+ * @param {Object} metadata - DICOM metadata JSON
+ * @param {number} maxDim - Maximum dimension bound (default: 512)
+ * @returns {Object} `{ outputHeight: maxDim }` or `{ outputWidth: maxDim }`
+ */
+function getRenderDimensions(metadata, maxDim = 512) {
+  const rows = parseInt(metadata?.Rows, 10);
+  const cols = parseInt(metadata?.Columns, 10);
+  if (!isNaN(rows) && !isNaN(cols) && rows > cols) {
+    return { outputHeight: maxDim };
+  }
+  return { outputWidth: maxDim };
+}
+
+/**
  * Renders a DICOM image to a JPG buffer using native dcmnorm node bindings.
  * @param {Object} metadata - DICOM metadata JSON
  * @param {Buffer|string} dicomInput - Raw DICOM file buffer or local DICOM file path
@@ -95,10 +111,10 @@ async function renderDicomImage(metadata, dicomInput, frameIndex) {
       }
     }
 
+    const renderDimensions = getRenderDimensions(metadata, 512);
     const rendered = await renderFrame(dicomPath, {
       format: "jpeg",
-      outputWidth: 512,
-      outputHeight: 512,
+      ...renderDimensions,
       frameIndex: targetFrame,
     });
 
@@ -143,12 +159,12 @@ async function renderAllDicomFrames(metadata, dicomInput, frameIndices) {
       throw new Error("Expected dicom input to be a file path or Buffer");
     }
 
+    const renderDimensions = getRenderDimensions(metadata, 512);
     const results = [];
     for (const frameIndex of frameIndices) {
       const rendered = await renderFrame(dicomPath, {
         format: "jpeg",
-        outputWidth: 512,
-        outputHeight: 512,
+        ...renderDimensions,
         frameIndex,
       });
       if (rendered && rendered.data) {
@@ -182,4 +198,4 @@ async function processImage(metadata, dicomInput) {
   return null;
 }
 
-module.exports = { processImage, renderDicomImage, renderAllDicomFrames, getFrameIndicesToProcess };
+module.exports = { processImage, renderDicomImage, renderAllDicomFrames, getFrameIndicesToProcess, getRenderDimensions };
