@@ -15,7 +15,7 @@
   "author": "Jason Klotzer",
   "license": "Apache-2.0",
   "dependencies": {
-    "@google-cloud/bigquery": "^8.1.1",
+    "@google-cloud/bigquery": "^9.0.0",
     "@google-cloud/pubsub": "^5.2.0",
     "@google-cloud/storage": "^7.17.0",
     "@google/genai": "^2.0.0",
