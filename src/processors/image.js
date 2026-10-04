@@ -34,9 +34,36 @@ const SUPPORTED_TRANSFER_SYNTAXES = new Set([
   "1.2.840.10008.1.2.4.51",      // JPEG Extended (Process 2 & 4)
   "1.2.840.10008.1.2.4.57",      // JPEG Lossless, Non-Hierarchical (Process 14)
   "1.2.840.10008.1.2.4.70",      // JPEG Lossless, Hierarchical, First-Order Prediction (Process 14, [Selection Value 1])
+  // JPEG-LS
+  "1.2.840.10008.1.2.4.80",      // JPEG-LS Lossless Image Compression
+  "1.2.840.10008.1.2.4.81",      // JPEG-LS Lossy (Near-Lossless) Image Compression
+  // JPEG 2000
   "1.2.840.10008.1.2.4.90",      // JPEG 2000 Image Compression (Lossless Only)
-  "1.2.840.10008.1.2.4.91"       // JPEG 2000 Image Compression
+  "1.2.840.10008.1.2.4.91",      // JPEG 2000 Image Compression
+  "1.2.840.10008.1.2.4.92",      // JPEG 2000 Part 2 Multi-component Image Compression (Lossless Only)
+  "1.2.840.10008.1.2.4.93",      // JPEG 2000 Part 2 Multi-component Image Compression
+  "1.2.840.10008.1.2.4.201",     // High-Throughput JPEG 2000 Image Compression (Lossless Only)
+  "1.2.840.10008.1.2.4.202",     // High-Throughput JPEG 2000 with RPCL Options Image Compression (Lossless Only)
+  "1.2.840.10008.1.2.4.203",     // High-Throughput JPEG 2000 Image Compression
+  // JPEG XL
+  "1.2.840.10008.1.2.4.110",     // JPEG XL Lossless
+  "1.2.840.10008.1.2.4.111",     // JPEG XL JPEG Recompression
+  "1.2.840.10008.1.2.4.112",     // JPEG XL
+  // Video (decoded by the FFmpeg codec statically linked into dcmnorm-node)
+  "1.2.840.10008.1.2.4.100",     // MPEG2 Main Profile / Main Level
+  "1.2.840.10008.1.2.4.101",     // MPEG2 Main Profile / High Level
+  "1.2.840.10008.1.2.4.102",     // MPEG-4 AVC/H.264 High Profile / Level 4.1
+  "1.2.840.10008.1.2.4.103",     // MPEG-4 AVC/H.264 BD-compatible High Profile / Level 4.1
+  "1.2.840.10008.1.2.4.104",     // MPEG-4 AVC/H.264 High Profile / Level 4.2 For 2D Video
+  "1.2.840.10008.1.2.4.105",     // MPEG-4 AVC/H.264 High Profile / Level 4.2 For 3D Video
+  "1.2.840.10008.1.2.4.106",     // MPEG-4 AVC/H.264 Stereo High Profile / Level 4.2
+  "1.2.840.10008.1.2.4.107",     // HEVC/H.265 Main Profile / Level 5.1
+  "1.2.840.10008.1.2.4.108"      // HEVC/H.265 Main 10 Profile / Level 5.1
 ]);
+
+// Options shared by every renderFrame call. Overlay planes (group 60xx) are composited by
+// dcmnorm-node by default; keep them out so visuals/embeddings reflect the pixel data only.
+const BASE_RENDER_OPTIONS = Object.freeze({ format: "jpeg", showOverlays: false });
 
 /**
  * Returns an array of 0-based frame indices to process.
@@ -113,7 +140,7 @@ async function renderDicomImage(metadata, dicomInput, frameIndex) {
 
     const renderDimensions = getRenderDimensions(metadata, 512);
     const rendered = await renderFrame(dicomPath, {
-      format: "jpeg",
+      ...BASE_RENDER_OPTIONS,
       ...renderDimensions,
       frameIndex: targetFrame,
     });
@@ -163,7 +190,7 @@ async function renderAllDicomFrames(metadata, dicomInput, frameIndices) {
     const results = [];
     for (const frameIndex of frameIndices) {
       const rendered = await renderFrame(dicomPath, {
-        format: "jpeg",
+        ...BASE_RENDER_OPTIONS,
         ...renderDimensions,
         frameIndex,
       });

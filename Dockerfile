@@ -17,10 +17,10 @@ FROM node:24-trixie-slim
 ENV NODE_ENV=production
 ENV PATH=/usr/local/bin:${PATH}
 
-# Install runtime dependencies
+# Install runtime dependencies (dcmnorm-node statically links its codecs, incl. FFmpeg,
+# so it only needs libstdc++ at runtime)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl ffmpeg libstdc++6 \
-    libpng16-16 libxml2 zlib1g \
+    ca-certificates curl libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install npm dependencies

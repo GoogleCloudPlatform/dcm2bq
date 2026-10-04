@@ -43,6 +43,7 @@ Traditional imaging systems (PACS and VNAs) offer limited query capabilities ove
 ## Features
 
 - **DICOM Parsing**: Parses DICOM Part 10 files using native [`dcmnorm`](https://github.com/pohcee/dcmnorm) Node.js bindings (`@pohcee/dcmnorm-node`).
+- **Image Rendering**: Renders frames in-process via `dcmnorm` for uncompressed, RLE, JPEG (baseline/extended/lossless), JPEG-LS, JPEG 2000 (incl. Part 2 and HTJ2K), JPEG XL, and MPEG-2/H.264/HEVC video transfer syntaxes. Overlay planes are not composited.
 - **Vector Embeddings**: Generates multimodal embeddings for images (per-frame sampling for multi-frame/WSI), SR text, and encapsulated PDFs via Vertex AI.
 - **Event-Driven Service**: Containerized service responding to Cloud Storage and Healthcare API Pub/Sub lifecycle events (finalize, delete).
 - **Archive Support**: Extracts and processes DICOM files directly from `.zip`, `.tar.gz`, and `.tgz` archives.
@@ -58,7 +59,7 @@ Traditional imaging systems (PACS and VNAs) offer limited query capabilities ove
 `DCM2BQ` uses [`dcmnorm`](https://github.com/pohcee/dcmnorm), a fast Rust-based DICOM parser and renderer included in this repository as a Git submodule. Native Node.js bindings (`@pohcee/dcmnorm-node`) provide in-process execution.
 
 - **Node.js**: Version 18 or higher (v22+ recommended).
-- **ffmpeg** *(Optional)*: Required on `PATH` if using MPEG4 video rendering.
+- **Platform**: The bundled `dcmnorm-node` native binary targets Linux x64 (glibc). All codecs, including FFmpeg for video transfer syntaxes, are statically linked, so no extra system packages are needed.
 
 ### Docker
 
