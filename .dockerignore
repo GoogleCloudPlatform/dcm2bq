@@ -4,3 +4,15 @@ test
 Dockerfile
 .dockerignore
 .git*
+# The dcmnorm submodule is only needed for the prebuilt @pohcee/dcmnorm-node binding
+# (a file: dependency). Exclude everything else - Rust sources, fixtures, and any local
+# target/ or node_modules build output, which can run to many GB.
+dcmnorm/*
+!dcmnorm/bindings
+dcmnorm/bindings/*
+!dcmnorm/bindings/node
+dcmnorm/bindings/node/*
+!dcmnorm/bindings/node/package.json
+!dcmnorm/bindings/node/index.js
+!dcmnorm/bindings/node/index.d.ts
+!dcmnorm/bindings/node/*.node
