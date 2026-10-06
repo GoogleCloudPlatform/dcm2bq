@@ -38,7 +38,7 @@
   "overrides": {
     "diff": "^8.0.4",
     "serialize-javascript": "^7.0.7",
-    "brace-expansion": "^5.0.8",
+    "brace-expansion": "^5.0.12",
     "uuid": "^11.1.1",
     "@opentelemetry/core": "^2.8.0"
   },
