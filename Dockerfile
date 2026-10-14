@@ -23,11 +23,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install npm dependencies
+# Install npm dependencies (strip devDependencies from prebuilt local binding so npm ci --omit=dev succeeds without submodule dev trees)
 WORKDIR /usr/src/app
 COPY package*.json ./
 COPY dcmnorm ./dcmnorm
-RUN npm ci --omit=dev
+RUN node -e 'const fs = require("fs"); const p = JSON.parse(fs.readFileSync("dcmnorm/bindings/node/package.json", "utf8")); delete p.devDependencies; fs.writeFileSync("dcmnorm/bindings/node/package.json", JSON.stringify(p, null, 2));' \
+    && npm ci --omit=dev
 
 # Copy application code
 COPY src ./src
