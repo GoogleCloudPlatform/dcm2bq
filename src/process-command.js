@@ -46,10 +46,11 @@ async function countDicomFilesInArchive(archivePath) {
   let count = 0;
   
   if (ext === '.zip') {
-    // Use unzip to list files
-    const { execSync } = require('child_process');
+    // Use unzip to list files. Pass the path as an argv entry (no shell) so that
+    // archive filenames containing shell metacharacters cannot be interpreted.
+    const { execFileSync } = require('child_process');
     try {
-      const output = execSync(`unzip -l "${archivePath}"`, { encoding: 'utf8' });
+      const output = execFileSync('unzip', ['-l', archivePath], { encoding: 'utf8' });
       const lines = output.split('\n');
       for (const line of lines) {
         // Extract filename from unzip output (last column after spaces)
@@ -67,10 +68,11 @@ async function countDicomFilesInArchive(archivePath) {
       return 0;
     }
   } else if (ext === '.tgz' || archivePath.toLowerCase().endsWith('.tar.gz')) {
-    // Use tar to list files
-    const { execSync } = require('child_process');
+    // Use tar to list files. Pass the path as an argv entry (no shell) so that
+    // archive filenames containing shell metacharacters cannot be interpreted.
+    const { execFileSync } = require('child_process');
     try {
-      const output = execSync(`tar -tzf "${archivePath}"`, { encoding: 'utf8' });
+      const output = execFileSync('tar', ['-tzf', archivePath], { encoding: 'utf8' });
       const lines = output.split('\n');
       for (const line of lines) {
         const filename = line.trim();
