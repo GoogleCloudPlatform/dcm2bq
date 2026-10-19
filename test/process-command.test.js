@@ -747,8 +747,55 @@ describe("process-command", () => {
   });
 
   describe("countDicomFilesInArchive", () => {
+    const os = require("os");
+    const AdmZip = require("adm-zip");
+    const tar = require("tar");
+    let tempDir;
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dcm2bq-archive-test-"));
+    });
+
+    afterEach(() => {
+      if (tempDir && fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it("should be exported", () => {
       assert.ok(typeof processCommand.countDicomFilesInArchive === "function");
+    });
+
+    it("should count .dcm files in a .zip archive in-process, including filenames with spaces and shell metacharacters", async () => {
+      const zipPath = path.join(tempDir, "study $(echo injected) `id`.zip");
+      const zip = new AdmZip();
+      zip.addFile("series1/img1.dcm", Buffer.from("dicom1"));
+      zip.addFile("series1/img 2 with spaces.DCM", Buffer.from("dicom2"));
+      zip.addFile("series1/readme.txt", Buffer.from("notes"));
+      zip.writeZip(zipPath);
+
+      const count = await processCommand.countDicomFilesInArchive(zipPath);
+      assert.strictEqual(count, 2);
+    });
+
+    it("should count .dcm files in a .tar.gz / .tgz archive in-process without shell execution", async () => {
+      const srcDir = path.join(tempDir, "tar-src");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, "a.dcm"), "dicom-a");
+      fs.writeFileSync(path.join(srcDir, "b.DCM"), "dicom-b");
+      fs.writeFileSync(path.join(srcDir, "ignore.json"), "{}");
+
+      const tgzPath = path.join(tempDir, "study $(echo injected).tar.gz");
+      await tar.c({ gzip: true, file: tgzPath, cwd: srcDir }, ["a.dcm", "b.DCM", "ignore.json"]);
+
+      const count = await processCommand.countDicomFilesInArchive(tgzPath);
+      assert.strictEqual(count, 2);
+    });
+
+    it("should return 0 for invalid or non-existent archives gracefully", async () => {
+      const missingZip = path.join(tempDir, "missing.zip");
+      assert.strictEqual(await processCommand.countDicomFilesInArchive(missingZip), 0);
+      assert.strictEqual(await processCommand.countDicomFilesInArchive(""), 0);
     });
   });
 });

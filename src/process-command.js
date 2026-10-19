@@ -19,6 +19,8 @@ const path = require("path");
 const { Storage } = require("@google-cloud/storage");
 const { BigQuery } = require("@google-cloud/bigquery");
 const crypto = require("crypto");
+const AdmZip = require("adm-zip");
+const tar = require("tar");
 
 const storage = new Storage();
 const bigquery = new BigQuery();
@@ -37,44 +39,25 @@ function isArchiveFile(filePath) {
 }
 
 /**
- * Count DICOM files in an archive
+ * Count DICOM files in an archive in-process without invoking shell commands.
  * @param {string} archivePath Path to the archive file
  * @returns {Promise<number>} Number of .dcm files in the archive
  */
 async function countDicomFilesInArchive(archivePath) {
-  const ext = path.extname(archivePath).toLowerCase();
+  if (typeof archivePath !== "string" || !archivePath) {
+    return 0;
+  }
+
+  const resolvedPath = path.resolve(archivePath);
+  const ext = path.extname(resolvedPath).toLowerCase();
   let count = 0;
-  
-  if (ext === '.zip') {
-    // Use unzip to list files
-    const { execSync } = require('child_process');
+
+  if (ext === ".zip") {
     try {
-      const output = execSync(`unzip -l "${archivePath}"`, { encoding: 'utf8' });
-      const lines = output.split('\n');
-      for (const line of lines) {
-        // Extract filename from unzip output (last column after spaces)
-        // Example line: "  12345  2024-01-15 10:30   path/to/file.dcm"
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 4) {
-          const filename = parts[parts.length - 1];
-          if (filename.toLowerCase().endsWith('.dcm')) {
-            count++;
-          }
-        }
-      }
-    } catch (error) {
-      console.warn(`Warning: Could not count files in archive: ${error.message}`);
-      return 0;
-    }
-  } else if (ext === '.tgz' || archivePath.toLowerCase().endsWith('.tar.gz')) {
-    // Use tar to list files
-    const { execSync } = require('child_process');
-    try {
-      const output = execSync(`tar -tzf "${archivePath}"`, { encoding: 'utf8' });
-      const lines = output.split('\n');
-      for (const line of lines) {
-        const filename = line.trim();
-        if (filename && filename.toLowerCase().endsWith('.dcm')) {
+      const zip = new AdmZip(resolvedPath);
+      const entries = zip.getEntries();
+      for (const entry of entries) {
+        if (!entry.isDirectory && entry.entryName && entry.entryName.toLowerCase().endsWith(".dcm")) {
           count++;
         }
       }
@@ -82,8 +65,22 @@ async function countDicomFilesInArchive(archivePath) {
       console.warn(`Warning: Could not count files in archive: ${error.message}`);
       return 0;
     }
+  } else if (ext === ".tgz" || resolvedPath.toLowerCase().endsWith(".tar.gz")) {
+    try {
+      await tar.t({
+        file: resolvedPath,
+        onReadEntry: (entry) => {
+          if (entry.type === "File" && entry.path && entry.path.toLowerCase().endsWith(".dcm")) {
+            count++;
+          }
+        },
+      });
+    } catch (error) {
+      console.warn(`Warning: Could not count files in archive: ${error.message}`);
+      return 0;
+    }
   }
-  
+
   return count;
 }
 
