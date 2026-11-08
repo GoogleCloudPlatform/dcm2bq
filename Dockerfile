@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Single-stage runtime image
-FROM node:24-trixie-slim
+FROM node:26-trixie-slim
 ENV NODE_ENV=production
 ENV PATH=/usr/local/bin:${PATH}
 
