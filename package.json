@@ -18,7 +18,7 @@
     "@google-cloud/bigquery": "^9.0.0",
     "@google-cloud/pubsub": "^6.0.0",
     "@google-cloud/storage": "^8.0.0",
-    "@google/genai": "^2.0.0",
+    "@google/genai": "^3.0.0",
     "@pohcee/dcmnorm-node": "file:dcmnorm/bindings/node",
     "adm-zip": "^0.6.1",
     "ajv": "^8.17.1",
