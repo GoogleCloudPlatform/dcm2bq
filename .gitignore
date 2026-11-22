@@ -49,5 +49,3 @@ CLAUDE.md
 # Local config file
 testconfig.json
 
-# Cached dcmnorm archives
-assets/dcmnorm-*.tar.gz

@@ -14,7 +14,7 @@
  limitations under the License.
  */
 
-const { renderFrame } = require("@pohcee/dcmnorm-node");
+const { renderFrame } = require("dcmnorm");
 const { mkdtemp, writeFile, rm } = require("fs/promises");
 const path = require("path");
 const os = require("os");
@@ -49,7 +49,7 @@ const SUPPORTED_TRANSFER_SYNTAXES = new Set([
   "1.2.840.10008.1.2.4.110",     // JPEG XL Lossless
   "1.2.840.10008.1.2.4.111",     // JPEG XL JPEG Recompression
   "1.2.840.10008.1.2.4.112",     // JPEG XL
-  // Video (decoded by the FFmpeg codec statically linked into dcmnorm-node)
+  // Video (decoded by the FFmpeg codec statically linked into dcmnorm)
   "1.2.840.10008.1.2.4.100",     // MPEG2 Main Profile / Main Level
   "1.2.840.10008.1.2.4.101",     // MPEG2 Main Profile / High Level
   "1.2.840.10008.1.2.4.102",     // MPEG-4 AVC/H.264 High Profile / Level 4.1
@@ -62,7 +62,7 @@ const SUPPORTED_TRANSFER_SYNTAXES = new Set([
 ]);
 
 // Options shared by every renderFrame call. Overlay planes (group 60xx) are composited by
-// dcmnorm-node by default; keep them out so visuals/embeddings reflect the pixel data only.
+// dcmnorm by default; keep them out so visuals/embeddings reflect the pixel data only.
 const BASE_RENDER_OPTIONS = Object.freeze({ format: "jpeg", showOverlays: false });
 
 /**

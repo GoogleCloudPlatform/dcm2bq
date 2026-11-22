@@ -15,7 +15,7 @@
  */
 
 const { fileURLToPath } = require("url");
-const { readJson } = require("@pohcee/dcmnorm-node");
+const { readJson } = require("dcmnorm");
 
 const FILE_META_HEADER_KEYS = new Set([
   "FileMetaInformationGroupLength",
@@ -38,7 +38,7 @@ function isPlainObject(value) {
 
 function getDcmnormVersion() {
   try {
-    const pkg = require("@pohcee/dcmnorm-node/package.json");
+    const pkg = require("dcmnorm/package.json");
     return pkg.version || "unknown";
   } catch (error) {
     return "unavailable";
